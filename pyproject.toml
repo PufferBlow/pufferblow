@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "pufferblow-api"
+version = "0.1.0"
+description = "Official API for PufferBlow"
+authors = ["0RaMsY0 <0ramsy0@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "pufferblow_api"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.95.2"
+typer = "^0.9.0"
+
+[tool.poetry.group.dev.dependencies]
+loguru = "^0.7.0"
+gunicorn = "^20.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
