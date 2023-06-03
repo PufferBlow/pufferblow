@@ -3,7 +3,7 @@ import sys
 
 from fastapi import (
     FastAPI,
-    responses    
+    responses
 )
 
 from gunicorn.app.base import BaseApplication
@@ -21,7 +21,7 @@ from pufferblow_api.src.utils.logger import (
     JSON_LOGS,
 )
 from pufferblow_api.src.database.database_session import DatabaseSession
-from pufferblow_api.src.models.pufferblow_api_config import PufferBlowAPIConfig
+from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIConfig
 
 # Init API
 API = FastAPI()
@@ -30,12 +30,12 @@ API = FastAPI()
 PUFFERBLOW_API_CONFIG = PufferBlowAPIConfig()
 
 # Init Database Connection
-DATABASE = DatabaseSession(
+DATABASE_SESSION = DatabaseSession(
     username    =   PUFFERBLOW_API_CONFIG.USERNAME,
     password    =   PUFFERBLOW_API_CONFIG.PASSWORD,
     host        =   PUFFERBLOW_API_CONFIG.CASSANDRA_HOST,
     port        =   PUFFERBLOW_API_CONFIG.CASSANDRA_PORT
-)
+).session()
 
 @API.get("/")
 def redirect_route():
@@ -46,8 +46,9 @@ def home_route():
     return {
         "status code": 200,
         "message": "Welcome to PufferBlow's API",
-        "github": "https://github.com/PufferBlow"
+        "github": constants.ORG_GITHUB
     }
+
 
 def run() -> None:
     """ Starts the API """
