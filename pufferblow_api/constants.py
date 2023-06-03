@@ -5,6 +5,7 @@ PACKAGE_NAME = "PufferBlow-api"
 VERSION      = "0.1.0"
 AUTHER       = "ramsy"
 GITHUB       = "https://github.com/PufferBlow/PufferBlow-api"  
+ORG_GITHUB   = "https://github.com/PufferBlow"
 
 # PufferBlow-api default config file
 PUFFERBLOW_CONFIG_PATH = f"{os.environ['HOME']}/.config/pufferblow-api/config.yaml"
