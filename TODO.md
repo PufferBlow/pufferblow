@@ -37,15 +37,15 @@
       - Parameters:
         ``` json
         {
-            "access_token": str
+            "access_token": ""
         }
         ```      
     - Add new user route `"/api/v1/users/add"`
       - Parameters:
           ``` json
           {
-              "username": str,
-              "password": str
+              "username": "",
+              "password": ""
           }
           ```
     
@@ -53,8 +53,8 @@
       - Parameters:
           ``` json
           {
-              "username": str,
-              "access_token": str
+              "username": "",
+              "access_token": ""
           }
           ```
   - Messages routes
@@ -62,26 +62,26 @@
       - Parameters:
         ``` json
         {
-            "channel_id": str,
-            "access_token": str
+            "channel_id": "",
+            "access_token": ""
         }
         ```
     - Send messages route `"/api/v1/messages/send"`
       - Parameters:
         ``` json
         {
-            "message_content": str,
-            "channel_id": str,
-            "access_token": str
+            "message_content": "",
+            "channel_id": "",
+            "access_token": ""
         }
         ```
     - Delete messages route `"/api/v1/messages/delete"`
       - Parameters:
         ``` json
         {
-            "message_id": str,
-            "channel_id": str,
-            "access_token": str
+            "message_id": "",
+            "channel_id": "",
+            "access_token": ""
         }
         ```
 - Create a documentation for the all the routes
