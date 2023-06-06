@@ -9,7 +9,6 @@ from Crypto.Util.Padding import pad, unpad
 from Crypto.Random import get_random_bytes
 
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
-from pufferblow_api.src.utils.remove_escape_sequence import remove_escape_sequence
 
 class Hasher (object):
     """ Hasher class used to encrypt and decrypt passwords, messages, usernames, user's email """
