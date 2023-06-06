@@ -20,9 +20,13 @@ api:
  - workers: 7 # number of workers for guvicorn
  - connection_timeout: 60 # in seconds
 
-cassandra:
- - host: "0.0.0.0"
- - port: 9042{os.environ['HOME']}
- - username: <your username>
- - password: <your password>
+supabase:
+ - supabase_url: "<your supabase url>"
+ - supabase_key: "<your supabase key>"
+ - postregsql:
+    - database_name: "<your database name>"
+    - username: "<your username>"
+    - password: "<your password>"
+    - host: "<your database host>"
+    - port: "<your database port>"
 """
