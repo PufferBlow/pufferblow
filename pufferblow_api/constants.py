@@ -30,3 +30,16 @@ supabase:
     - host: "<your database host>"
     - port: "<your database port>"
 """
+
+ASSOCIATIONS = {
+    "user_id": [
+        "username",
+        "auth_token",
+        "email",
+        "password",
+    ],
+    "message_id": [
+        "message_content",
+        "sender"
+    ] 
+}
