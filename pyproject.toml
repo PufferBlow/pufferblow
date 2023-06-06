@@ -15,6 +15,10 @@ cassandra-driver = "^3.27.0"
 rich = "^13.4.1"
 uvicorn = "^0.22.0"
 pyyaml = "^6.0"
+supabase = "^1.0.3"
+psycopg2 = "^2.9.6"
+pycryptodome = "^3.18.0"
+bcrypt = "^4.0.1"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.0"
