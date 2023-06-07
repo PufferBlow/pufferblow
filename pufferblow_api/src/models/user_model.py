@@ -15,7 +15,8 @@ class User:
     conversations            :       list
     contacts                 :       list
     created_at               :       str
-    auth_token               :       str
+    raw_auth_token           :       str
+    encrypted_auth_token     :       str
     auth_token_expire_time   :       datetime.date.today
 
     def to_json(self) -> json.dump:
@@ -29,7 +30,7 @@ class User:
             "last_seen"                 :       self.last_seen,
             "conversations"             :       self.conversations,
             "contacts"                  :       self.contacts,
-            "auth_token"                :       self.auth_token,
+            "auth_token"                :       self.encrypted_auth_token,
             "auth_token_expire_time"    :       self.auth_token_expire_time,
             "created_at"                :       self.created_at
         }
@@ -52,7 +53,7 @@ class User:
             self.last_seen.strftime("%Y-%m-%d"),
             self.conversations,
             self.contacts,
-            self.auth_token,
+            self.encrypted_auth_token,
             self.auth_token_expire_time.strftime("%Y-%m-%d"),
             self.created_at.strftime("%Y-%m-%d")
         )
