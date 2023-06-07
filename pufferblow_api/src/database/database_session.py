@@ -1,6 +1,7 @@
 import os
 import sys
 import psycopg2
+import psycopg2.pool
 import datetime
 
 from supabase import (
@@ -16,8 +17,8 @@ class DatabaseSession (object):
         self.supabase_key = supabase_key
         self.pufferblow_api_config = pufferblow_api_config
 
-    def database_connection_session(self) -> psycopg2.connect:
-        """ Returns the database session """
+    def database_connection_pool(self) -> psycopg2.pool.ThreadedConnectionPool:
+        """ Returns the threads database connection pool """
         KEEPALIVE_KWAGS = {
             "keepalives": 7,
             "keepalives_idle": 30,
@@ -25,7 +26,9 @@ class DatabaseSession (object):
             "keepalives_count": 7,
         }
 
-        database_connection = psycopg2.connect(
+        database_connection = psycopg2.pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=20,
             database=self.pufferblow_api_config.DATABASE_NAME,
             host=self.pufferblow_api_config.DATABASE_HOST,
             user=self.pufferblow_api_config.USERNAME,

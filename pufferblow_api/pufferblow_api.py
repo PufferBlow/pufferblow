@@ -46,7 +46,7 @@ DATABASE_SESSION = DatabaseSession(
 
 # Init Database handler
 DATABASE_HANDLER = DatabaseHandler(
-    database_connenction=DATABASE_SESSION.database_connection_session(),
+    database_connection_pool=DATABASE_SESSION.database_connection_pool(),
     hasher=HASHER
 )
 
@@ -92,14 +92,14 @@ async def signup_new_user(
     encryption_key_data.associated_to           =       "password"
     encryption_key_data.user_id                 =       new_user.user_id
 
+    new_user.raw_auth_token, new_user.auth_token_expire_time = DATABASE_HANDLER.sign_up(new_user)
+    
     DATABASE_HANDLER._save_keys(encryption_key_data)
-
-    new_user.auth_token, new_user.auth_token_expire_time = DATABASE_HANDLER.sign_up(new_user)
 
     return {
         "status_code": 201,
         "message": "Account created successfully",
-        "auth_token": new_user.auth_token,
+        "auth_token": new_user.raw_auth_token,
         "auth_token_expire_time": new_user.auth_token_expire_time
     }
 
