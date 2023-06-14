@@ -99,6 +99,12 @@ async def signup_new_user(
         password=password
     )
 
+    logger.info(
+        constants.NEW_USER_SIGNUP_SUCCESSFULLY(
+            user=user_data,
+        )
+    )
+
     return {
         "status_code": 201,
         "message": "Account created successfully",
@@ -111,19 +117,28 @@ async def signup_new_user(
 async def users_profile_route(
     user_id: str,
     auth_token: str,
+    viewer_user_id: str
 ):
     """ Users profile management route """
-    if user_id not in DATABASE_HANDLER.get_users_id():
+    users_id = DATABASE_HANDLER.get_users_id()
+
+    if user_id not in users_id:
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"\"{user_id}\" not found. Please make sure to pass the correct one"
+            detail=f"The target user's user_id=\"{user_id}\" not found. Please make sure to pass the correct one"
         )
+    if viewer_user_id not in users_id:
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"The user requested's user_id=\"{viewer_user_id}\" not found. Please make sure to pass the correct one"
+        )
+    
     hashed_auth_token = AUTH_TOKEN_MANAGER._encrypt_auth_token(
-        user_id=user_id,
+        user_id=viewer_user_id,
         auth_token=auth_token
     )
     if not AUTH_TOKEN_MANAGER.token_exists(
-        user_id=user_id,
+        user_id=viewer_user_id,
         hashed_auth_token=hashed_auth_token
     ):
         raise exceptions.HTTPException(
@@ -134,6 +149,13 @@ async def users_profile_route(
     user_data = USER_MANAGER.user_profile(
         user_id=user_id,
         hashed_auth_token=hashed_auth_token
+    )
+
+    logger.info(
+        constants.REQUEST_FOR_USER_PROFILE(
+            user_data=user_data,
+            viewer_user_id=viewer_user_id
+        )
     )
 
     return {
@@ -200,7 +222,6 @@ def run() -> None:
     OPTIONS = {
         "bind": f"{PUFFERBLOW_API_CONFIG.API_HOST}:{PUFFERBLOW_API_CONFIG.API_PORT}",
         "workers": WORKERS(PUFFERBLOW_API_CONFIG.WORKERS),
-        "reload": True,
         "timeout": PUFFERBLOW_API_CONFIG.CONNECTION_TIMEOUT,
         "accesslog": "-",
         "errorlog": "-",
