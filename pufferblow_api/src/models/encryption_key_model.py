@@ -11,7 +11,7 @@ class EncryptionKey (object):
     def to_json(self) -> json.dumps:
         """ Returns the data in json format """
         ENCRYPTION_KEY_DATA = {
-            "key_value"             :       self.key,
+            "key_value"             :       self.key_value,
             "salt"                  :       self.salt,
             "associated_to"         :       self.associated_to,
             "user_id"               :       self.user_id,
