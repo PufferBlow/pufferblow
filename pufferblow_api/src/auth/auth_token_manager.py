@@ -4,6 +4,9 @@ import string
 import base64
 import datetime
 
+from loguru import logger
+
+from pufferblow_api import constants
 from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.database.database_handler import DatabaseHandler
 
@@ -86,6 +89,11 @@ class AuthTokenManager (object):
 
             break
         
+        logger.info(
+            constants.NEW_AUTH_TOKEN_GENERATED(
+                auth_token=auth_token
+            )
+        )
         return auth_token
 
     def delete_token(self, user_id: str, auth_token: str) -> None:
