@@ -4,6 +4,9 @@ import string
 import random
 import datetime
 
+from loguru import logger
+
+from pufferblow_api import constants
 from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
@@ -83,7 +86,6 @@ class UserManager (object):
         """
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id,
-            auth_token=hashed_auth_token
         )
 
         encrypted_username              =       user_data[1]
@@ -155,8 +157,23 @@ class UserManager (object):
             encryption_key_data.associated_to   =     associated_to
             encryption_key_data.user_id         =     user_id
 
+            if encryption_key_data.associated_to == "username":
+                logger.info(
+                    constants.USERNAME_ENCRYPTED(
+                        username=data,
+                        encrypted_username=encrypted_data
+                    )
+                )
+            elif encryption_key_data.associated_to == "email":
+                logger.info(
+                    constants.EMAIL_ENCRYPTED(
+                        email=data,
+                        encrypted_email=encrypted_data
+                    )
+                )
+
             self.database_handler.save_encryption_key(
-                keys=encryption_key_data
+                key=encryption_key_data
             )
 
             return encrypted_data
@@ -167,12 +184,25 @@ class UserManager (object):
                 data=data,
                 user_id=user_id
             )
-            print(f"{salt.hashed_data = }")
 
             salt.associated_to = associated_to
 
-            print(salt.to_json())
-
+            if salt.associated_to == "auth_token":
+                logger.info(
+                    constants.NEW_AUTH_TOKEN_HASHED(
+                        auth_token=data,
+                        hashed_auth_token=salt.hashed_data,
+                        salt=salt
+                    )
+                )
+            elif salt.associated_to == "password":
+                logger.info(
+                    constants.NEW_PASSWORD_HASHED(
+                        password=data,
+                        hashed_password=salt.hashed_data
+                    )
+                )
+            
             self.database_handler.save_salt(
                 salt=salt
             )
@@ -203,6 +233,21 @@ class UserManager (object):
             key=decryption_key
         )
 
+        if associated_to == "username":
+            logger.info(
+                constants.USERNAME_DECRYPTED(
+                    encrypted_username=data,
+                    decrypted_username=decrypted_data
+                )
+            )
+        elif associated_to == "email":
+            logger.info(
+                constants.EMAIL_DECRYPTED(
+                    encrypted_email=data,
+                    decrypted_email=decrypted_data
+                )
+            )
+        
         return decrypted_data
 
     def _generate_user_id(self) -> str:
@@ -225,4 +270,10 @@ class UserManager (object):
             else:
                 user_id = ""
         
+        logger.info(
+            constants.NEW_USER_ID_GENERATED(
+                user_id=user_id
+            )
+        )
+    
         return user_id
