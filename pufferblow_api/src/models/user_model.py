@@ -1,4 +1,3 @@
-import json
 import datetime
 
 from rich import print
@@ -8,18 +7,18 @@ class User:
 
     user_id                  :       str
     username                 :       str
-    email                    :       str
-    password_hash            :       str
-    status                   :       str
+    email                    :       str                    =       ""
+    password_hash            :       str                    =       ""
+    status                   :       str 
     last_seen                :       str
-    conversations            :       list
-    contacts                 :       list
-    created_at               :       str
-    raw_auth_token           :       str
-    encrypted_auth_token     :       str
-    auth_token_expire_time   :       datetime.date.today
+    conversations            :       list                   =       []
+    contacts                 :       list                   =       []
+    created_at               :       str    
+    raw_auth_token           :       str                    =       ""    
+    encrypted_auth_token     :       str                    =       ""
+    auth_token_expire_time   :       str                    =       ""
 
-    def to_json(self) -> json.dump:
+    def to_json(self) -> dict:
         """ Returns the user data as json """
         USER_DATA = {
             "user_id"                   :       self.user_id,
@@ -35,12 +34,7 @@ class User:
             "created_at"                :       self.created_at
         }
 
-        return json.dumps(
-            USER_DATA,
-            indent=4,
-            sort_keys=True,
-            default=str
-        )
+        return USER_DATA
 
     def to_tuple(self) -> tuple:
         """ Reutns the user data in tuple format """
