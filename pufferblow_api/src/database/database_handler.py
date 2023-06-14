@@ -2,11 +2,11 @@ import os
 import sys
 import json
 import base64
-import loguru
 import datetime
 import psycopg2
 import psycopg2.pool
 
+from loguru import logger
 from rich import print
 
 from pufferblow_api import constants
@@ -45,7 +45,7 @@ class DatabaseHandler (object):
                 close=False
             )
 
-    def fetch_user_data(self, user_id: str, auth_token: str) -> tuple:
+    def fetch_user_data(self, user_id: str) -> tuple:
         """ 
             Returns a User model containing
             information about the given user's id
@@ -55,11 +55,11 @@ class DatabaseHandler (object):
 
         try:
             with database_connection.cursor() as cursor:
-                sql = "SELECT user_id, username, email, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at FROM users WHERE user_id = %s AND auth_token = %s"
+                sql = "SELECT user_id, username, email, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at FROM users WHERE user_id = %s"
 
                 cursor.execute(
                     sql,
-                    (user_id, auth_token)
+                    (user_id,)
                 )
                 user_data = cursor.fetchone()
         finally:
@@ -107,6 +107,12 @@ class DatabaseHandler (object):
                     salt.to_tuple()
                 )
                 database_connection.commit()
+
+                logger.info(
+                    constants.NEW_HASH_SALT_SAVED(
+                        salt=salt
+                    )
+                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
@@ -135,6 +141,12 @@ class DatabaseHandler (object):
                     ),
                 )
                 database_connection.commit()
+
+                logger.info(
+                    constants.NEW_AUTH_TOKEN_SAVED(
+                        auth_token=auth_token
+                    )
+                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
@@ -155,19 +167,25 @@ class DatabaseHandler (object):
                 sql = "SELECT user_id FROM users"
                 cursor.execute(sql)
 
-                user_ids = cursor.fetchall()
+                users_id = cursor.fetchall()
 
-                if len(user_ids) == 0:
-                    user_ids = []
+                if len(users_id) == 0:
+                    users_id = []
                 else:
-                    user_ids = [user_id[0] for user_id in user_ids]
+                    users_id = [user_id[0] for user_id in users_id]
+                
+                logger.info(
+                    constants.FETCH_USERS_ID(
+                        users_id=users_id
+                    )
+                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
 
-        return user_ids
+        return users_id
 
     def save_encryption_key(self, key: EncryptionKey):
         """ Saves the keys that are used in encryption along side with the salt """
@@ -182,6 +200,12 @@ class DatabaseHandler (object):
                     key.to_tuple()
                 )
                 database_connection.commit()
+
+                logger.info(
+                    constants.NEW_DERIVED_KEY_SAVED(
+                        key=key
+                    )
+                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
@@ -235,13 +259,22 @@ class DatabaseHandler (object):
                     (user_id, associated_to)
                 )
                 salt = cursor.fetchone()[0]
+                salt = base64.b64decode(salt)
+
+                logger.info(
+                    constants.REQUEST_SALT_VALUE(
+                        user_id=user_id,
+                        salt_value=salt,
+                        associated_to=associated_to
+                    )
+                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
         
-        return base64.b64decode(salt)
+        return salt
 
     def get_auth_token_expire_time(self, user_id: str, auth_token: str) -> str:
         """
@@ -283,6 +316,7 @@ class DatabaseHandler (object):
             bool: True if the `auth_token` exists, otherwise False
         """
         database_connection = self.database_connection_pool.getconn()
+        is_valid = True
 
         try:
             with database_connection.cursor() as cursor:
@@ -293,15 +327,22 @@ class DatabaseHandler (object):
                     (user_id, hashed_auth_token)
                 )
 
-                auth_token = cursor.fetchall()
-                print(f"check auth-token | {auth_token = } | {hashed_auth_token = }")
+                user_data = cursor.fetchall()
 
-                if len(auth_token) != 1:
-                    return False
+                if len(user_data) != 1:
+                    is_valid = False
                 
-                return True
+                logger.info(
+                    constants.VALIDATE_AUTH_TOKEN(
+                        hashed_auth_token=hashed_auth_token,
+                        is_valid=is_valid
+                    )
+                )
+                
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
+        
+        return is_valid
