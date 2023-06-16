@@ -8,8 +8,6 @@ from fastapi import (
     exceptions
 )
 
-from gunicorn.app.base import BaseApplication
-from gunicorn.glogging import Logger
 from loguru import logger
 
 from pufferblow_api import constants
@@ -119,15 +117,33 @@ async def users_profile_route(
     auth_token: str,
     viewer_user_id: str
 ):
-    """ Users profile management route """
-    users_id = DATABASE_HANDLER.get_users_id()
+    """
+    Users profile management route
+    
+    Parameters:
+        user_id (str): The user_id of the target user
+        auth_token (str): The auth_token of the user who requested this user's profile
+        viewer_user_id (str): The user_id of the user who requested this user's profile
+    
+    Returns:
+        dict: The User class model to json
 
-    if user_id not in users_id:
+    """
+
+    # Check if the targeted user exists or not
+    if not USER_MANAGER.check_user(
+        user_id=user_id
+    ):
         raise exceptions.HTTPException(
             status_code=404,
             detail=f"The target user's user_id=\"{user_id}\" not found. Please make sure to pass the correct one"
         )
-    if viewer_user_id not in users_id:
+    
+    # Check if the `user_id` of the user who requested to view the target user's profile exists or not
+    if not USER_MANAGER.check_user(
+        user_id=viewer_user_id,
+        auth_token=auth_token
+    ):
         raise exceptions.HTTPException(
             status_code=404,
             detail=f"The user requested's user_id=\"{viewer_user_id}\" not found. Please make sure to pass the correct one"
@@ -137,6 +153,7 @@ async def users_profile_route(
         user_id=viewer_user_id,
         auth_token=auth_token
     )
+    # Check if the `auth_token` belongs to `viewer_user_id`
     if not AUTH_TOKEN_MANAGER.token_exists(
         user_id=viewer_user_id,
         hashed_auth_token=hashed_auth_token
