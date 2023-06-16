@@ -132,6 +132,40 @@ class UserManager (object):
             user_data.pop(data)
         
         return user_data
+    
+    def check_user(self, user_id: str, auth_token: str | None=None) -> bool:
+        """
+        Checks if the user exists or not
+        
+        Parameters:
+            user_id (str): The user's `user_id`
+            auth_token (str | None): The user's `auth_token`,
+                in case it is None, then we are expecting to 
+                check only if the `user_id` exists without
+                the match of the raw `auth_token` with this user's `auth_token`
+
+        Returns:
+            bool: True is the user exists, otherswise False
+        """
+        users_id = self.database_handler.get_users_id()
+
+        if user_id not in users_id:
+            return False
+        
+        if auth_token is not None:
+            hashed_auth_token = self.auth_token_manager._encrypt_auth_token(
+                user_id=user_id,
+                auth_token=auth_token
+            )
+            user_data = self.database_handler.fetch_user_data(user_id=user_id)
+
+            user_auth_token = user_data[8]
+
+            # Check if the `auth_token` don't match
+            if hashed_auth_token != user_auth_token:
+                return False
+
+        return True
 
     def _encrypt_data(self, user_id: str, data: str, associated_to: str, algo_type: str) -> str:
         """
