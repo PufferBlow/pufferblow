@@ -175,20 +175,17 @@ async def edit_users_profile_route(
     auth_token: str,
     username: str = None,
     status: str = None,
-    email: str = None,
-    old_email: str = None,
     password: str = None,
     old_password: str = None
 ):
     """ Edits a user's profile data such as: status,
-    last_seen, username, email and password
+    last_seen, username and password
     
     Parameters:
         user_id (str): The user's id
         auth_token (str): The user's auth_token
         username (str, optional): The new username for the user
         status (str, optional): The new status for the user ["ONLINE", "OFFLINE"]
-        email (str, optional): The new email for the user
         password (str, optional): The new password for the user
         old_password (str, optional): The old password of the user. This is in case the ```password``` was passed 
     
