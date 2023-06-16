@@ -25,7 +25,6 @@ class UserManager (object):
         
         Parameters:
             username (str): The user's username
-            email    (str): The user's email
             password (str): The user's password
         """
         new_user = User()
@@ -83,7 +82,6 @@ class UserManager (object):
         )
 
         encrypted_username              =       user_data[1]
-        # encrypted_email                 =       user_data[2]
         hashed_user_auth_token          =       user_data[7]
         auth_token_expire_time          =       user_data[8]
 
@@ -171,7 +169,7 @@ class UserManager (object):
         Returns:
             str: Encrypted version of the given data
         """
-        # For username, email, messages, contancts data
+        # For username, messages, contancts data
         if algo_type == "blowfish":
             encrypted_data, encryption_key_data  =  self.hasher.encrypt_with_blowfish(data)
 
