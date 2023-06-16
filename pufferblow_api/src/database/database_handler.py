@@ -26,7 +26,7 @@ class DatabaseHandler (object):
         database_connection = self.database_connection_pool.getconn()
         try:
             with database_connection.cursor() as cursor:
-                add_new_user = "INSERT INTO users (user_id, username, email, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
                 cursor.execute(
                     add_new_user,
@@ -55,7 +55,7 @@ class DatabaseHandler (object):
 
         try:
             with database_connection.cursor() as cursor:
-                sql = "SELECT user_id, username, email, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at FROM users WHERE user_id = %s"
+                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at FROM users WHERE user_id = %s"
 
                 cursor.execute(
                     sql,

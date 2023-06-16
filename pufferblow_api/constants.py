@@ -36,7 +36,6 @@ ASSOCIATIONS = {
     "user_id": [
         "username",
         "auth_token",
-        "email",
         "password",
     ],
     "message_id": [
@@ -62,9 +61,6 @@ NEW_HASH_SALT_CREATED = lambda salt: f"New salt created: salt=\"{salt.salt_value
 NEW_HASH_SALT_SAVED   = lambda salt: f"New salt saved to \"salts\": {salt.to_json()}"
 
 NEW_PASSWORD_HASHED = lambda password, hashed_password: f"New password hashed: password=\"{password}\", hashed_password=\"{hashed_password}\""
-
-EMAIL_ENCRYPTED = lambda email, encrypted_email: f"Email encrypted: email=\"{email}\", encrypted_email=\"{encrypted_email}\""
-EMAIL_DECRYPTED = lambda encrypted_email, decrypted_email: f"Email decrypted: encrypted_email=\"{encrypted_email}\", decrypted_email=\"{decrypted_email}\""
 
 USERNAME_ENCRYPTED = lambda username, encrypted_username: f"Username encrypted: username=\"{username}\", encrypted_username=\"{encrypted_username}\""
 USERNAME_DECRYPTED = lambda encrypted_username, decrypted_username: f"Username decrypted: encrypted_username=\"{encrypted_username}\", decrypted_username=\"{decrypted_username}\""

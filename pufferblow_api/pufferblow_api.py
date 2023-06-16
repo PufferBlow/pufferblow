@@ -75,7 +75,7 @@ def home_route():
         "github": constants.ORG_GITHUB
     }
 
-# Users routes 
+# Users routes
 @API.get("/api/v1/users", status_code=200)
 def users_route():
     """ Main users route """
@@ -87,13 +87,11 @@ def users_route():
 @API.post("/api/v1/users/signup", status_code=201)
 async def signup_new_user(
     username: str,
-    email: str,
     password: str
 ):
     """ Signup a new user """
     user_data = USER_MANAGER.sign_up(
         username=username,
-        email=email,
         password=password
     )
 
@@ -136,7 +134,7 @@ async def users_profile_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"The target user's user_id=\"{user_id}\" not found. Please make sure to pass the correct one"
+            detail=f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"
         )
     
     # Check if the `user_id` of the user who requested to view the target user's profile exists or not
@@ -146,22 +144,13 @@ async def users_profile_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"The user requested's user_id=\"{viewer_user_id}\" not found. Please make sure to pass the correct one"
+            detail=f"The user requested's user_id='{viewer_user_id}' not found. Please check your 'auth_token' if it is expired/unvalid, or 'user_id'"
         )
     
     hashed_auth_token = AUTH_TOKEN_MANAGER._encrypt_auth_token(
         user_id=viewer_user_id,
         auth_token=auth_token
     )
-    # Check if the `auth_token` belongs to `viewer_user_id`
-    if not AUTH_TOKEN_MANAGER.token_exists(
-        user_id=viewer_user_id,
-        hashed_auth_token=hashed_auth_token
-    ):
-        raise exceptions.HTTPException(
-            status_code=404,
-            detail=f"\"{auth_token}\" not found, or expired. Please make sure to pass the correct one"
-        )
 
     user_data = USER_MANAGER.user_profile(
         user_id=user_id,
@@ -184,12 +173,12 @@ async def users_profile_route(
 async def edit_users_profile_route(
     user_id: str,
     auth_token: str,
-    username: str,
-    status: str,
-    email: str,
-    old_email: str,
-    password: str,
-    old_password: str
+    username: str = None,
+    status: str = None,
+    email: str = None,
+    old_email: str = None,
+    password: str = None,
+    old_password: str = None
 ):
     """ Edits a user's profile data such as: status,
     last_seen, username, email and password
@@ -197,11 +186,11 @@ async def edit_users_profile_route(
     Parameters:
         user_id (str): The user's id
         auth_token (str): The user's auth_token
-        username (str): The new username for the user
-        status (str): The new status for the user ["ONLINE", "OFFLINE"]
-        email (str): The new email for the user
-        password (str): The new password for the user
-        old_password (str): The old password of the user. This is in case the ```password``` was passed 
+        username (str, optional): The new username for the user
+        status (str, optional): The new status for the user ["ONLINE", "OFFLINE"]
+        email (str, optional): The new email for the user
+        password (str, optional): The new password for the user
+        old_password (str, optional): The old password of the user. This is in case the ```password``` was passed 
     
     Returns:
         {
@@ -209,7 +198,15 @@ async def edit_users_profile_route(
             "message": (str)
         }
     """
-    pass
+    # Check if the user exists or not
+    if not USER_MANAGER.check_user(
+        user_id=user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
 
 def run() -> None:
     """ Starts the API """

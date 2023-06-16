@@ -19,7 +19,7 @@ class UserManager (object):
         self.auth_token_manager =     auth_token_manager
         self.hasher             =     hasher
     
-    def sign_up(self, username: str, email: str, password: str) -> User:
+    def sign_up(self, username: str, password: str) -> User:
         """ 
         Signs up a new user
         
@@ -39,12 +39,6 @@ class UserManager (object):
             user_id=new_user.user_id,
             data=username,
             associated_to="username",
-            algo_type="blowfish"
-        )
-        new_user.email                                  =       self._encrypt_data(
-            user_id=new_user.user_id,
-            data=email,
-            associated_to="email",
             algo_type="blowfish"
         )
         new_user.password_hash                          =       self._encrypt_data(
@@ -89,16 +83,16 @@ class UserManager (object):
         )
 
         encrypted_username              =       user_data[1]
-        encrypted_email                 =       user_data[2]
-        hashed_user_auth_token          =       user_data[8]
-        auth_token_expire_time          =       user_data[9]
+        # encrypted_email                 =       user_data[2]
+        hashed_user_auth_token          =       user_data[7]
+        auth_token_expire_time          =       user_data[8]
 
-        status      =   user_data[4]
-        last_seen   =   user_data[5]
-        created_at  =   user_data[10]
+        status      =   user_data[3]
+        last_seen   =   user_data[4]
+        created_at  =   user_data[9]
         
-        conversations   =   user_data[6]
-        contacts        =   user_data[7]
+        conversations   =   user_data[5]
+        contacts        =   user_data[6]
 
         user = User()
 
@@ -114,11 +108,6 @@ class UserManager (object):
 
         # Check if the user owns the account
         if hashed_auth_token == hashed_user_auth_token:
-            user.email                      =  self._decrypt_data( \
-                user_id=user_id,\
-                    data=encrypted_email, \
-                        associated_to="email" \
-                            )
             user.auth_token_expire_time     =       auth_token_expire_time
             user.conversations              =       conversations
             user.contacts                   =       contacts
@@ -159,7 +148,7 @@ class UserManager (object):
             )
             user_data = self.database_handler.fetch_user_data(user_id=user_id)
 
-            user_auth_token = user_data[8]
+            user_auth_token = user_data[7]
 
             # Check if the `auth_token` don't match
             if hashed_auth_token != user_auth_token:
@@ -175,7 +164,7 @@ class UserManager (object):
             user_id (str): The user's user_id
             data (str): The data to encrypt
             associated_to (str): What will derived key will be associated to
-                [ "username", "email", "auth_token"]
+                [ "username", "auth_token"]
 
             algo_type (str): Type of algorithm to use to encrypt
         
@@ -196,13 +185,6 @@ class UserManager (object):
                     constants.USERNAME_ENCRYPTED(
                         username=data,
                         encrypted_username=encrypted_data
-                    )
-                )
-            elif encryption_key_data.associated_to == "email":
-                logger.info(
-                    constants.EMAIL_ENCRYPTED(
-                        email=data,
-                        encrypted_email=encrypted_data
                     )
                 )
 
@@ -251,7 +233,7 @@ class UserManager (object):
             user_id (str): The user's user_id
             data (str): The data to decrypt
             associated_to (str): What does derived key associated to
-                 [ "username", "email", "auth_token"]
+                 [ "username", "auth_token"]
         Returns:
             str: The decrypted data
         """
@@ -272,13 +254,6 @@ class UserManager (object):
                 constants.USERNAME_DECRYPTED(
                     encrypted_username=data,
                     decrypted_username=decrypted_data
-                )
-            )
-        elif associated_to == "email":
-            logger.info(
-                constants.EMAIL_DECRYPTED(
-                    encrypted_email=data,
-                    decrypted_email=decrypted_data
                 )
             )
         

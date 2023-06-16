@@ -6,8 +6,7 @@ class User:
     """ User model """
 
     user_id                  :       str
-    username                 :       str
-    email                    :       str                    =       ""
+    username                 :       SyntaxWarning
     password_hash            :       str                    =       ""
     status                   :       str 
     last_seen                :       str
@@ -23,7 +22,6 @@ class User:
         USER_DATA = {
             "user_id"                   :       self.user_id,
             "username"                  :       self.username,
-            "email"                     :       self.email,
             "password_hash"             :       self.password_hash,
             "status"                    :       self.status,
             "last_seen"                 :       self.last_seen,
@@ -41,7 +39,6 @@ class User:
         USER_DATA = (
             self.user_id,
             self.username,
-            self.email,
             self.password_hash,
             self.status,
             self.last_seen.strftime("%Y-%m-%d"),
