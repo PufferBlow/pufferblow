@@ -10,7 +10,7 @@ from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 
 class Hasher (object):
-    """ Hasher class used to encrypt and decrypt passwords, messages, usernames, user's email """
+    """ Hasher class used to encrypt and decrypt passwords, messages, usernames """
     def __init__(self) -> None:
         pass
 
