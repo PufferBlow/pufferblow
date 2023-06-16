@@ -30,7 +30,6 @@
 #     user.password_hash  = "f7xoIhlivCegtS6T0YzbTw+4Xqcp2wNa"
 #     user.contacts       = []
 #     user.conversations  = []
-#     user.email          = "0ramsy0@gmail.com"
 #     user.status         = "ONLINE"
 
 #     user.auth_token, user.auth_token_expire_time, user.user_id = DATABASE_HANDLER.sign_up(
