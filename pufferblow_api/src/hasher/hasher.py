@@ -21,9 +21,7 @@ class Hasher (object):
             and pads the input data using PKCS7 padding.
         """
         if key is None:
-            generate_key    =      self._generate_key(data)
-            key             =      generate_key[0]
-            salt            =      generate_key[1]
+            key = self._generate_key(data)
         else:
             key = base64.b64decode(key)
             
@@ -35,7 +33,6 @@ class Hasher (object):
         if is_to_check != True:
             encryption_key = EncryptionKey()
             encryption_key.key_value =  base64.b64encode(key).decode("ascii") # Encoding the key into base64 to save in the database
-            encryption_key.salt      =  base64.b64encode(salt).decode("ascii") # Encoding the salt into bse64 to save in the database
 
             return (
                 encrypted_data,
@@ -83,10 +80,7 @@ class Hasher (object):
             rounds=100  # Adjust the number of rounds as per your requirement
         )
 
-        return (
-            derived_key,
-            salt
-        )
+        return derived_key
 
     def encrypt_with_bcrypt(self, data: str, user_id: str = "", salt: str | None=None, is_to_check: bool = False) -> Salt:
         """ 
