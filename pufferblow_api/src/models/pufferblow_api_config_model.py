@@ -1,6 +1,5 @@
 from pufferblow_api.src.conf_file_reader.load_config import load_config
 
-
 class PufferBlowAPIConfig:
     """ PufferBlow-api's config data class """
     
