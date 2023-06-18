@@ -1,3 +1,4 @@
+
 class Salt (object):
     """ Salt model """
 
