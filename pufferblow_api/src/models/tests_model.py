@@ -1,5 +1,3 @@
-from rich import print
-
 
 class Test (object):
     # This is the Test model, it wil be used to 
