@@ -90,6 +90,13 @@ async def signup_new_user(
     password: str
 ):
     """ Signup a new user """
+    # Check if the `username` already exists
+    if USER_MANAGER.check_username(username):
+        raise exceptions.HTTPException(
+            detail=f"username already exists. Please change it and try again later",
+            status_code=409
+        )
+
     user_data = USER_MANAGER.sign_up(
         username=username,
         password=password
@@ -169,13 +176,13 @@ async def users_profile_route(
         "user_data": user_data
     }
 
-@API.put("/api/v1/users/profile", status_code=201)
+@API.put("/api/v1/users/profile", status_code=200)
 async def edit_users_profile_route(
     user_id: str,
     auth_token: str,
-    username: str = None,
+    new_username: str = None,
     status: str = None,
-    password: str = None,
+    new_password: str = None,
     old_password: str = None
 ):
     """ Edits a user's profile data such as: status,
@@ -184,9 +191,9 @@ async def edit_users_profile_route(
     Parameters:
         user_id (str): The user's id
         auth_token (str): The user's auth_token
-        username (str, optional): The new username for the user
+        new_username (str, optional): The new username for the user
         status (str, optional): The new status for the user ["ONLINE", "OFFLINE"]
-        password (str, optional): The new password for the user
+        new_password (str, optional): The new password for the user
         old_password (str, optional): The old password of the user. This is in case the ```password``` was passed 
     
     Returns:
@@ -204,6 +211,65 @@ async def edit_users_profile_route(
             status_code=404,
             detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
+
+    # Update username
+    if new_username is not None:
+        if USER_MANAGER.check_username(
+            username=new_username
+        ):
+            raise exceptions.HTTPException(
+                detail=f"username already exists. Please change it and try again later",
+                status_code=409
+            )
+        
+        USER_MANAGER.update_username(
+            user_id=user_id,
+            new_username=new_username
+        )
+
+        return {
+            "status_code": 200,
+            "message": "username updated successfully"
+        }
+
+    # Update the user's status
+    if status is not None:
+        # Check the status value
+        if status not in ["online", "offline"]:
+            logger.info(
+                constants.USER_STATUS_UPDATE_FAILD(
+                    user_id=user_id,
+                    status=status
+                )
+            )
+
+            raise exceptions.HTTPException(
+                detail=f"status value status='{status}' not found. Accepted values ['online', 'offline']",
+                status_code=404
+            )
+
+        USER_MANAGER.update_user_status(
+            user_id=user_id,
+            status=status
+        )
+
+        return {
+            "status_code": 200,
+            "message": "Status updated successfully"
+        }
+
+    # Udate the user's password
+    if new_password is not None and old_password is not None:
+        USER_MANAGER.update_user_password(
+            user_id=user_id,
+            new_password=new_password,
+            old_password=old_password
+        )
+
+        return {
+            "status_code": 200,
+            "message": "Password updated successfully"
+        }
 
 def run() -> None:
     """ Starts the API """
