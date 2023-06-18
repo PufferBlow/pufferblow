@@ -1,12 +1,9 @@
-import datetime
-
-from rich import print
 
 class User:
     """ User model """
 
     user_id                  :       str
-    username                 :       SyntaxWarning
+    username                 :       str
     password_hash            :       str                    =       ""
     status                   :       str 
     last_seen                :       str
@@ -41,12 +38,12 @@ class User:
             self.username,
             self.password_hash,
             self.status,
-            self.last_seen.strftime("%Y-%m-%d"),
+            self.last_seen,
             self.conversations,
             self.contacts,
             self.encrypted_auth_token,
-            self.auth_token_expire_time.strftime("%Y-%m-%d"),
-            self.created_at.strftime("%Y-%m-%d")
+            self.auth_token_expire_time,
+            self.created_at
         )
 
         return USER_DATA
