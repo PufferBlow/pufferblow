@@ -128,7 +128,7 @@ class AuthTokenManager (object):
                 year=expire_time.year+1
             )
         
-        return expire_time
+        return expire_time.strftime("%Y-%m-%d")
     
     def _encrypt_auth_token(self, auth_token:str, user_id: str) -> str:
         """ 
