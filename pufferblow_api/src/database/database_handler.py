@@ -1,5 +1,6 @@
 import os
 import sys
+import pytz
 import json
 import base64
 import datetime
@@ -26,7 +27,7 @@ class DatabaseHandler (object):
         database_connection = self.database_connection_pool.getconn()
         try:
             with database_connection.cursor() as cursor:
-                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
                 cursor.execute(
                     add_new_user,
@@ -136,7 +137,7 @@ class DatabaseHandler (object):
                     sql,
                     (   
                         auth_token,
-                        auth_token_expire_time.strftime("%Y-%m-%d"),
+                        auth_token_expire_time,
                         user_id
                     ),
                 )
@@ -186,14 +187,164 @@ class DatabaseHandler (object):
             )
 
         return users_id
+    
+    def get_usernames(self) -> list[str]:
+        """ Returns a list of all the usernames in the database """
+        database_connection = self.database_connection_pool.getconn()
+        usernames = []
 
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "SELECT user_id, username FROM users"
+
+                cursor.execute(sql)
+
+                users_data = cursor.fetchall()
+
+                for user_data in users_data:
+                    user_id, username = user_data
+
+                    username = base64.b64decode(username)
+
+                    decryption_key = self.get_decryption_key(
+                        user_id=user_id,
+                        associated_to="username"
+                    )
+
+                    username = self.hasher.decrypt_with_blowfish(
+                        encrypted_data=username,
+                        key=decryption_key
+                    )
+
+                    usernames.append(username)
+    
+                logger.info(
+                    constants.FETCH_USERNAMES(
+                        usernames=usernames
+                    )
+                )
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection, 
+                close=False
+            )
+        
+        return usernames
+
+    def update_username(self, user_id:str, new_username: str) -> None:
+        """ Updates the username 
+        
+        Parameters:
+            user_id (str): The user's `user_id`
+            new_username (str): The new username
+        """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "UPDATE users SET username = %s WHERE user_id = %s"
+
+                cursor.execute(
+                    sql,
+                    (new_username, user_id)
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+
+    def update_user_status(self, user_id: str ,status: str):
+        """ Updates the user's status 
+        
+        Parameters:
+            status (str): Status value. ["online", "offline"]
+            last_seen (str): Last seen time in GMT (in case the status="offline")
+        """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = None
+                changes = None
+
+                if status == "offline":
+                    gmt = pytz.timezone("GMT")
+                    last_seen = datetime.datetime.now(gmt).strftime("%Y-%m-%d %H:%M:%S")
+
+                    sql = "UPDATE users SET status = %s, last_seen = %s WHERE user_id = %s"
+                    changes = (status, last_seen, user_id)
+                else:
+                    sql = "UPDATE users SET status = %s WHERE user_id = %s"
+                    (status, user_id)
+                
+                cursor.execute(
+                    sql,
+                    changes
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+    
+    def update_user_password(self, user_id: str, hashed_new_password: str) -> None:
+        """Updates the user's password
+        
+        Parameters:
+            user_id (srt): The user's `user_id`
+            hashed_new_password (srt): The hash of the new password to change the old one
+        """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "UPDATE users SET password_hash = %s WHERE user_id = %s"
+
+                cursor.execute(
+                    sql,
+                    (hashed_new_password, user_id)
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+    
+    def delete_encryption_key(self, key: EncryptionKey) -> None:
+        """ Deletes the given encryption key """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "DELETE FROM keys WHERE user_id = %s AND key_value = %s AND associated_to = %s"
+
+                cursor.execute(
+                    sql,
+                    (key.user_id, key.key_value, key.associated_to)
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+        logger.info(
+            constants.DERIVED_KEY_DELETED(
+                key=key
+            )
+        )
+    
     def save_encryption_key(self, key: EncryptionKey):
         """ Saves the keys that are used in encryption along side with the salt """
         database_connection = self.database_connection_pool.getconn()
         
         try:
             with database_connection.cursor() as cursor:
-                sql = "INSERT INTO keys (key_value, salt, associated_to, user_id, message_id) VALUES (%s, %s, %s, %s, %s)"
+                sql = "INSERT INTO keys (key_value, associated_to, user_id, message_id, created_at) VALUES (%s, %s, %s, %s, %s)"
                 
                 cursor.execute(
                     sql,
@@ -275,6 +426,60 @@ class DatabaseHandler (object):
             )
         
         return salt
+
+    def update_salt(self, user_id: str, associated_to: str, new_salt_value: str) -> None:
+        """ 
+        Updates the salt value
+        
+        Parameters:
+            user_id (str): The user's id
+            associated_to (str): password, auth_token
+            new_salt_value (str): The new salt value
+        """
+        database_connection = self.database_connection_pool.getconn()
+        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "UPDATE salts SET salt_value = %s, updated_at = %s WHERE user_id = %s AND associated_to = %s"
+
+                cursor.execute(
+                    sql,
+                    (   
+                        new_salt_value,
+                        updated_at,
+                        user_id,
+                        associated_to
+                    )
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+
+    def delete_salt(self, user_id: str, associated_to: str) -> None:
+        """ Deletes the salt data from the salts table """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "DELETE FROM salts WHERE user_id = %s AND associated_to = %s"
+
+                cursor.execute(
+                    sql,
+                    (
+                        user_id,
+                        associated_to
+                    )
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
 
     def get_auth_token_expire_time(self, user_id: str, auth_token: str) -> str:
         """
