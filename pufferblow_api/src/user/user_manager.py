@@ -1,16 +1,20 @@
 import os
+import pytz
 import base64
 import string
 import random
 import datetime
 
 from loguru import logger
+from fastapi import exceptions
 
 from pufferblow_api import constants
 from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.models.user_model import User
+from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
 from pufferblow_api.src.database.database_handler import DatabaseHandler
+from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 
 class UserManager (object):
     """ User manager class """
@@ -54,11 +58,11 @@ class UserManager (object):
             algo_type="bcrypt"
         )
         new_user.auth_token_expire_time                 =       auth_token_expire_time
-        new_user.status                                 =       "ONLINE"
+        new_user.status                                 =       "online"
         new_user.contacts                               =       []
         new_user.conversations                          =       []
-        new_user.created_at                             =       datetime.date.today()
-        new_user.last_seen                              =       datetime.datetime.now()
+        new_user.created_at                             =       datetime.date.today().strftime("%Y-%m-%d")
+        new_user.last_seen                              =       datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
 
         self.database_handler.sign_up(
             user_data=new_user
@@ -153,6 +157,181 @@ class UserManager (object):
                 return False
 
         return True
+    
+    def check_username(self, username: str) -> bool:
+        """
+        Checks if the `username` already exists or not
+        
+        Parameters:
+            username (str): To check username
+        
+        Returns:
+            bool: True is the username exists, otherwise False
+        """
+        usernames = self.database_handler.get_usernames()
+
+        if username in usernames:
+            return True
+        
+        return False
+
+    def update_username(self, user_id: str, new_username: str) -> None:
+        """ 
+        Updates the `username`
+        
+        Parameters:
+            user_id (str): The user's `user_id`
+            new_username (str): The new username
+        """
+        user_data = self.database_handler.fetch_user_data(
+            user_id=user_id,
+        )
+        encrypted_old_username = base64.b64decode(user_data[1])
+
+        username_decryption_key = self.database_handler.get_decryption_key(
+            user_id=user_id,
+            associated_to="username"
+        )
+
+        decryption_key = EncryptionKey()
+
+        decryption_key.key_value = username_decryption_key
+        decryption_key.user_id = user_id
+        decryption_key.associated_to = "username"
+
+        old_username = self.hasher.decrypt_with_blowfish(
+            encrypted_data=encrypted_old_username,
+            key=username_decryption_key
+        )
+        
+        encrypted_new_username, encryption_key =  self.hasher.encrypt_with_blowfish(data=new_username)
+
+        encrypted_new_username = base64.b64encode(encrypted_new_username).decode("ascii")
+
+        encryption_key.user_id = user_id
+        encryption_key.associated_to = "username"
+
+        # Update the username
+        self.database_handler.update_username(
+            user_id=user_id,
+            new_username=encrypted_new_username
+        )
+
+        # Save the encryption key data to the database
+        self.database_handler.save_encryption_key(
+            key=encryption_key
+        )
+
+        # Delete old encryption key
+        self.database_handler.delete_encryption_key(
+            key=decryption_key
+        )
+
+        logger.info(
+            constants.UPDATE_USERNAME(
+                user_id=user_id,
+                old_username=old_username,
+                new_username=new_username
+            )
+        )
+    def update_user_status(self, user_id: str, status: str) -> None:
+        """
+        Updates the user's status
+        
+        Parameters:
+            status (str): Status value. ["online", "offline"]
+        """
+        user_data = self.database_handler.fetch_user_data(
+            user_id=user_id
+        )
+        users_status = user_data[3]
+
+        if users_status == status:
+            logger.info(
+                constants.USER_STATUS_UPDATE_SKIPPED(
+                    user_id=user_id,
+                )
+            )
+            return
+
+        self.database_handler.update_user_status(
+            user_id=user_id,
+            status=status
+        )
+
+        logger.info(
+            constants.UPDATE_USER_STATUS(
+                user_id=user_id,
+                from_status=users_status,
+                to_status=status
+            )
+        )
+
+    def update_user_password(self, user_id: str, new_password: str, old_password: str) -> None:
+        """ 
+        Updates the user's password
+        
+        Parameters:
+            user_id (srt): The user's `user_id`
+            new_password (srt): The new password to change the old one
+            old_password (str): The old password
+        """
+        user_data = self.database_handler.fetch_user_data(
+            user_id=user_id
+        )
+        
+        hashed_password = base64.b64decode(user_data[2])
+
+        # Check if the old password matches the `hashed_old_password`
+        hashed_password_salt = self.database_handler.get_salt(
+            user_id=user_id,
+            associated_to="password"
+        )
+
+        hashed_old_password = self.hasher.encrypt_with_bcrypt(
+            data=old_password,
+            salt=hashed_password_salt,
+            is_to_check=True
+        )
+
+        if hashed_password != hashed_old_password:
+            logger.info(
+                constants.UPDATE_USER_PASSWORD_FAILED(
+                    user_id=user_id
+                )
+            )
+            
+            raise exceptions.HTTPException(
+                detail=f"Invalid password. Please try again later.",
+                status_code=401
+            )
+        
+        salt = self.hasher.encrypt_with_bcrypt(
+            data=new_password,
+            user_id=user_id
+        )
+        salt.associated_to = "password"
+
+        hashed_new_password = salt.hashed_data
+
+        self.database_handler.update_user_password(
+            user_id=user_id,
+            hashed_new_password=hashed_new_password
+        )
+
+        self.database_handler.update_salt(
+            user_id=user_id,
+            associated_to="password",
+            new_salt_value=salt.salt_value
+        )
+
+        logger.info(
+            constants.UPDATE_USER_PASSWORD(
+                user_id=user_id,
+                hashed_old_password=hashed_old_password,
+                hashed_new_password=hashed_new_password
+            )
+        )
 
     def _encrypt_data(self, user_id: str, data: str, associated_to: str, algo_type: str) -> str:
         """
