@@ -1,21 +1,22 @@
 import json
+import datetime
 
 class EncryptionKey (object):
     """ Encryption key data class """
     key_value           :           str
-    salt                :           str
     associated_to       :           str
     user_id             =           None
     message_id          =           None
+    created_at          =           datetime.date.today().strftime("%Y-%m-%d")
 
     def to_json(self) -> json.dumps:
         """ Returns the data in json format """
         ENCRYPTION_KEY_DATA = {
             "key_value"             :       self.key_value,
-            "salt"                  :       self.salt,
             "associated_to"         :       self.associated_to,
             "user_id"               :       self.user_id,
-            "message_id"            :       self.message_id
+            "message_id"            :       self.message_id,
+            "created_at"            :       self.created_at
         }
 
         return json.dumps(
@@ -29,8 +30,8 @@ class EncryptionKey (object):
         """ Returns the data in tuple format """
         return (
             self.key_value,
-            self.salt,
             self.associated_to,
             self.user_id,
-            self.message_id
+            self.message_id,
+            self.created_at
         )
