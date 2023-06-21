@@ -8,7 +8,7 @@ readme = "README.md"
 packages = [{include = "pufferblow_api"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.10"
 fastapi = "^0.95.2"
 typer = "^0.9.0"
 cassandra-driver = "^3.27.0"
@@ -16,11 +16,11 @@ rich = "^13.4.1"
 uvicorn = "^0.22.0"
 pyyaml = "^6.0"
 supabase = "^1.0.3"
-psycopg2 = "^2.9.6"
 pycryptodome = "^3.18.0"
 bcrypt = "^4.0.1"
 loguru = "^0.7.0"
 pytz = "^2023.3"
+psycopg2-binary = "^2.9.6"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.0"
