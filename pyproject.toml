@@ -11,7 +11,6 @@ packages = [{include = "pufferblow_api"}]
 python = "^3.10"
 fastapi = "^0.95.2"
 typer = "^0.9.0"
-cassandra-driver = "^3.27.0"
 rich = "^13.4.1"
 uvicorn = "^0.22.0"
 pyyaml = "^6.0"
