@@ -92,7 +92,8 @@ class UserManager (object):
         status      =   user_data[3]
         last_seen   =   user_data[4]
         created_at  =   user_data[9]
-        
+        updated_at  =   user_data[10]
+
         conversations   =   user_data[5]
         contacts        =   user_data[6]
 
@@ -113,7 +114,8 @@ class UserManager (object):
             user.auth_token_expire_time     =       auth_token_expire_time
             user.conversations              =       conversations
             user.contacts                   =       contacts
-        
+            user.updated_at                 =       updated_at
+            
         user_data = user.to_json()
 
         # Cleaning up the dict
@@ -175,6 +177,41 @@ class UserManager (object):
         
         return False
 
+    def check_user_password(self, user_id: str, password: str) -> bool:
+        """
+        Checks if the passed password matches the user's password
+        
+        Parameters:
+            user_id (str): The user's id
+            password (str): The user's password
+        
+        Returns:
+            bool: True if the passed password matches the user's password,
+            otherwise False it returned
+        """
+        user_data = self.database_handler.fetch_user_data(
+            user_id=user_id
+        )
+        
+        hashed_user_password = base64.b64decode(user_data[2]) # Saved hashed version of the user's password
+
+        hashed_user_passwords_salt = self.database_handler.get_salt(
+            user_id=user_id,
+            associated_to="password"
+        ) # Salt used to encrypt the password
+
+        # Hashed version of the passed password
+        hashed_password = self.hasher.encrypt_with_bcrypt(
+            data=password,
+            salt=hashed_user_passwords_salt,
+            is_to_check=True
+        )
+
+        if hashed_password != hashed_user_password:
+            return False
+
+        return True
+    
     def update_username(self, user_id: str, new_username: str) -> None:
         """ 
         Updates the `username`
@@ -276,36 +313,6 @@ class UserManager (object):
             new_password (srt): The new password to change the old one
             old_password (str): The old password
         """
-        user_data = self.database_handler.fetch_user_data(
-            user_id=user_id
-        )
-        
-        hashed_password = base64.b64decode(user_data[2])
-
-        # Check if the old password matches the `hashed_old_password`
-        hashed_password_salt = self.database_handler.get_salt(
-            user_id=user_id,
-            associated_to="password"
-        )
-
-        hashed_old_password = self.hasher.encrypt_with_bcrypt(
-            data=old_password,
-            salt=hashed_password_salt,
-            is_to_check=True
-        )
-
-        if hashed_password != hashed_old_password:
-            logger.info(
-                constants.UPDATE_USER_PASSWORD_FAILED(
-                    user_id=user_id
-                )
-            )
-            
-            raise exceptions.HTTPException(
-                detail=f"Invalid password. Please try again later.",
-                status_code=401
-            )
-        
         salt = self.hasher.encrypt_with_bcrypt(
             data=new_password,
             user_id=user_id
@@ -322,13 +329,13 @@ class UserManager (object):
         self.database_handler.update_salt(
             user_id=user_id,
             associated_to="password",
-            new_salt_value=salt.salt_value
+            new_salt_value=salt.salt_value,
+            new_hashed_data=hashed_new_password
         )
 
         logger.info(
             constants.UPDATE_USER_PASSWORD(
                 user_id=user_id,
-                hashed_old_password=hashed_old_password,
                 hashed_new_password=hashed_new_password
             )
         )
