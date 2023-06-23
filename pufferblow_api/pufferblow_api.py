@@ -260,6 +260,21 @@ async def edit_users_profile_route(
 
     # Udate the user's password
     if new_password is not None and old_password is not None:
+        if not USER_MANAGER.check_user_password(
+            user_id=user_id,
+            password=old_password
+        ): 
+            logger.info(
+                constants.UPDATE_USER_PASSWORD_FAILED(
+                    user_id=user_id
+                )
+            )
+            
+            raise exceptions.HTTPException(
+                detail=f"Invalid password. Please try again later.",
+                status_code=401
+            )
+
         USER_MANAGER.update_user_password(
             user_id=user_id,
             new_password=new_password,
@@ -270,6 +285,71 @@ async def edit_users_profile_route(
             "status_code": 200,
             "message": "Password updated successfully"
         }
+
+@API.put("/api/v1/users/profile/reset-auth-token", status_code=200)
+async def reset_users_auth_token_route(user_id: str, password: str):
+    """ 
+    Reset the user's auth_token in case they forgot it or
+    their account is being compromised by someone else.
+
+    Parameters:
+        user_id (str): The user's id
+        password (str): The user's password
+    """
+    if not USER_MANAGER.check_user(
+        user_id=user_id
+    ):
+        raise exceptions.HTTPException(
+            detail="'user_id' doesn't exists. Please try again.",
+            status_code=404
+        )
+
+    if not USER_MANAGER.check_user_password(
+        user_id=user_id,
+        password=password
+    ):
+        logger.info(
+            constants.RESET_USER_AUTH_TOKEN_FAILD(
+                user_id=user_id,
+            )
+        )
+
+        raise exceptions.HTTPException(
+            detail="Incorrect password. Please try again",
+            status_code=404
+        )
+    
+    new_auth_token = AUTH_TOKEN_MANAGER.create_token()
+
+    # Hashing the new the password and updating the existing salt value
+    # with the new one
+    salt = HASHER.encrypt_with_bcrypt(
+        user_id=user_id,
+        data=new_auth_token,
+    )
+
+    hashed_auth_token = salt.hashed_data
+    new_auth_token_expire_time = AUTH_TOKEN_MANAGER.auth_token_expire_time()
+
+    DATABASE_HANDLER.update_salt(
+        user_id=user_id,
+        associated_to="auth_token",
+        new_salt_value=salt.salt_value,
+        new_hashed_data=hashed_auth_token
+    )
+    
+    DATABASE_HANDLER.update_auth_token(
+        user_id=user_id,
+        new_auth_token=hashed_auth_token,
+        new_auth_token_expire_time=new_auth_token_expire_time
+    )
+    
+    return {
+        "status_code": 200,
+        "message": "auth_token rested successfully",
+        "auth_token": new_auth_token,
+        "auth_token_expire_time": new_auth_token_expire_time
+    }
 
 def run() -> None:
     """ Starts the API """
