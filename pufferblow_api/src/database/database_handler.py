@@ -27,7 +27,7 @@ class DatabaseHandler (object):
         database_connection = self.database_connection_pool.getconn()
         try:
             with database_connection.cursor() as cursor:
-                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
                 cursor.execute(
                     add_new_user,
@@ -56,7 +56,7 @@ class DatabaseHandler (object):
 
         try:
             with database_connection.cursor() as cursor:
-                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at FROM users WHERE user_id = %s"
+                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at FROM users WHERE user_id = %s"
 
                 cursor.execute(
                     sql,
@@ -122,8 +122,8 @@ class DatabaseHandler (object):
 
     def save_auth_token(
         self,
-        auth_token: bytes,
-        auth_token_expire_time: datetime.date.today,
+        auth_token: str,
+        auth_token_expire_time: str,
         user_id: str
     ) -> None:
         """ Saves the token to the auth_tokens table """
@@ -131,14 +131,15 @@ class DatabaseHandler (object):
 
         try:
             with database_connection.cursor() as cursor:
-                sql = "INSERT INTO auth_tokens (auth_token, auth_token_expire_time, user_id) VALUES (%s, %s, %s)"
+                sql = "INSERT INTO auth_tokens (auth_token, auth_token_expire_time, user_id, updated_at) VALUES (%s, %s, %s, %s)"
 
                 cursor.execute(
                     sql,
                     (   
                         auth_token,
                         auth_token_expire_time,
-                        user_id
+                        user_id,
+                        None
                     ),
                 )
                 database_connection.commit()
@@ -148,6 +149,59 @@ class DatabaseHandler (object):
                         auth_token=auth_token
                     )
                 )
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+
+    def update_auth_token(self, user_id: str, new_auth_token: str, new_auth_token_expire_time: str) -> None:
+        """
+        Updates the user's auth_token
+        
+        Parameters:
+            user_id (str): The user's id
+            new_auth_token (str): The new hashed generated `auth_token`
+            new_auth_token_expire_time (date): The new expire time for the generated `auth_token`
+        """
+        database_connection = self.database_connection_pool.getconn()
+
+        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            with database_connection.cursor() as cursor:
+                update_auth_tokens_table_sql = "UPDATE auth_tokens SET auth_token = %s, auth_token_expire_time = %s, updated_at = %s WHERE user_id = %s"
+                update_users_table_sql = "UPDATE users SET auth_token = %s, updated_at = %s WHERE user_id = %s"
+
+                sql = """
+                    {update_auth_tokens_table_sql};
+                    {update_users_table_sql};
+                """.format(
+                    update_auth_tokens_table_sql=update_auth_tokens_table_sql,
+                    update_users_table_sql=update_users_table_sql
+                )
+                
+                cursor.execute(
+                    sql,
+                    (
+                        new_auth_token,
+                        new_auth_token_expire_time,
+                        updated_at,
+                        user_id,
+                        new_auth_token,
+                        updated_at,
+                        user_id
+                    )
+                )
+                database_connection.commit()
+
+                logger.info(
+                    constants.RESET_USER_AUTH_TOKEN(
+                        user_id=user_id,
+                        new_hashed_auth_token=new_auth_token
+                    )
+                )
+
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
@@ -240,13 +294,19 @@ class DatabaseHandler (object):
         """
         database_connection = self.database_connection_pool.getconn()
 
+        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+
         try:
             with database_connection.cursor() as cursor:
-                sql = "UPDATE users SET username = %s WHERE user_id = %s"
+                sql = "UPDATE users SET username = %s, updated_at = %s WHERE user_id = %s"
 
                 cursor.execute(
                     sql,
-                    (new_username, user_id)
+                    (
+                        new_username,
+                        updated_at,
+                        user_id
+                    )
                 )
                 database_connection.commit()
         finally:
@@ -263,6 +323,8 @@ class DatabaseHandler (object):
             last_seen (str): Last seen time in GMT (in case the status="offline")
         """
         database_connection = self.database_connection_pool.getconn()
+        
+        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
 
         try:
             with database_connection.cursor() as cursor:
@@ -273,11 +335,11 @@ class DatabaseHandler (object):
                     gmt = pytz.timezone("GMT")
                     last_seen = datetime.datetime.now(gmt).strftime("%Y-%m-%d %H:%M:%S")
 
-                    sql = "UPDATE users SET status = %s, last_seen = %s WHERE user_id = %s"
-                    changes = (status, last_seen, user_id)
+                    sql = "UPDATE users SET status = %s, last_seen = %s, updated_at = %s WHERE user_id = %s"
+                    changes = (status, last_seen, updated_at, user_id)
                 else:
-                    sql = "UPDATE users SET status = %s WHERE user_id = %s"
-                    (status, user_id)
+                    sql = "UPDATE users SET status = %s, updated_at = %s WHERE user_id = %s"
+                    changes = (status, updated_at, user_id)
                 
                 cursor.execute(
                     sql,
@@ -298,14 +360,20 @@ class DatabaseHandler (object):
             hashed_new_password (srt): The hash of the new password to change the old one
         """
         database_connection = self.database_connection_pool.getconn()
+        
+        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
 
         try:
             with database_connection.cursor() as cursor:
-                sql = "UPDATE users SET password_hash = %s WHERE user_id = %s"
+                sql = "UPDATE users SET password_hash = %s, updated_at = %s WHERE user_id = %s"
 
                 cursor.execute(
                     sql,
-                    (hashed_new_password, user_id)
+                    (
+                        hashed_new_password,
+                        updated_at,
+                        user_id
+                    )
                 )
                 database_connection.commit()
         finally:
@@ -427,7 +495,7 @@ class DatabaseHandler (object):
         
         return salt
 
-    def update_salt(self, user_id: str, associated_to: str, new_salt_value: str) -> None:
+    def update_salt(self, user_id: str, associated_to: str, new_salt_value: str, new_hashed_data: str) -> None:
         """ 
         Updates the salt value
         
@@ -441,12 +509,13 @@ class DatabaseHandler (object):
         
         try:
             with database_connection.cursor() as cursor:
-                sql = "UPDATE salts SET salt_value = %s, updated_at = %s WHERE user_id = %s AND associated_to = %s"
+                sql = "UPDATE salts SET salt_value = %s, hashed_data = %s, updated_at = %s WHERE user_id = %s AND associated_to = %s"
 
                 cursor.execute(
                     sql,
                     (   
                         new_salt_value,
+                        new_hashed_data,
                         updated_at,
                         user_id,
                         associated_to
