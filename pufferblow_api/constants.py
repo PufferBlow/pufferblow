@@ -80,5 +80,8 @@ UPDATE_USER_STATUS = lambda user_id, from_status, to_status: f"Updated user stat
 USER_STATUS_UPDATE_SKIPPED = lambda user_id: f"Skipped status update for User ID: '{user_id}' due to passing the same status value."
 USER_STATUS_UPDATE_FAILED = lambda user_id, status: f"Failed to update the status for User ID: '{user_id}'. Provided status value not found. Status: '{status}', Accepted status values: ['online', 'offline']."
 
-UPDATE_USER_PASSWORD = lambda user_id, hashed_old_password, hashed_new_password: f"Updated password. User ID: '{user_id}', Hashed old password: '{hashed_old_password}', Hashed new password: '{hashed_new_password}'"
+UPDATE_USER_PASSWORD = lambda user_id, hashed_new_password: f"Updated password. User ID: '{user_id}', Hashed new password: '{hashed_new_password}'"
 UPDATE_USER_PASSWORD_FAILED = lambda user_id: f"Failed to update the password for User ID: '{user_id}' due to an invalid old password."
+
+RESET_USER_AUTH_TOKEN = lambda user_id, new_hashed_auth_token: f"Reseted auth_token for User ID: '{user_id}', New hashed auth_token: '{new_hashed_auth_token}'"
+RESET_USER_AUTH_TOKEN_FAILD = lambda user_id: f"Faild to reset auth_token for User ID: '{user_id}' due to the incorrect password that was passed in."
