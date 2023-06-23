@@ -1,7 +1,6 @@
 import psycopg2
 import psycopg2.pool
 
-
 from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIConfig
 
 class DatabaseSession (object):
