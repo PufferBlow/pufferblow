@@ -85,3 +85,4 @@ UPDATE_USER_PASSWORD_FAILED = lambda user_id: f"Failed to update the password fo
 
 RESET_USER_AUTH_TOKEN = lambda user_id, new_hashed_auth_token: f"Reseted auth_token for User ID: '{user_id}', New hashed auth_token: '{new_hashed_auth_token}'"
 RESET_USER_AUTH_TOKEN_FAILD = lambda user_id: f"Faild to reset auth_token for User ID: '{user_id}' due to the incorrect password that was passed in."
+AUTH_TOKEN_SUSPENSION_TIME = lambda user_id: f"Faild to reset authentication token for User ID: {user_id}. Suspension time has not elapsed"
