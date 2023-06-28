@@ -412,6 +412,32 @@ class DatabaseHandler (object):
                 close=False
             )
     
+    def update_encryption_key(self, key: EncryptionKey) -> None:
+        """ Updates the given encryption key """
+        database_connection = self.database_connection_pool.getconn()
+
+        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "UPDATE keys SET key_value = %s, updated_at = %s WHERE user_id = %s AND associated_to = %s"
+
+                cursor.execute(
+                    sql,
+                    (key.key_value, updated_at, key.user_id, key.associated_to)
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+        
+        logger.info(
+            constants.DERIVED_KEY_UPDATED(
+                key=key
+            )
+        )
+    
     def delete_encryption_key(self, key: EncryptionKey) -> None:
         """ Deletes the given encryption key """
         database_connection = self.database_connection_pool.getconn()

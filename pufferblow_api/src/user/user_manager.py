@@ -254,14 +254,9 @@ class UserManager (object):
             new_username=encrypted_new_username
         )
 
-        # Save the encryption key data to the database
-        self.database_handler.save_encryption_key(
+        # Update the encryption key info in the database
+        self.database_handler.update_encryption_key(
             key=encryption_key
-        )
-
-        # Delete old encryption key
-        self.database_handler.delete_encryption_key(
-            key=decryption_key
         )
 
         logger.info(
