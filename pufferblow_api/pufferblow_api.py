@@ -26,6 +26,7 @@ from pufferblow_api.src.user.user_manager import UserManager
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
 from pufferblow_api.src.database.database_session import DatabaseSession
 from pufferblow_api.src.database.database_handler import DatabaseHandler
+from pufferblow_api.src.utils.is_able_to_update import is_able_to_update
 from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIConfig
 
 # Init API
@@ -319,6 +320,25 @@ async def reset_users_auth_token_route(user_id: str, password: str):
             status_code=404
         )
     
+    # Check if the user is suspended from reseting their auth_token
+    updated_at = DATABASE_HANDLER.get_auth_tokens_updated_at(
+        user_id=user_id
+    )
+    if not is_able_to_update(
+        updated_at=updated_at,
+        suspend_time=2 # Two days
+    ):  
+        logger.info(
+            constants.AUTH_TOKEN_SUSPENSION_TIME(
+                user_id=user_id
+            )
+        )
+        
+        raise exceptions.HTTPException(
+            detail="Cannot reset authentication token. Suspension time has not elapsed.",
+            status_code=403
+        )
+
     new_auth_token = AUTH_TOKEN_MANAGER.create_token()
 
     # Hashing the new the password and updating the existing salt value

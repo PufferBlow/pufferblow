@@ -285,6 +285,36 @@ class DatabaseHandler (object):
         
         return usernames
 
+    def get_auth_tokens_updated_at(self, user_id: str) -> str:
+        """
+        Returns the value in the column `updated_at`
+        for the auth_token
+        
+        Parameters:
+            user_id (str): The user's id
+        Returns:
+            str: The `updated_at` value in GMT
+        """
+        database_connection = self.database_connection_pool.getconn()
+        updated_at = None
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "SELECT updated_at FROM auth_tokens WHERE user_id = %s"
+
+                cursor.execute(
+                    sql, 
+                    (user_id, )
+                )
+                updated_at = cursor.fetchone()[0]
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+        
+        return updated_at
+
     def update_username(self, user_id:str, new_username: str) -> None:
         """ Updates the username 
         
