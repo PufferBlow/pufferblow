@@ -56,6 +56,7 @@ NEW_AUTH_TOKEN_SAVED = lambda auth_token: f"Saved new authentication token in 'a
 
 NEW_DERIVED_KEY_CREATED = lambda user, key: f"Created new derived key. User ID: '{user.user_id}', Key: '{key.key_value}'"
 NEW_DERIVED_KEY_SAVED = lambda key: f"Saved new derived key in 'keys': {key.to_json()}"
+DERIVED_KEY_UPDATED = lambda key: f"Derived key updated for User ID: {key.user_id}, associated_to: {key.associated_to}, New Key value: {key.key_value}"
 DERIVED_KEY_DELETED = lambda key: f"Deleted derived key from 'keys': {key.to_json()}"
 
 NEW_HASH_SALT_CREATED = lambda salt: f"Created new hash salt. Salt: {salt.salt_value}, Associated to: '{salt.associated_to}', Hashed data: '{salt.hashed_data}'"
