@@ -1,4 +1,3 @@
-import os
 import bcrypt
 import base64
 import datetime

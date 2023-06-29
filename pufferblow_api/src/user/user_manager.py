@@ -1,4 +1,3 @@
-import os
 import pytz
 import base64
 import string
@@ -6,12 +5,10 @@ import random
 import datetime
 
 from loguru import logger
-from fastapi import exceptions
 
 from pufferblow_api import constants
 from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.models.user_model import User
-from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
 from pufferblow_api.src.database.database_handler import DatabaseHandler
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
