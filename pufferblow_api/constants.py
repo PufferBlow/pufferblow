@@ -47,6 +47,7 @@ ASSOCIATIONS = {
 # Logs messages
 NEW_USER_SIGNUP_SUCCESSFULLY = lambda user: f"New user signed up successfully. User ID: '{user.user_id}'"
 REQUEST_FOR_USER_PROFILE = lambda user_data, viewer_user_id: f"Requested user profile. Viewer: '{viewer_user_id}', Target: '{user_data['user_id']}', User Data: {user_data}"
+REQUEST_FOR_USERS_LIST = lambda viewer_user_id, auth_token: f"Request to get the list of users by User ID: '{viewer_user_id}', auth_token: '{auth_token}'"
 
 NEW_USER_ID_GENERATED = lambda user_id: f"Generated new user ID: '{user_id}'"
 
