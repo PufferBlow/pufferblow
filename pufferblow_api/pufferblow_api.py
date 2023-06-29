@@ -1,25 +1,11 @@
-import os
-import sys
-import base64
-
 from fastapi import (
     FastAPI,
     responses,
     exceptions
 )
-
 from loguru import logger
 
 from pufferblow_api import constants
-from pufferblow_api.src.utils.logger import (
-    InterceptHandler,
-    logging,
-    StandaloneApplication,
-    StubbedGunicornLogger,
-    LOG_LEVEL,
-    WORKERS,
-    JSON_LOGS,
-)
 
 from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.user.user_manager import UserManager
@@ -29,20 +15,20 @@ from pufferblow_api.src.database.database_handler import DatabaseHandler
 from pufferblow_api.src.utils.is_able_to_update import is_able_to_update
 from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIConfig
 
-# Init API
-API = FastAPI()
+# Init api
+api = FastAPI()
 
 # PufferBlow-api's config data class
-PUFFERBLOW_API_CONFIG = PufferBlowAPIConfig()
+PUFFERBLOW_api_CONFIG = PufferBlowAPIConfig()
 
 # Init the hasher (Responsible for encrypting and decrypting data)
 HASHER = Hasher()
 
 # Init Database Connection
 DATABASE_SESSION = DatabaseSession(
-    supabase_url            =   PUFFERBLOW_API_CONFIG.SUPABASE_URL,
-    supabase_key            =   PUFFERBLOW_API_CONFIG.SUPABASE_KEY,
-    pufferblow_api_config   =   PUFFERBLOW_API_CONFIG
+    supabase_url            =   PUFFERBLOW_api_CONFIG.SUPABASE_URL,
+    supabase_key            =   PUFFERBLOW_api_CONFIG.SUPABASE_KEY,
+    pufferblow_api_config   =   PUFFERBLOW_api_CONFIG
 )
 
 # Init Database handler
@@ -64,20 +50,20 @@ USER_MANAGER = UserManager(
     hasher                  =       HASHER
 )
 
-@API.get("/")
+@api.get("/")
 def redirect_route():
     return responses.RedirectResponse("/api/v1")
 
-@API.get("/api/v1", status_code=200)
+@api.get("/api/v1", status_code=200)
 def home_route():
     return {
         "status_code": 200,
-        "message": "Welcome to PufferBlow's API",
+        "message": "Welcome to PufferBlow's api",
         "github": constants.ORG_GITHUB
     }
 
 # Users routes
-@API.get("/api/v1/users", status_code=200)
+@api.get("/api/v1/users", status_code=200)
 def users_route():
     """ Main users route """
     return {
@@ -85,7 +71,7 @@ def users_route():
         "description": "This is the main users route"
     }
 
-@API.post("/api/v1/users/signup", status_code=201)
+@api.post("/api/v1/users/signup", status_code=201)
 async def signup_new_user(
     username: str,
     password: str
@@ -117,7 +103,7 @@ async def signup_new_user(
         "auth_token_expire_time": user_data.auth_token_expire_time
     }
 
-@API.get("/api/v1/users/profile", status_code=200)
+@api.get("/api/v1/users/profile", status_code=200)
 async def users_profile_route(
     user_id: str,
     auth_token: str,
@@ -177,7 +163,7 @@ async def users_profile_route(
         "user_data": user_data
     }
 
-@API.put("/api/v1/users/profile", status_code=200)
+@api.put("/api/v1/users/profile", status_code=200)
 async def edit_users_profile_route(
     user_id: str,
     auth_token: str,
@@ -287,7 +273,7 @@ async def edit_users_profile_route(
             "message": "Password updated successfully"
         }
 
-@API.put("/api/v1/users/profile/reset-auth-token", status_code=200)
+@api.put("/api/v1/users/profile/reset-auth-token", status_code=200)
 async def reset_users_auth_token_route(user_id: str, password: str):
     """ 
     Reset the user's auth_token in case they forgot it or
@@ -370,40 +356,3 @@ async def reset_users_auth_token_route(user_id: str, password: str):
         "auth_token": new_auth_token,
         "auth_token_expire_time": new_auth_token_expire_time
     }
-
-def run() -> None:
-    """ Starts the API """
-    INTERCEPT_HANDLER = InterceptHandler()
-    # logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=LOG_LEVEL)
-    # logging.root.handlers = [INTERCEPT_HANDLER]
-    logging.root.setLevel(LOG_LEVEL)
-
-    SEEN = set()
-
-    for name in [
-        *logging.root.manager.loggerDict.keys(),
-        "gunicorn",
-        "gunicorn.access",
-        "gunicorn.error",
-        "uvicorn",
-        "uvicorn.access",
-        "uvicorn.error",
-    ]:
-        if name not in SEEN:
-            SEEN.add(name.split(".")[0])
-            logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
-
-    logger.configure(handlers=[{"sink": sys.stdout, "serialize": JSON_LOGS}])
-    logger.add(PUFFERBLOW_API_CONFIG.LOGS_PATH, rotation="10 MB")
-    
-    OPTIONS = {
-        "bind": f"{PUFFERBLOW_API_CONFIG.API_HOST}:{PUFFERBLOW_API_CONFIG.API_PORT}",
-        "workers": WORKERS(PUFFERBLOW_API_CONFIG.WORKERS),
-        "timeout": PUFFERBLOW_API_CONFIG.CONNECTION_TIMEOUT,
-        "accesslog": "-",
-        "errorlog": "-",
-        "worker_class": "uvicorn.workers.UvicornWorker",
-        "logger_class": StubbedGunicornLogger
-    }
-
-    StandaloneApplication(API, OPTIONS).run()
