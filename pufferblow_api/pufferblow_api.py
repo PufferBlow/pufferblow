@@ -356,3 +356,40 @@ async def reset_users_auth_token_route(user_id: str, password: str):
         "auth_token": new_auth_token,
         "auth_token_expire_time": new_auth_token_expire_time
     }
+
+@api.get("/api/v1/users/list", status_code=200)
+def list_users_route(
+    viewer_user_id: str,
+    auth_token: str
+):
+    """
+    Returns a list of all the users present in the server
+    
+    Parameters:
+        viewer_user_id (str): The `user_id` of the user who requested to view the users list
+        auth_token (str): The viewer user's `auth_token`
+    """
+    # Check if the user exists or not
+    if not USER_MANAGER.check_user(
+        user_id=viewer_user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+
+    hashed_auth_token = AUTH_TOKEN_MANAGER._encrypt_auth_token(
+        user_id=viewer_user_id,
+        auth_token=auth_token
+    )
+
+    users = USER_MANAGER.list_users(
+        viewer_user_id=viewer_user_id,
+        auth_token=hashed_auth_token
+    )
+    
+    return {
+        "status_code": 200,
+        "users": users
+    }

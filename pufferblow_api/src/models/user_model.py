@@ -13,7 +13,7 @@ class User:
     raw_auth_token           :       str                    =       ""    
     encrypted_auth_token     :       str                    =       ""
     auth_token_expire_time   :       str                    =       ""
-    updated_at               :       None                   =       None
+    updated_at               :       str                    =       ""
 
     def to_json(self) -> dict:
         """ Returns the user data as json """

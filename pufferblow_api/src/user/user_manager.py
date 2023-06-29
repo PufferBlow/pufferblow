@@ -67,6 +67,38 @@ class UserManager (object):
         
         return new_user
 
+    def list_users(self, viewer_user_id: str, auth_token: str) -> list:
+        """
+        Returns a list of all the existing users in the server
+        
+        Parameters:
+            viewer_user_id (str): The id of the user who requested the users list
+            auth_token (str): The user's `auth_token`
+        
+        Returns:
+            List of users list containing some info about them
+        """
+        users = []
+
+        users_id = self.database_handler.get_users_id()
+
+        for user_id in users_id:
+            user_data = self.user_profile(
+                user_id=user_id,
+                hashed_auth_token=auth_token # The `auth_token` of the viewer_user_id it will not be the `auth_token` of the other users unless the current `user_id` == `viewer_user_id`
+            )
+
+            users.append(user_data)
+        
+        logger.info(
+            constants.REQUEST_FOR_USERS_LIST(
+                viewer_user_id=viewer_user_id,
+                auth_token=auth_token
+            )
+        )
+
+        return users
+
     def user_profile(self, user_id: str, hashed_auth_token: str) -> dict:
         """
         Returns the user's profile data
