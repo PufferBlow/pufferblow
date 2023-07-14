@@ -1,10 +1,10 @@
 import psycopg2
 import psycopg2.pool
 
-from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIConfig
+from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
 class DatabaseSession (object):
-    def __init__(self, supabase_url: str, supabase_key: str, pufferblow_api_config: PufferBlowAPIConfig) -> None:
+    def __init__(self, supabase_url: str, supabase_key: str, pufferblow_api_config: PufferBlowAPIconfig) -> None:
         self.supabase_url = supabase_url
         self.supabase_key = supabase_key
         self.pufferblow_api_config = pufferblow_api_config
