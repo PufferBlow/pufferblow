@@ -3,7 +3,7 @@ import os
 # PufferBlow-api info
 PACKAGE_NAME = "PufferBlow-api"
 VERSION      = "0.1.0"
-AUTHER       = "ramsy"
+AUTHER       = "ramsy0dev"
 GITHUB       = "https://github.com/PufferBlow/PufferBlow-api"  
 ORG_GITHUB   = "https://github.com/PufferBlow"
 
