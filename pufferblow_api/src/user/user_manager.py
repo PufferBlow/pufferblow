@@ -1,7 +1,9 @@
 import pytz
-import base64
+import uuid
 import string
 import random
+import base64
+import hashlib
 import datetime
 
 from loguru import logger
@@ -30,8 +32,8 @@ class UserManager (object):
         """
         new_user = User()
 
-        user_id                 =   self._generate_user_id()
-        auth_token              =   self.auth_token_manager.create_token()
+        user_id                 =   self._generate_user_id(username=username)
+        auth_token              =   f"{user_id}.{self.auth_token_manager.create_token()}"
         auth_token_expire_time  =   self.auth_token_manager.auth_token_expire_time()
 
         new_user.user_id                                =       user_id
@@ -189,6 +191,24 @@ class UserManager (object):
 
         return True
     
+    def check_is_user_admin(self, user_id: str) -> bool:
+        """
+        Checks if the user is the admin of the server or not
+        
+        Parameters:
+            user_id (str): The user's id
+        
+        Returns:
+            bool: True if the user is the admin, otherwise False
+        """
+        user_data = self.database_handler.fetch_user_data(
+            user_id=user_id
+        )
+
+        is_admin = user_data[11]
+
+        return is_admin
+    
     def check_username(self, username: str) -> bool:
         """
         Checks if the `username` already exists or not
@@ -328,7 +348,7 @@ class UserManager (object):
             )
         )
 
-    def update_user_password(self, user_id: str, new_password: str, old_password: str) -> None:
+    def update_user_password(self, user_id: str, new_password: str) -> None:
         """ 
         Updates the user's password
         
@@ -467,30 +487,17 @@ class UserManager (object):
         
         return decrypted_data
 
-    def _generate_user_id(self) -> str:
-        """ Generates a unique user id for a user """
-        user_ids = self.database_handler.get_users_id()
-        size = 17
-        ascii_charachters = [char for char in string.ascii_lowercase + string.ascii_uppercase] 
+    def _generate_user_id(self, username: str) -> str:
+        """ Generates a unique user id based of the username """
+        username = f"{username}{''.join([char for char in random.choices(string.ascii_letters)])}" # Adding random charachters to the username
 
-        for _ in range(10):
-            ascii_charachters.append(str(_))
-        
-        user_id = ""
-        
-        while True:
-            for _ in range(size):
-                user_id += random.choice(ascii_charachters)
-            
-            if user_id not in user_ids:
-                break
-            else:
-                user_id = ""
-        
+        hashed_username_salt = hashlib.md5(username.encode()).hexdigest()
+        generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_username_salt)
+
         logger.info(
             constants.NEW_USER_ID_GENERATED(
-                user_id=user_id
+                user_id=str(generated_uuid)
             )
         )
-    
-        return user_id
+
+        return str(generated_uuid)
