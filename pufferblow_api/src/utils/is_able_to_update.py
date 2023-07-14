@@ -8,9 +8,9 @@ def is_able_to_update(updated_at: str, suspend_time: int) -> bool:
     
     Parameters:
         updated_at (str): The value of the column `updated_at`
-        suspend_time (int): How many times should pass until 
+        suspend_time (int): How many days should pass until 
         the user is eligible to update their info or reset 
-        their `auth_token`. (in days)
+        their `auth_token`.
     
     Returns:
         bool: True if the user is eligible otherwise False
