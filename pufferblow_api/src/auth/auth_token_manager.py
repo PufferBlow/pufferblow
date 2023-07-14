@@ -31,6 +31,30 @@ class AuthTokenManager (object):
             hashed_auth_token=hashed_auth_token
         )
 
+    def check_auth_token_format(self, auth_token: str) -> bool:
+        """ Checks the auth_token format 
+        
+        Parameters:
+            auth_token (str): The raw auth_token
+        
+        Returns:
+            bool: False if the format of the auth_token is bad otherwise True
+        """
+        # NOTE: auth_token is formed from the user_id and the auth_token itself
+        # example: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.uSrBsausJJJwYsvBHfi145RYSEorgQjIfuWtpZTjc"
+        # the first half of the auth_token is the user_id and it length will always be 36 chars
+        # as for the second half wich the actual auth_token it's length is 41
+        if "." not in auth_token:
+            return False
+
+        user_id = auth_token.split(".")[0]
+        auth_token = auth_token.split(".")[1]
+
+        if len(user_id) != 36 or len(auth_token) != 41:
+            return False
+        
+        return True
+    
     def is_token_valid(self, user_id: str, auth_token: str) -> bool:
         """
         Checks if the authentication token is valid, not expired.
@@ -44,10 +68,11 @@ class AuthTokenManager (object):
         """
         result = None
 
-        expire_time = self.database_handler._get_auth_token_expire_time(
+        expire_time = self.database_handler.get_auth_token_expire_time(
             user_id=user_id,
             auth_token=auth_token
         )
+
         month = int(expire_time.split("-")[1])
         year  = int(expire_time.split("-")[0])
 
@@ -129,7 +154,7 @@ class AuthTokenManager (object):
         
         return expire_time.strftime("%Y-%m-%d")
     
-    def _encrypt_auth_token(self, auth_token:str, user_id: str) -> str:
+    def _encrypt_auth_token(self, user_id: str, auth_token: str) -> str:
         """ 
         Returns the hashed version of the auth_token using the same salt that
         is soted in the database
