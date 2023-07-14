@@ -12,42 +12,52 @@ from pufferblow_api.src.user.user_manager import UserManager
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
 from pufferblow_api.src.database.database_session import DatabaseSession
 from pufferblow_api.src.database.database_handler import DatabaseHandler
+from pufferblow_api.src.channels.channels_manager import ChannelsManager
+from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+
+from pufferblow_api.src.utils.extract_user_id import extract_user_id
 from pufferblow_api.src.utils.is_able_to_update import is_able_to_update
-from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIConfig
 
 # Init api
 api = FastAPI()
 
 # PufferBlow-api's config data class
-PUFFERBLOW_api_CONFIG = PufferBlowAPIConfig()
+pufferblow_api_config = PufferBlowAPIconfig()
 
 # Init the hasher (Responsible for encrypting and decrypting data)
-HASHER = Hasher()
+hasher = Hasher()
 
 # Init Database Connection
 DATABASE_SESSION = DatabaseSession(
-    supabase_url            =   PUFFERBLOW_api_CONFIG.SUPABASE_URL,
-    supabase_key            =   PUFFERBLOW_api_CONFIG.SUPABASE_KEY,
-    pufferblow_api_config   =   PUFFERBLOW_api_CONFIG
+    supabase_url            =   pufferblow_api_config.SUPABASE_URL,
+    supabase_key            =   pufferblow_api_config.SUPABASE_KEY,
+    pufferblow_api_config   =   pufferblow_api_config
 )
 
 # Init Database handler
-DATABASE_HANDLER = DatabaseHandler(
+database_handler = DatabaseHandler(
     database_connection_pool    =       DATABASE_SESSION.database_connection_pool(),
-    hasher                      =       HASHER
+    hasher                      =       hasher
 )
 
 # Init Auth tokens manager
-AUTH_TOKEN_MANAGER = AuthTokenManager(
-    database_handler        =       DATABASE_HANDLER,
-    hasher                  =       HASHER
+auth_token_manager = AuthTokenManager(
+    database_handler        =       database_handler,
+    hasher                  =       hasher
 )
 
 # Init user manager
-USER_MANAGER = UserManager(
-    database_handler        =       DATABASE_HANDLER,
-    auth_token_manager      =       AUTH_TOKEN_MANAGER,
-    hasher                  =       HASHER
+users_manager = UserManager(
+    database_handler        =       database_handler,
+    auth_token_manager      =       auth_token_manager,
+    hasher                  =       hasher
+)
+
+# Init channels manager
+channels_manager = ChannelsManager(
+    database_handler        =       database_handler,
+    auth_token_manager      =       auth_token_manager,
+    hasher                  =       hasher
 )
 
 @api.get("/")
@@ -56,6 +66,7 @@ def redirect_route():
 
 @api.get("/api/v1", status_code=200)
 def home_route():
+    """ Main route """
     return {
         "status_code": 200,
         "message": "Welcome to PufferBlow's api",
@@ -65,7 +76,7 @@ def home_route():
 # Users routes
 @api.get("/api/v1/users", status_code=200)
 def users_route():
-    """ Main users route """
+    """ Users route start point """
     return {
         "status_code": 200,
         "description": "This is the main users route"
@@ -78,13 +89,13 @@ async def signup_new_user(
 ):
     """ Signup a new user """
     # Check if the `username` already exists
-    if USER_MANAGER.check_username(username):
+    if users_manager.check_username(username):
         raise exceptions.HTTPException(
-            detail=f"username already exists. Please change it and try again later",
+            detail="username already exists. Please change it and try again later",
             status_code=409
         )
 
-    user_data = USER_MANAGER.sign_up(
+    user_data = users_manager.sign_up(
         username=username,
         password=password
     )
@@ -98,7 +109,6 @@ async def signup_new_user(
     return {
         "status_code": 201,
         "message": "Account created successfully",
-        "user_id": user_data.user_id,
         "auth_token": user_data.raw_auth_token,
         "auth_token_expire_time": user_data.auth_token_expire_time
     }
@@ -107,7 +117,6 @@ async def signup_new_user(
 async def users_profile_route(
     user_id: str,
     auth_token: str,
-    viewer_user_id: str
 ):
     """
     Users profile management route
@@ -115,15 +124,32 @@ async def users_profile_route(
     Parameters:
         user_id (str): The user_id of the target user
         auth_token (str): The auth_token of the user who requested this user's profile
-        viewer_user_id (str): The user_id of the user who requested this user's profile
     
     Returns:
         dict: The User class model to json
 
     """
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail="Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
 
+    viewer_user_id = extract_user_id(auth_token=auth_token)
+
+    # Check the viewer user_id
+    if not users_manager.check_user(
+        user_id=viewer_user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+    
     # Check if the targeted user exists or not
-    if not USER_MANAGER.check_user(
+    if not users_manager.check_user(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
@@ -131,22 +157,12 @@ async def users_profile_route(
             detail=f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"
         )
     
-    # Check if the `user_id` of the user who requested to view the target user's profile exists or not
-    if not USER_MANAGER.check_user(
-        user_id=viewer_user_id,
-        auth_token=auth_token
-    ):
-        raise exceptions.HTTPException(
-            status_code=404,
-            detail=f"The user requested's user_id='{viewer_user_id}' not found. Please check your 'auth_token' if it is expired/unvalid, or 'user_id'"
-        )
-    
-    hashed_auth_token = AUTH_TOKEN_MANAGER._encrypt_auth_token(
+    hashed_auth_token = auth_token_manager._encrypt_auth_token(
         user_id=viewer_user_id,
         auth_token=auth_token
     )
 
-    user_data = USER_MANAGER.user_profile(
+    user_data = users_manager.user_profile(
         user_id=user_id,
         hashed_auth_token=hashed_auth_token
     )
@@ -165,7 +181,6 @@ async def users_profile_route(
 
 @api.put("/api/v1/users/profile", status_code=200)
 async def edit_users_profile_route(
-    user_id: str,
     auth_token: str,
     new_username: str = None,
     status: str = None,
@@ -176,7 +191,6 @@ async def edit_users_profile_route(
     last_seen, username and password
     
     Parameters:
-        user_id (str): The user's id
         auth_token (str): The user's auth_token
         new_username (str, optional): The new username for the user
         status (str, optional): The new status for the user ["ONLINE", "OFFLINE"]
@@ -189,8 +203,17 @@ async def edit_users_profile_route(
             "message": (str)
         }
     """
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
+
+    user_id = extract_user_id(auth_token=auth_token)
+
     # Check if the user exists or not
-    if not USER_MANAGER.check_user(
+    if not users_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -201,7 +224,7 @@ async def edit_users_profile_route(
 
     # Update username
     if new_username is not None:
-        if USER_MANAGER.check_username(
+        if users_manager.check_username(
             username=new_username
         ):
             raise exceptions.HTTPException(
@@ -209,7 +232,7 @@ async def edit_users_profile_route(
                 status_code=409
             )
         
-        USER_MANAGER.update_username(
+        users_manager.update_username(
             user_id=user_id,
             new_username=new_username
         )
@@ -224,7 +247,7 @@ async def edit_users_profile_route(
         # Check the status value
         if status not in ["online", "offline"]:
             logger.info(
-                constants.USER_STATUS_UPDATE_FAILD(
+                constants.USER_STATUS_UPDATE_FAILED(
                     user_id=user_id,
                     status=status
                 )
@@ -235,7 +258,7 @@ async def edit_users_profile_route(
                 status_code=404
             )
 
-        USER_MANAGER.update_user_status(
+        users_manager.update_user_status(
             user_id=user_id,
             status=status
         )
@@ -247,7 +270,7 @@ async def edit_users_profile_route(
 
     # Udate the user's password
     if new_password is not None and old_password is not None:
-        if not USER_MANAGER.check_user_password(
+        if not users_manager.check_user_password(
             user_id=user_id,
             password=old_password
         ): 
@@ -262,10 +285,9 @@ async def edit_users_profile_route(
                 status_code=401
             )
 
-        USER_MANAGER.update_user_password(
+        users_manager.update_user_password(
             user_id=user_id,
-            new_password=new_password,
-            old_password=old_password
+            new_password=new_password
         )
 
         return {
@@ -274,7 +296,10 @@ async def edit_users_profile_route(
         }
 
 @api.put("/api/v1/users/profile/reset-auth-token", status_code=200)
-async def reset_users_auth_token_route(user_id: str, password: str):
+async def reset_users_auth_token_route(
+    auth_token: str,
+    password: str
+):
     """ 
     Reset the user's auth_token in case they forgot it or
     their account is being compromised by someone else.
@@ -283,15 +308,26 @@ async def reset_users_auth_token_route(user_id: str, password: str):
         user_id (str): The user's id
         password (str): The user's password
     """
-    if not USER_MANAGER.check_user(
-        user_id=user_id
-    ):
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail="'user_id' doesn't exists. Please try again.",
-            status_code=404
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
         )
 
-    if not USER_MANAGER.check_user_password(
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if the user exists or not
+    if not users_manager.check_user(
+        user_id=user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+
+    if not users_manager.check_user_password(
         user_id=user_id,
         password=password
     ):
@@ -307,44 +343,45 @@ async def reset_users_auth_token_route(user_id: str, password: str):
         )
     
     # Check if the user is suspended from reseting their auth_token
-    updated_at = DATABASE_HANDLER.get_auth_tokens_updated_at(
+    updated_at = database_handler.get_auth_tokens_updated_at(
         user_id=user_id
     )
-    if not is_able_to_update(
-        updated_at=updated_at,
-        suspend_time=2 # Two days
-    ):  
-        logger.info(
-            constants.AUTH_TOKEN_SUSPENSION_TIME(
-                user_id=user_id
+    if updated_at is not None:
+        if not is_able_to_update(
+            updated_at=updated_at,
+            suspend_time=2 # Two days
+        ):  
+            logger.info(
+                constants.AUTH_TOKEN_SUSPENSION_TIME(
+                    user_id=user_id
+                )
             )
-        )
-        
-        raise exceptions.HTTPException(
-            detail="Cannot reset authentication token. Suspension time has not elapsed.",
-            status_code=403
-        )
+            
+            raise exceptions.HTTPException(
+                detail="Cannot reset authentication token. Suspension time has not elapsed.",
+                status_code=403
+            )
 
-    new_auth_token = AUTH_TOKEN_MANAGER.create_token()
+    new_auth_token = f"{user_id}.{auth_token_manager.create_token()}"
 
-    # Hashing the new the password and updating the existing salt value
+    # Hashing the new auth_token and updating the existing salt value
     # with the new one
-    salt = HASHER.encrypt_with_bcrypt(
+    salt = hasher.encrypt_with_bcrypt(
         user_id=user_id,
         data=new_auth_token,
     )
 
     hashed_auth_token = salt.hashed_data
-    new_auth_token_expire_time = AUTH_TOKEN_MANAGER.auth_token_expire_time()
+    new_auth_token_expire_time = auth_token_manager.auth_token_expire_time()
 
-    DATABASE_HANDLER.update_salt(
+    database_handler.update_salt(
         user_id=user_id,
         associated_to="auth_token",
         new_salt_value=salt.salt_value,
         new_hashed_data=hashed_auth_token
     )
     
-    DATABASE_HANDLER.update_auth_token(
+    database_handler.update_auth_token(
         user_id=user_id,
         new_auth_token=hashed_auth_token,
         new_auth_token_expire_time=new_auth_token_expire_time
@@ -359,7 +396,6 @@ async def reset_users_auth_token_route(user_id: str, password: str):
 
 @api.get("/api/v1/users/list", status_code=200)
 def list_users_route(
-    viewer_user_id: str,
     auth_token: str
 ):
     """
@@ -369,8 +405,17 @@ def list_users_route(
         viewer_user_id (str): The `user_id` of the user who requested to view the users list
         auth_token (str): The viewer user's `auth_token`
     """
-    # Check if the user exists or not
-    if not USER_MANAGER.check_user(
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
+
+    viewer_user_id = extract_user_id(auth_token=auth_token)
+
+    # Check the viewer user_id
+    if not users_manager.check_user(
         user_id=viewer_user_id,
         auth_token=auth_token
     ):
@@ -379,12 +424,12 @@ def list_users_route(
             detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
-    hashed_auth_token = AUTH_TOKEN_MANAGER._encrypt_auth_token(
+    hashed_auth_token = auth_token_manager._encrypt_auth_token(
         user_id=viewer_user_id,
         auth_token=auth_token
     )
 
-    users = USER_MANAGER.list_users(
+    users = users_manager.list_users(
         viewer_user_id=viewer_user_id,
         auth_token=hashed_auth_token
     )
@@ -392,4 +437,112 @@ def list_users_route(
     return {
         "status_code": 200,
         "users": users
+    }
+
+# Server's Channels routes
+@api.get("/api/v1/channels", status_code=200)
+def channels_route():
+    """ Channels route start point """
+    return {
+        "status_code": 200,
+        "message": "Channels route"
+    }
+
+@api.get("/api/v1/channels/list", status_code=200)
+def list_channels_route(
+    auth_token: str
+    ):
+    """ Returns a list of all the available channels """
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
+
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if the user exists or not
+    if not users_manager.check_user(
+        user_id=user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+
+    channels_list = channels_manager.list_channels(
+            user_id=user_id
+        )
+
+    return {
+        "status_code": 200,
+        "channels": channels_list 
+    }
+
+@api.put("/api/v1/channels/create", status_code=200)
+def create_new_channel_route(
+    # user_id: str,
+    auth_token: str,
+    channel_name: str,
+    is_private: bool = False
+):
+    """
+    Create new channel for the server
+    
+    Parameters:
+        user_id (str): The ID of the user creating the channel route.
+        auth_token (str): The authentication token for the user.
+        channel_name (str): The name of the channel to create.
+        is_private (bool, optional): Specifies whether the channel should be private or not.
+            Defaults to False.
+    """
+        # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
+
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if the user exists or not
+    if not users_manager.check_user(
+        user_id=user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+
+    # Check if the user is the server admin
+    if not users_manager.check_is_user_admin(
+        user_id=user_id
+    ):
+        raise exceptions.HTTPException(
+            status_code=403,
+            detail="Access forbidden. Only admins can create channels and manage them."
+        )
+    
+    # Check if the channel_name is not repeated
+    channels_names = database_handler.get_channels_names()
+    
+    if channel_name in channels_names:
+        raise exceptions.HTTPException(
+            status_code=409,
+            detail="Channel name already exists, please change it and try again."
+        )
+    
+    channel_data = channels_manager.create_channel(
+        user_id=user_id,
+        channel_name=channel_name,
+        is_private=is_private
+    )
+
+    return {
+        "status_code": 200,
+        "message": "Channel created successfully",
+        "channel_data": channel_data.to_json()
     }
