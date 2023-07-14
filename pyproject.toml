@@ -2,7 +2,7 @@
 name = "pufferblow-api"
 version = "0.1.0"
 description = "Official API for PufferBlow"
-authors = ["0RaMsY0 <0ramsy0@gmail.com>"]
+authors = ["ramsy0dev <0ramsy0@gmail.com>"]
 license = "GPL-3.0"
 readme = "README.md"
 packages = [{include = "pufferblow_api"}]
