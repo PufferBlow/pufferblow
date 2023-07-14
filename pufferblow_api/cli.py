@@ -16,16 +16,16 @@ from pufferblow_api.src.utils.logger import (
 )
 from pufferblow_api import constants
 from pufferblow_api.pufferblow_api import api
-from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIConfig
+from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
 # Init cli
 cli = typer.Typer()
 
 # Init console
-CONSOLE = Console()
+console = Console()
 
 # Get config data
-PUFFERBLOW_API_CONFIG = PufferBlowAPIConfig()
+pufferblow_api_config = PufferBlowAPIconfig()
 
 @cli.command()
 def version():
@@ -33,9 +33,14 @@ def version():
     print(f"[bold cyan] Version [italic white]{constants.VERSION}")
 
 @cli.command()
+def setup(): 
+    """ Setup PufferBlow's API """
+    pass
+
+@cli.command()
 def serve():
     """ Serves the API on the passed host and port """
-    if PUFFERBLOW_API_CONFIG.SUPABASE_URL == "<your supabase url>" and PUFFERBLOW_API_CONFIG.SUPABASE_KEY == "<your supabase key>":
+    if pufferblow_api_config.SUPABASE_URL == "<your supabase url>" and pufferblow_api_config.SUPABASE_KEY == "<your supabase key>":
         print(f"[bold red] [  ?  ] [bold white] Config error: please edit the [italic yellow]`supabase_url`[/][bold white] and [italic yellow]`supabase_key`[/][bold white] feilds in [bold cyan]{constants.PUFFERBLOW_CONFIG_PATH}[white]")
         sys.exit(1)
     
@@ -60,12 +65,12 @@ def serve():
             logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
     logger.configure(handlers=[{"sink": sys.stdout, "serialize": JSON_LOGS}])
-    logger.add(PUFFERBLOW_API_CONFIG.LOGS_PATH, rotation="10 MB")
+    logger.add(pufferblow_api_config.LOGS_PATH, rotation="10 MB")
     
     OPTIONS = {
-        "bind": f"{PUFFERBLOW_API_CONFIG.API_HOST}:{PUFFERBLOW_API_CONFIG.API_PORT}",
-        "workers": WORKERS(PUFFERBLOW_API_CONFIG.WORKERS),
-        "timeout": PUFFERBLOW_API_CONFIG.CONNECTION_TIMEOUT,
+        "bind": f"{pufferblow_api_config.API_HOST}:{pufferblow_api_config.API_PORT}",
+        "workers": WORKERS(pufferblow_api_config.WORKERS),
+        "timeout": pufferblow_api_config.CONNECTION_TIMEOUT,
         "accesslog": "-",
         "errorlog": "-",
         "worker_class": "uvicorn.workers.UvicornWorker",
