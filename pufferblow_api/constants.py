@@ -7,8 +7,11 @@ AUTHER       = "ramsy"
 GITHUB       = "https://github.com/PufferBlow/PufferBlow-api"  
 ORG_GITHUB   = "https://github.com/PufferBlow"
 
+# `Home` path
+HOME = os.environ["HOME"]
+
 # PufferBlow-api default config file
-PUFFERBLOW_CONFIG_PATH = f"{os.environ['HOME']}/.config/pufferblow-api/config.yaml"
+PUFFERBLOW_CONFIG_PATH = f"{HOME}/.config/pufferblow-api/config.yaml"
 PUFFERBLOW_CONFIG = f"""# This is the config file for pufferblow-api
 # please if you do edit this file you will need
 # to restart, in order to apply the changes
@@ -16,7 +19,7 @@ PUFFERBLOW_CONFIG = f"""# This is the config file for pufferblow-api
 api:
  - host: "0.0.0.0"
  - port: 7575
- - logs_path: {os.environ['HOME']}/pufferblow_api.log
+ - logs_path: {HOME}/pufferblow_api.log
  - workers: 7 # number of workers for guvicorn
  - connection_timeout: 60 # in seconds
 
@@ -88,3 +91,5 @@ UPDATE_USER_PASSWORD_FAILED = lambda user_id: f"Failed to update the password fo
 RESET_USER_AUTH_TOKEN = lambda user_id, new_hashed_auth_token: f"Reseted auth_token for User ID: '{user_id}', New hashed auth_token: '{new_hashed_auth_token}'"
 RESET_USER_AUTH_TOKEN_FAILD = lambda user_id: f"Faild to reset auth_token for User ID: '{user_id}' due to the incorrect password that was passed in."
 AUTH_TOKEN_SUSPENSION_TIME = lambda user_id: f"Faild to reset authentication token for User ID: {user_id}. Suspension time has not elapsed"
+
+NEW_CHANNEL_CREATED = lambda user_id, channel_id, channel_name :f"New channel created by User ID: '{user_id}', Channel ID: '{channel_id}', Channel Name: '{channel_name}'"
