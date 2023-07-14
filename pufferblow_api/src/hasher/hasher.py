@@ -56,6 +56,7 @@ class Hasher (object):
         iv = encrypted_data[:Blowfish.block_size]
         ciphertext = encrypted_data[Blowfish.block_size:]
         cipher = Blowfish.new(key, Blowfish.MODE_CBC, iv)
+        
         decrypted_data = unpad(cipher.decrypt(ciphertext), Blowfish.block_size)
 
         return decrypted_data.decode()
