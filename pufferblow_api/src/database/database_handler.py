@@ -1,6 +1,4 @@
-import pytz
 import base64
-import datetime
 import psycopg2
 import psycopg2.pool
 
@@ -10,7 +8,10 @@ from pufferblow_api import constants
 from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.models.user_model import User
+from pufferblow_api.src.models.channel_model import Channel
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
+
+from pufferblow_api.src.utils.current_date import date_in_gmt
 
 class DatabaseHandler (object):
     """ Database handler for PufferBlow's API """
@@ -21,9 +22,10 @@ class DatabaseHandler (object):
     def sign_up(self, user_data: User) -> None:
         """ Signs up a new user and returns a auth token """
         database_connection = self.database_connection_pool.getconn()
+
         try:
             with database_connection.cursor() as cursor:
-                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
                 cursor.execute(
                     add_new_user,
@@ -52,7 +54,7 @@ class DatabaseHandler (object):
 
         try:
             with database_connection.cursor() as cursor:
-                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at FROM users WHERE user_id = %s"
+                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin FROM users WHERE user_id = %s"
 
                 cursor.execute(
                     sql,
@@ -95,6 +97,7 @@ class DatabaseHandler (object):
     def save_salt(self, salt: Salt) -> None:
         """ Stores the salt data in the salt table """
         database_connection = self.database_connection_pool.getconn()
+
         try:
             with database_connection.cursor() as cursor:
                 sql = "INSERT INTO salts (salt_value, hashed_data, user_id, associated_to, created_at) VALUES (%s, %s, %s, %s, %s)"
@@ -104,17 +107,18 @@ class DatabaseHandler (object):
                     salt.to_tuple()
                 )
                 database_connection.commit()
-
-                logger.info(
-                    constants.NEW_HASH_SALT_SAVED(
-                        salt=salt
-                    )
-                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
+        
+        logger.info(
+            constants.NEW_HASH_SALT_SAVED(
+                salt=salt
+            )
+        )
+
 
     def save_auth_token(
         self,
@@ -139,17 +143,18 @@ class DatabaseHandler (object):
                     ),
                 )
                 database_connection.commit()
-
-                logger.info(
-                    constants.NEW_AUTH_TOKEN_SAVED(
-                        auth_token=auth_token
-                    )
-                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
+        
+        logger.info(
+            constants.NEW_AUTH_TOKEN_SAVED(
+                auth_token=auth_token
+            )
+        )
+        
 
     def update_auth_token(self, user_id: str, new_auth_token: str, new_auth_token_expire_time: str) -> None:
         """
@@ -161,8 +166,7 @@ class DatabaseHandler (object):
             new_auth_token_expire_time (date): The new expire time for the generated `auth_token`
         """
         database_connection = self.database_connection_pool.getconn()
-
-        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
         try:
             with database_connection.cursor() as cursor:
@@ -190,20 +194,19 @@ class DatabaseHandler (object):
                     )
                 )
                 database_connection.commit()
-
-                logger.info(
-                    constants.RESET_USER_AUTH_TOKEN(
-                        user_id=user_id,
-                        new_hashed_auth_token=new_auth_token
-                    )
-                )
-
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
 
+        logger.info(
+            constants.RESET_USER_AUTH_TOKEN(
+                user_id=user_id,
+                new_hashed_auth_token=new_auth_token
+            )
+        )
+        
     def get_users_id(self) -> list:
         """
         Returns a list of all the used users id
@@ -224,18 +227,18 @@ class DatabaseHandler (object):
                     users_id = []
                 else:
                     users_id = [user_id[0] for user_id in users_id]
-                
-                logger.info(
-                    constants.FETCH_USERS_ID(
-                        users_id=users_id
-                    )
-                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
 
+        logger.info(
+            constants.FETCH_USERS_ID(
+                users_id=users_id
+            )
+        )
+        
         return users_id
     
     def get_usernames(self) -> list[str]:
@@ -267,18 +270,18 @@ class DatabaseHandler (object):
                     )
 
                     usernames.append(username)
-    
-                logger.info(
-                    constants.FETCH_USERNAMES(
-                        usernames=usernames
-                    )
-                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection, 
                 close=False
             )
         
+        logger.info(
+            constants.FETCH_USERNAMES(
+                usernames=usernames
+            )
+        )
+
         return usernames
 
     def get_auth_tokens_updated_at(self, user_id: str) -> str:
@@ -319,8 +322,7 @@ class DatabaseHandler (object):
             new_username (str): The new username
         """
         database_connection = self.database_connection_pool.getconn()
-
-        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
         try:
             with database_connection.cursor() as cursor:
@@ -349,8 +351,7 @@ class DatabaseHandler (object):
             last_seen (str): Last seen time in GMT (in case the status="offline")
         """
         database_connection = self.database_connection_pool.getconn()
-        
-        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
         try:
             with database_connection.cursor() as cursor:
@@ -358,8 +359,7 @@ class DatabaseHandler (object):
                 changes = None
 
                 if status == "offline":
-                    gmt = pytz.timezone("GMT")
-                    last_seen = datetime.datetime.now(gmt).strftime("%Y-%m-%d %H:%M:%S")
+                    last_seen = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
                     sql = "UPDATE users SET status = %s, last_seen = %s, updated_at = %s WHERE user_id = %s"
                     changes = (status, last_seen, updated_at, user_id)
@@ -386,8 +386,7 @@ class DatabaseHandler (object):
             hashed_new_password (srt): The hash of the new password to change the old one
         """
         database_connection = self.database_connection_pool.getconn()
-        
-        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
         try:
             with database_connection.cursor() as cursor:
@@ -411,8 +410,8 @@ class DatabaseHandler (object):
     def update_encryption_key(self, key: EncryptionKey) -> None:
         """ Updates the given encryption key """
         database_connection = self.database_connection_pool.getconn()
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
-        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
         try:
             with database_connection.cursor() as cursor:
                 sql = "UPDATE keys SET key_value = %s, updated_at = %s WHERE user_id = %s AND associated_to = %s"
@@ -452,6 +451,7 @@ class DatabaseHandler (object):
                 database_connection,
                 close=False
             )
+        
         logger.info(
             constants.DERIVED_KEY_DELETED(
                 key=key
@@ -471,18 +471,18 @@ class DatabaseHandler (object):
                     key.to_tuple()
                 )
                 database_connection.commit()
-
-                logger.info(
-                    constants.NEW_DERIVED_KEY_SAVED(
-                        key=key
-                    )
-                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
-    
+
+        logger.info(
+            constants.NEW_DERIVED_KEY_SAVED(
+                key=key
+            )
+        )
+        
     def get_decryption_key(self, associated_to: str, user_id: str| None=None, message_id: str | None=None) -> bytes:
         """ Returns the decryption key from the database """
         database_connection = self.database_connection_pool.getconn()
@@ -531,20 +531,20 @@ class DatabaseHandler (object):
                 )
                 salt = cursor.fetchone()[0]
                 salt = base64.b64decode(salt)
-
-                logger.info(
-                    constants.REQUEST_SALT_VALUE(
-                        user_id=user_id,
-                        salt_value=salt,
-                        associated_to=associated_to
-                    )
-                )
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
         
+        logger.info(
+            constants.REQUEST_SALT_VALUE(
+                user_id=user_id,
+                salt_value=salt,
+                associated_to=associated_to
+            )
+        )
+
         return salt
 
     def update_salt(self, user_id: str, associated_to: str, new_salt_value: str, new_hashed_data: str) -> None:
@@ -557,7 +557,7 @@ class DatabaseHandler (object):
             new_salt_value (str): The new salt value
         """
         database_connection = self.database_connection_pool.getconn()
-        updated_at = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
         
         try:
             with database_connection.cursor() as cursor:
@@ -619,9 +619,8 @@ class DatabaseHandler (object):
             with database_connection.cursor() as cursor:
                 sql = "SELECT auth_token_expire_time FROM auth_tokens WHERE user_id = '%s' AND auth_token = '%s'" % (auth_token, user_id)
                 cursor.execute(sql)
-
+                
                 expire_time = cursor.fetchone()[0]
-        
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
@@ -657,18 +656,90 @@ class DatabaseHandler (object):
 
                 if len(user_data) != 1:
                     is_valid = False
-                
-                logger.info(
-                    constants.VALIDATE_AUTH_TOKEN(
-                        hashed_auth_token=hashed_auth_token,
-                        is_valid=is_valid
-                    )
-                )
-                
         finally:
             self.database_connection_pool.putconn(
                 database_connection,
                 close=False
             )
         
+        logger.info(
+            constants.VALIDATE_AUTH_TOKEN(
+                hashed_auth_token=hashed_auth_token,
+                is_valid=is_valid
+                )
+            )
+        
         return is_valid
+
+    def fetch_channels(self, user_id: str) -> list:
+        """ Returns a list of all the available channels """
+        database_connection = self.database_connection_pool.getconn()
+        channels_data = None
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = """
+                    SELECT channel_id, channel_name, messages_ids, is_private, allowed_users, created_at
+                    FROM channels
+                    WHERE NOT is_private OR (is_private AND %s = ANY(allowed_users));
+                """
+                
+                cursor.execute(
+                    sql,
+                    (user_id, )
+                )
+                
+                channels_data = cursor.fetchall()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+        
+        return channels_data
+
+    def get_channels_names(self) -> list[str]:
+        """ Returns a list of channel_name """
+        database_connection = self.database_connection_pool.getconn()
+        channels_names = None
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "SELECT channel_name FROM channels"
+
+                cursor.execute(sql)
+                channels_names = [channel_id[0] for channel_id in cursor.fetchall()]
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+        
+        return channels_names
+
+    def create_new_channel(self, user_id: str, channel: Channel) -> None:
+        """ Registers a new channel into the channels table """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "INSERT INTO channels (channel_id, channel_name, messages_ids, is_private, allowed_users, created_at) VALUES (%s, %s, %s, %s, %s, %s)"
+
+                cursor.execute(
+                    sql,
+                    channel.to_tuple()
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+
+        logger.info(
+            constants.NEW_CHANNEL_CREATED(
+                user_id=user_id,
+                channel_id=channel.channel_id,
+                channel_name=channel.channel_name
+            )
+        )
