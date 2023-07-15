@@ -167,13 +167,6 @@ async def users_profile_route(
         hashed_auth_token=hashed_auth_token
     )
 
-    logger.info(
-        constants.REQUEST_FOR_USER_PROFILE(
-            user_data=user_data,
-            viewer_user_id=viewer_user_id
-        )
-    )
-
     return {
         "status_code": 200,
         "user_data": user_data
