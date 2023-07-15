@@ -155,6 +155,13 @@ class UserManager (object):
         for data in element_to_pop:
             user_data.pop(data)
         
+        logger.info(
+        constants.REQUEST_FOR_USER_PROFILE(
+            user_data=user_data,
+            viewer_user_id=user_id
+            )
+        )
+        
         return user_data
     
     def check_user(self, user_id: str, auth_token: str | None=None) -> bool:
