@@ -15,6 +15,7 @@ class User:
     auth_token_expire_time   :       str                    =       ""
     updated_at               :       str                    =       ""
     is_admin                 :       bool                   =       False
+    is_owner                 :       bool                   =       False
 
     def to_json(self) -> dict:
         """ Returns the user data as json """
@@ -30,7 +31,8 @@ class User:
             "auth_token_expire_time"    :       self.auth_token_expire_time,
             "created_at"                :       self.created_at,
             "updated_at"                :       self.updated_at,
-            "is_admin"                  :       self.is_admin
+            "is_admin"                  :       self.is_admin,
+            "is_owner"                  :       self.is_owner
         }
 
         return USER_DATA
@@ -49,7 +51,8 @@ class User:
             self.auth_token_expire_time,
             self.created_at,
             self.updated_at,
-            self.is_admin
+            self.is_admin,
+            self.is_owner
         )
 
         return USER_DATA

@@ -125,6 +125,9 @@ class UserManager (object):
         created_at  =   user_data[9]
         updated_at  =   user_data[10]
 
+        is_admin    =   user_data[11]
+        is_owner    =   user_data[12]
+
         conversations   =   user_data[5]
         contacts        =   user_data[6]
 
@@ -139,14 +142,16 @@ class UserManager (object):
         user.status             =       status
         user.last_seen          =       last_seen
         user.created_at         =       created_at
-
+        user.is_admin           =       is_admin
+        user.is_owner           =       is_owner
+        
         # Check if the user owns the account
         if hashed_auth_token == hashed_user_auth_token:
             user.auth_token_expire_time     =       auth_token_expire_time
             user.conversations              =       conversations
             user.contacts                   =       contacts
             user.updated_at                 =       updated_at
-            
+        
         user_data = user.to_json()
 
         # Cleaning up the dict
@@ -198,7 +203,7 @@ class UserManager (object):
 
         return True
     
-    def check_is_user_admin(self, user_id: str) -> bool:
+    def is_admin(self, user_id: str) -> bool:
         """
         Checks if the user is the admin of the server or not
         
