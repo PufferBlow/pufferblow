@@ -68,6 +68,63 @@ class ChannelsManager (object):
 
         return channel
     
+    def delete_channel(self, channel_id: str) -> None:
+        """ Deletes a channel based off it `channel_id` """
+        self.database_handler.delete_channel(
+            channel_id=channel_id
+        )
+    
+    def check_channel(self, user_id: str, channel_id: str) -> bool:
+        """ Checks the existsing of a chennal based off it's `channel_id` """
+        channel_data = self.database_handler.get_channel_data(
+            user_id=user_id,
+            channel_id=channel_id
+        )
+
+        if len(channel_data) == 0:
+            return False
+    
+        return True
+    
+    def is_private(self, user_id: str,channel_id: str) -> bool:
+        """ Checks if a channnel is private or public """
+        channel_data = self.database_handler.get_channel_data(
+            user_id=user_id,
+            channel_id=channel_id
+        )
+        
+        return channel_data[3] # `is_private` column value
+
+    def add_user_to_channel(self, user_id: str, to_add_user_id: str, channel_id: str) -> None:
+        """ Adds a user to a private channel """
+        self.database_handler.add_user_to_channel(
+            channel_id=channel_id,
+            to_add_user_id=to_add_user_id
+        )
+
+        logger.info(
+            constants.NEW_USER_ADDED_TO_PRIVATE_CHANNEL(
+                user_id=user_id,
+                to_add_user_id=to_add_user_id,
+                channel_id=channel_id
+            )
+        )
+
+    def remove_user_from_channel(self, user_id: str, to_remove_user_id: str, channel_id: str) -> None:
+        """ Removes a user from a private channel """
+        self.database_handler.remove_user_from_channel(
+            channel_id=channel_id,
+            to_remove_user_id=to_remove_user_id
+        )
+
+        logger.info(
+            constants.USER_REMOVED_FROM_A_PRIVATE_CHANNEL(
+                user_id=user_id,
+                channel_id=channel_id,
+                to_remove_user_id=to_remove_user_id
+            )
+        )
+    
     def _generate_channel_id(self, channel_name: str) -> str:
         """ Generates a unique id for a channel based on this channel's name """
         hashed_channel_name = hashlib.md5(channel_name.encode()).hexdigest()

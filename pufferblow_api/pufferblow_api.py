@@ -491,7 +491,7 @@ def create_new_channel_route(
         is_private (bool, optional): Specifies whether the channel should be private or not.
             Defaults to False.
     """
-        # Check auth_token foramt and validity
+    # Check auth_token foramt and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -511,7 +511,7 @@ def create_new_channel_route(
         )
 
     # Check if the user is the server admin
-    if not users_manager.check_is_user_admin(
+    if not users_manager.is_admin(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
@@ -538,4 +538,253 @@ def create_new_channel_route(
         "status_code": 200,
         "message": "Channel created successfully",
         "channel_data": channel_data.to_json()
+    }
+
+@api.delete("/api/v1/channels/delete")
+def delete_channel_route(
+    auth_token: str,
+    channel_id: str
+):
+    """ Deletes a channel based off it's channel_id """
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
+
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if the user exists or not
+    if not users_manager.check_user(
+        user_id=user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+
+    # Check if the user is the server admin
+    if not users_manager.is_admin(
+        user_id=user_id
+    ):
+        raise exceptions.HTTPException(
+            status_code=403,
+            detail="Access forbidden. Only admins can create channels and manage them."
+        )
+    
+    # Check if the channel exists
+    if not channels_manager.check_channel(
+        user_id=user_id,
+        channel_id=channel_id
+    ): 
+        logger.info(
+            constants.CHANNEL_ID_NOT_FOUND(
+                viewer_user_id=user_id,
+                channel_id=channel_id
+            )
+        )
+
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
+        )
+    
+    channels_manager.delete_channel(
+        channel_id=channel_id
+    )
+
+    logger.info(
+        constants.CHANNEL_DELETED(
+            user_id=user_id,
+            channel_id=channel_id
+        )
+    )
+
+    return {
+        "status_code": 200,
+        "message": f"Channel: '{channel_id}' deleted successfully"
+    }
+
+@api.put("/api/v1/channels/addUser", status_code=200)
+def add_user_to_private_channel_route(
+    auth_token: str,
+    channel_id: str,
+    to_add_user_id: str
+):
+    """ Add a user to a private channel """
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
+
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if the user exists or not
+    if not users_manager.check_user(
+        user_id=user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+
+    # Check if the targeted user exists or not
+    if not users_manager.check_user(
+        user_id=to_add_user_id
+    ):
+        raise exceptions.HTTPException(
+            detail=f"To add User ID: '{to_add_user_id}' is unvalid/not found. Please enter a valid 'user_id' and try again.",
+            status_code=404
+        )
+    
+    # Check if the user is the server admin
+    if not users_manager.is_admin(
+        user_id=user_id
+    ):
+        raise exceptions.HTTPException(
+            status_code=403,
+            detail="Access forbidden. Only admins can create channels and manage them."
+        )
+    
+    # Check if the channel exists
+    if not channels_manager.check_channel(
+        user_id=user_id,
+        channel_id=channel_id
+    ): 
+        logger.info(
+            constants.CHANNEL_ID_NOT_FOUND(
+                viewer_user_id=user_id,
+                channel_id=channel_id
+            )
+        )
+
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
+        )
+
+    # Check if the channel is private
+    if not channels_manager.is_private(
+        user_id=user_id,
+        channel_id=channel_id
+    ):
+        
+        logger.info(
+            constants.CHANNEL_IS_NOT_PRIVATE(
+                user_id=user_id,
+                to_add_user_id=to_add_user_id,
+                channel_id=channel_id
+            )
+        )
+
+        raise exceptions.HTTPException(
+            detail=f"Channel with Channel ID: '{channel_id}' is not private. Only private channels are allowed.",
+            status_code=200
+        )
+    
+    channels_manager.add_user_to_channel(
+        user_id=user_id,
+        to_add_user_id=to_add_user_id,
+        channel_id=channel_id
+    )
+
+    return {
+        "status_code": 200,
+        "message": f"User ID: '{to_add_user_id}' added to Channel ID: '{channel_id}'"
+    }
+
+@api.delete("/api/v1/channels/removeUser", status_code=200)
+def remove_user_from_channel_route(
+    auth_token: str,
+    channel_id: str,
+    to_remove_user_id: str
+):
+    """ Removes a user from a private channel """
+    # Check auth_token foramt and validity
+    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        raise exceptions.HTTPException(
+            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            status_code=400
+        )
+
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if the user exists or not
+    if not users_manager.check_user(
+        user_id=user_id,
+        auth_token=auth_token
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        )
+
+    # Check if the targeted user exists or not
+    if not users_manager.check_user(
+        user_id=to_remove_user_id
+    ):
+        raise exceptions.HTTPException(
+            detail=f"To remove User ID: '{to_remove_user_id}' is unvalid/not found. Please enter a valid 'user_id' and try again.",
+            status_code=404
+        )
+    
+    # Check if the user is the server admin
+    if not users_manager.is_admin(
+        user_id=user_id
+    ):
+        raise exceptions.HTTPException(
+            status_code=403,
+            detail="Access forbidden. Only admins can create channels and manage them."
+        )
+    
+    # Check if the channel exists
+    if not channels_manager.check_channel(
+        user_id=user_id,
+        channel_id=channel_id
+    ): 
+        logger.info(
+            constants.CHANNEL_ID_NOT_FOUND(
+                viewer_user_id=user_id,
+                channel_id=channel_id
+            )
+        )
+
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
+        )
+
+    # Check if the channel is private
+    if not channels_manager.is_private(
+        user_id=user_id,
+        channel_id=channel_id
+    ):
+        
+        logger.info(
+            constants.CHANNEL_IS_NOT_PRIVATE(
+                user_id=user_id,
+                to_add_user_id=to_remove_user_id,
+                channel_id=channel_id
+            )
+        )
+
+        raise exceptions.HTTPException(
+            detail=f"Channel with Channel ID: '{channel_id}' is not private. Only private channels are allowed.",
+            status_code=200
+        )
+    
+    channels_manager.remove_user_from_channel(
+        user_id=user_id,
+        channel_id=channel_id,
+        to_remove_user_id=to_remove_user_id
+    )
+
+    return {
+        "status_code": 200,
+        "message": f"User ID: '{to_remove_user_id}' was successfully removed from Channel ID: '{channel_id}'"
     }

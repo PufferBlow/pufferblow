@@ -25,7 +25,7 @@ class DatabaseHandler (object):
 
         try:
             with database_connection.cursor() as cursor:
-                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin, is_owner) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
                 cursor.execute(
                     add_new_user,
@@ -54,7 +54,7 @@ class DatabaseHandler (object):
 
         try:
             with database_connection.cursor() as cursor:
-                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin FROM users WHERE user_id = %s"
+                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin, is_owner FROM users WHERE user_id = %s"
 
                 cursor.execute(
                     sql,
@@ -118,7 +118,6 @@ class DatabaseHandler (object):
                 salt=salt
             )
         )
-
 
     def save_auth_token(
         self,
@@ -743,3 +742,89 @@ class DatabaseHandler (object):
                 channel_name=channel.channel_name
             )
         )
+    
+    def get_channel_data(self, user_id:str, channel_id: str) -> None:
+        """ Returns the data of a channel based off it\s channel_id """
+        database_connection = self.database_connection_pool.getconn()
+        channel_data = None
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "SELECT channel_id, channel_name, messages_ids, is_private, allowed_users, created_at FROM channels WHERE channel_id = %s"
+
+                cursor.execute(
+                    sql,
+                    (channel_id,)
+                )
+                channel_data = cursor.fetchone()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+        
+        logger.info(
+            constants.REQUESTED_CHANNEL_DATA(
+                viewer_user_id=user_id,
+                channel_id=channel_id
+            )
+        )
+
+        return channel_data
+    
+    def delete_channel(self, channel_id: str) -> None:
+        """ Deletes a channel from the channels table based off it's `channel_id` """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "DELETE FROM channels WHERE channel_id = %s"
+
+                cursor.execute(
+                    sql,
+                    (channel_id, )
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+    
+    def add_user_to_channel(self, to_add_user_id: str, channel_id: str) -> None:
+        """ Addes a user to a private channel """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "UPDATE channels SET allowed_users = array_append(allowed_users, %s) WHERE channel_id = %s"
+
+                cursor.execute(
+                    sql,
+                    (to_add_user_id, channel_id)
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
+
+    def remove_user_from_channel(self, to_remove_user_id: str, channel_id: str) -> None:
+        """ Removes a user from a private channel """
+        database_connection = self.database_connection_pool.getconn()
+
+        try:
+            with database_connection.cursor() as cursor:
+                sql = "UPDATE channels SET allowed_users = array_remove(allowed_users, %s) WHERE channel_id = %s"
+
+                cursor.execute(
+                    sql,
+                    (to_remove_user_id, channel_id)
+                )
+                database_connection.commit()
+        finally:
+            self.database_connection_pool.putconn(
+                database_connection,
+                close=False
+            )
