@@ -93,3 +93,9 @@ RESET_USER_AUTH_TOKEN_FAILD = lambda user_id: f"Faild to reset auth_token for Us
 AUTH_TOKEN_SUSPENSION_TIME = lambda user_id: f"Faild to reset authentication token for User ID: {user_id}. Suspension time has not elapsed"
 
 NEW_CHANNEL_CREATED = lambda user_id, channel_id, channel_name :f"New channel created by User ID: '{user_id}', Channel ID: '{channel_id}', Channel Name: '{channel_name}'"
+CHANNEL_DELETED = lambda user_id, channel_id: f"Channel ID: '{channel_id}' deleted by Admin with User ID: '{user_id}'"
+REQUESTED_CHANNEL_DATA = lambda channel_id, viewer_user_id: f"Requested data about Channel ID: '{channel_id}' by User ID: '{viewer_user_id}'."
+CHANNEL_ID_NOT_FOUND = lambda channel_id, viewer_user_id: f"The provided channel ID: {channel_id} by User ID: '{viewer_user_id}' was not found."
+CHANNEL_IS_NOT_PRIVATE = lambda user_id, channel_id, to_add_user_id: f"Faild to add User ID: '{to_add_user_id}' to Channel ID: '{channel_id}' by Admin User ID: '{user_id}'. Channel is not private."
+NEW_USER_ADDED_TO_PRIVATE_CHANNEL = lambda user_id, channel_id, to_add_user_id: f"New User ID: '{to_add_user_id}' added to Channel ID: '{channel_id}' by Admin User ID: '{user_id}'"
+USER_REMOVED_FROM_A_PRIVATE_CHANNEL = lambda user_id, channel_id, to_remove_user_id: f"User ID: '{to_remove_user_id}' was removed from Channel ID: '{channel_id}' by Admin User ID: '{user_id}'"
