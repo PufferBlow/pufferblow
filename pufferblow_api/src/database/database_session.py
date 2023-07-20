@@ -12,15 +12,15 @@ class DatabaseSession (object):
     def database_connection_pool(self) -> psycopg2.pool.ThreadedConnectionPool:
         """ Returns the threads database connection pool """
         KEEPALIVE_KWAGS = {
-            "keepalives": 7,
+            "keepalives":11,
             "keepalives_idle": 30,
-            "keepalives_interval": 7,
-            "keepalives_count": 7,
+            "keepalives_interval": 11,
+            "keepalives_count": 11,
         }
 
         database_connection = psycopg2.pool.ThreadedConnectionPool(
             minconn=1,
-            maxconn=20,
+            maxconn=30,
             database=self.pufferblow_api_config.DATABASE_NAME,
             host=self.pufferblow_api_config.DATABASE_HOST,
             user=self.pufferblow_api_config.USERNAME,
