@@ -203,15 +203,33 @@ class UserManager (object):
 
         return True
     
-    def is_admin(self, user_id: str) -> bool:
+    def is_server_owner(self, user_id: str) -> bool:
         """
-        Checks if the user is the admin of the server or not
+        Checks if the user is the owner of the server or not
         
         Parameters:
             user_id (str): The user's id
         
         Returns:
-            bool: True if the user is the admin, otherwise False
+            bool: True if the user is the server owner, otherwise False
+        """
+        user_data = self.database_handler.fetch_user_data(
+            user_id=user_id
+        )
+
+        is_server_owner = user_data[12]
+
+        return is_server_owner
+    
+    def is_admin(self, user_id: str) -> bool:
+        """
+        Checks if the user is an admin of the server or not
+        
+        Parameters:
+            user_id (str): The user's id
+        
+        Returns:
+            bool: True if the user is an admin, otherwise False
         """
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id
