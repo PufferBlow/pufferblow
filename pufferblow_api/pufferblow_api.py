@@ -28,7 +28,7 @@ pufferblow_api_config = PufferBlowAPIconfig()
 hasher = Hasher()
 
 # Init Database Connection
-DATABASE_SESSION = DatabaseSession(
+database_session = DatabaseSession(
     supabase_url            =   pufferblow_api_config.SUPABASE_URL,
     supabase_key            =   pufferblow_api_config.SUPABASE_KEY,
     pufferblow_api_config   =   pufferblow_api_config
@@ -36,7 +36,7 @@ DATABASE_SESSION = DatabaseSession(
 
 # Init Database handler
 database_handler = DatabaseHandler(
-    database_connection_pool    =       DATABASE_SESSION.database_connection_pool(),
+    database_connection_pool    =       database_session.database_connection_pool(),
     hasher                      =       hasher
 )
 
