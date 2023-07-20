@@ -642,13 +642,33 @@ def add_user_to_private_channel_route(
             status_code=404
         )
     
-    # Check if the user is the server admin
+    # Check if the targeted user is also an admin
+    if users_manager.is_admin(
+        user_id=to_add_user_id
+    ):
+        return {
+            "status_code": 200,
+            "message": "Skipping the operation, the targeted user is an admin."
+        }
+
+    # Check if the targeted user is the server owner
+    if users_manager.is_server_owner(
+        user_id=to_add_user_id
+    ):
+        return {
+            "status_code": 200,
+            "message": "Skipping the operation, the targeted user is the server owner."
+        }
+
+    # Check if the user is an admin or the server owner
     if not users_manager.is_admin(
+        user_id=user_id
+    ) and not users_manager.is_server_owner(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
             status_code=403,
-            detail="Access forbidden. Only admins can create channels and manage them."
+            detail="Access forbidden. Only admins and the server owner can create channels and manage them."
         )
     
     # Check if the channel exists
@@ -733,13 +753,51 @@ def remove_user_from_channel_route(
             status_code=404
         )
     
-    # Check if the user is the server admin
+    # Check if the targeted user is an admin
+    if users_manager.is_admin(
+        user_id=to_remove_user_id
+    ):
+        
+        logger.warning(
+            constants.FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_AN_ADMIN(
+                user_id=user_id,
+                channel_id=channel_id,
+                to_remove_user_id=to_remove_user_id
+            )
+        )
+
+        raise exceptions.HTTPException(
+            detail=f"Error removing Admin User ID: '{to_remove_user_id}'. Only the server owner can remove admins from channels",
+            status_code=403
+        )
+
+    # Check if the targeted user is the server owner
+    if users_manager.is_server_owner(
+        user_id=to_remove_user_id
+    ):
+        
+        logger.warning(
+            constants.FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_SERVER_OWNER(
+                user_id=user_id,
+                channel_id=channel_id,
+                to_remove_user_id=to_remove_user_id
+            )
+        )
+
+        raise exceptions.HTTPException(
+            detail=f"Error removing User ID: '{to_remove_user_id}', this user is the server owner.",
+            status_code=403
+        )
+
+    # Check if the user who requested this route is an admin
     if not users_manager.is_admin(
+        user_id=user_id
+    ) and not users_manager.is_server_owner(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
             status_code=403,
-            detail="Access forbidden. Only admins can create channels and manage them."
+            detail="Access forbidden. Only admins and the server owner can create channels and manage them."
         )
     
     # Check if the channel exists
