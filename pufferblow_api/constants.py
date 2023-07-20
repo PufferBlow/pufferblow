@@ -99,3 +99,5 @@ CHANNEL_ID_NOT_FOUND = lambda channel_id, viewer_user_id: f"The provided channel
 CHANNEL_IS_NOT_PRIVATE = lambda user_id, channel_id, to_add_user_id: f"Faild to add User ID: '{to_add_user_id}' to Channel ID: '{channel_id}' by Admin User ID: '{user_id}'. Channel is not private."
 NEW_USER_ADDED_TO_PRIVATE_CHANNEL = lambda user_id, channel_id, to_add_user_id: f"New User ID: '{to_add_user_id}' added to Channel ID: '{channel_id}' by Admin User ID: '{user_id}'"
 USER_REMOVED_FROM_A_PRIVATE_CHANNEL = lambda user_id, channel_id, to_remove_user_id: f"User ID: '{to_remove_user_id}' was removed from Channel ID: '{channel_id}' by Admin User ID: '{user_id}'"
+FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_AN_ADMIN = lambda user_id, channel_id, to_remove_user_id: f"Admin User ID: '{user_id}' tried to remove Admin User ID: '{to_remove_user_id}' from Channel ID: '{channel_id}'"
+FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_SERVER_OWNER = lambda user_id, channel_id, to_remove_user_id: F"User ID: '{user_id}' tried to remove the server Admin ID: '{to_remove_user_id}' from Channel ID: '{channel_id}'"
