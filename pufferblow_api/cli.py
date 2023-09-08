@@ -33,7 +33,7 @@ def version():
     print(f"[bold cyan] Version [italic white]{constants.VERSION}")
 
 @cli.command()
-def setup(): 
+def setup():
     """ Setup PufferBlow's API """
     pass
 
@@ -43,7 +43,7 @@ def serve():
     if pufferblow_api_config.SUPABASE_URL == "<your supabase url>" and pufferblow_api_config.SUPABASE_KEY == "<your supabase key>":
         print(f"[bold red] [  ?  ] [bold white] Config error: please edit the [italic yellow]`supabase_url`[/][bold white] and [italic yellow]`supabase_key`[/][bold white] feilds in [bold cyan]{constants.PUFFERBLOW_CONFIG_PATH}[white]")
         sys.exit(1)
-    
+
     INTERCEPT_HANDLER = InterceptHandler()
     # logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=LOG_LEVEL)
     # logging.root.handlers = [INTERCEPT_HANDLER]
@@ -66,7 +66,7 @@ def serve():
 
     logger.configure(handlers=[{"sink": sys.stdout, "serialize": JSON_LOGS}])
     logger.add(pufferblow_api_config.LOGS_PATH, rotation="10 MB")
-    
+
     OPTIONS = {
         "bind": f"{pufferblow_api_config.API_HOST}:{pufferblow_api_config.API_PORT}",
         "workers": WORKERS(pufferblow_api_config.WORKERS),
@@ -79,7 +79,5 @@ def serve():
 
     StandaloneApplication(api, OPTIONS).run()
 
-main = cli()
+run = cli
 
-if __name__ == "__main__":
-    main()

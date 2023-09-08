@@ -120,11 +120,11 @@ async def users_profile_route(
 ):
     """
     Users profile management route
-    
+
     Parameters:
         user_id (str): The user_id of the target user
         auth_token (str): The auth_token of the user who requested this user's profile
-    
+
     Returns:
         dict: The User class model to json
 
@@ -147,7 +147,7 @@ async def users_profile_route(
             status_code=404,
             detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
-    
+
     # Check if the targeted user exists or not
     if not users_manager.check_user(
         user_id=user_id
@@ -156,7 +156,7 @@ async def users_profile_route(
             status_code=404,
             detail=f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"
         )
-    
+
     hashed_auth_token = auth_token_manager._encrypt_auth_token(
         user_id=viewer_user_id,
         auth_token=auth_token
@@ -182,14 +182,14 @@ async def edit_users_profile_route(
 ):
     """ Edits a user's profile data such as: status,
     last_seen, username and password
-    
+
     Parameters:
         auth_token (str): The user's auth_token
         new_username (str, optional): The new username for the user
         status (str, optional): The new status for the user ["ONLINE", "OFFLINE"]
         new_password (str, optional): The new password for the user
-        old_password (str, optional): The old password of the user. This is in case the ```password``` was passed 
-    
+        old_password (str, optional): The old password of the user. This is in case the ```password``` was passed
+
     Returns:
         {
             "status_code": 201,
@@ -224,7 +224,7 @@ async def edit_users_profile_route(
                 detail=f"username already exists. Please change it and try again later",
                 status_code=409
             )
-        
+
         users_manager.update_username(
             user_id=user_id,
             new_username=new_username
@@ -266,13 +266,13 @@ async def edit_users_profile_route(
         if not users_manager.check_user_password(
             user_id=user_id,
             password=old_password
-        ): 
+        ):
             logger.info(
                 constants.UPDATE_USER_PASSWORD_FAILED(
                     user_id=user_id
                 )
             )
-            
+
             raise exceptions.HTTPException(
                 detail=f"Invalid password. Please try again later.",
                 status_code=401
@@ -293,7 +293,7 @@ async def reset_users_auth_token_route(
     auth_token: str,
     password: str
 ):
-    """ 
+    """
     Reset the user's auth_token in case they forgot it or
     their account is being compromised by someone else.
 
@@ -334,7 +334,7 @@ async def reset_users_auth_token_route(
             detail="Incorrect password. Please try again",
             status_code=404
         )
-    
+
     # Check if the user is suspended from reseting their auth_token
     updated_at = database_handler.get_auth_tokens_updated_at(
         user_id=user_id
@@ -343,13 +343,13 @@ async def reset_users_auth_token_route(
         if not is_able_to_update(
             updated_at=updated_at,
             suspend_time=2 # Two days
-        ):  
+        ):
             logger.info(
                 constants.AUTH_TOKEN_SUSPENSION_TIME(
                     user_id=user_id
                 )
             )
-            
+
             raise exceptions.HTTPException(
                 detail="Cannot reset authentication token. Suspension time has not elapsed.",
                 status_code=403
@@ -373,13 +373,13 @@ async def reset_users_auth_token_route(
         new_salt_value=salt.salt_value,
         new_hashed_data=hashed_auth_token
     )
-    
+
     database_handler.update_auth_token(
         user_id=user_id,
         new_auth_token=hashed_auth_token,
         new_auth_token_expire_time=new_auth_token_expire_time
     )
-    
+
     return {
         "status_code": 200,
         "message": "auth_token rested successfully",
@@ -393,7 +393,7 @@ def list_users_route(
 ):
     """
     Returns a list of all the users present in the server
-    
+
     Parameters:
         viewer_user_id (str): The `user_id` of the user who requested to view the users list
         auth_token (str): The viewer user's `auth_token`
@@ -426,7 +426,7 @@ def list_users_route(
         viewer_user_id=viewer_user_id,
         auth_token=hashed_auth_token
     )
-    
+
     return {
         "status_code": 200,
         "users": users
@@ -471,7 +471,7 @@ def list_channels_route(
 
     return {
         "status_code": 200,
-        "channels": channels_list 
+        "channels": channels_list
     }
 
 @api.put("/api/v1/channels/create", status_code=200)
@@ -483,7 +483,7 @@ def create_new_channel_route(
 ):
     """
     Create new channel for the server
-    
+
     Parameters:
         user_id (str): The ID of the user creating the channel route.
         auth_token (str): The authentication token for the user.
@@ -518,16 +518,16 @@ def create_new_channel_route(
             status_code=403,
             detail="Access forbidden. Only admins can create channels and manage them."
         )
-    
+
     # Check if the channel_name is not repeated
     channels_names = database_handler.get_channels_names()
-    
+
     if channel_name in channels_names:
         raise exceptions.HTTPException(
             status_code=409,
             detail="Channel name already exists, please change it and try again."
         )
-    
+
     channel_data = channels_manager.create_channel(
         user_id=user_id,
         channel_name=channel_name,
@@ -573,12 +573,12 @@ def delete_channel_route(
             status_code=403,
             detail="Access forbidden. Only admins can create channels and manage them."
         )
-    
+
     # Check if the channel exists
     if not channels_manager.check_channel(
         user_id=user_id,
         channel_id=channel_id
-    ): 
+    ):
         logger.info(
             constants.CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
@@ -590,7 +590,7 @@ def delete_channel_route(
             status_code=404,
             detail="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
         )
-    
+
     channels_manager.delete_channel(
         channel_id=channel_id
     )
@@ -641,7 +641,7 @@ def add_user_to_private_channel_route(
             detail=f"To add User ID: '{to_add_user_id}' is unvalid/not found. Please enter a valid 'user_id' and try again.",
             status_code=404
         )
-    
+
     # Check if the targeted user is also an admin
     if users_manager.is_admin(
         user_id=to_add_user_id
@@ -670,12 +670,12 @@ def add_user_to_private_channel_route(
             status_code=403,
             detail="Access forbidden. Only admins and the server owner can create channels and manage them."
         )
-    
+
     # Check if the channel exists
     if not channels_manager.check_channel(
         user_id=user_id,
         channel_id=channel_id
-    ): 
+    ):
         logger.info(
             constants.CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
@@ -693,7 +693,7 @@ def add_user_to_private_channel_route(
         user_id=user_id,
         channel_id=channel_id
     ):
-        
+
         logger.info(
             constants.CHANNEL_IS_NOT_PRIVATE(
                 user_id=user_id,
@@ -706,7 +706,7 @@ def add_user_to_private_channel_route(
             detail=f"Channel with Channel ID: '{channel_id}' is not private. Only private channels are allowed.",
             status_code=200
         )
-    
+
     channels_manager.add_user_to_channel(
         user_id=user_id,
         to_add_user_id=to_add_user_id,
@@ -752,12 +752,12 @@ def remove_user_from_channel_route(
             detail=f"To remove User ID: '{to_remove_user_id}' is unvalid/not found. Please enter a valid 'user_id' and try again.",
             status_code=404
         )
-    
+
     # Check if the targeted user is an admin
     if users_manager.is_admin(
         user_id=to_remove_user_id
     ):
-        
+
         logger.warning(
             constants.FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_AN_ADMIN(
                 user_id=user_id,
@@ -775,7 +775,7 @@ def remove_user_from_channel_route(
     if users_manager.is_server_owner(
         user_id=to_remove_user_id
     ):
-        
+
         logger.warning(
             constants.FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_SERVER_OWNER(
                 user_id=user_id,
@@ -799,12 +799,12 @@ def remove_user_from_channel_route(
             status_code=403,
             detail="Access forbidden. Only admins and the server owner can create channels and manage them."
         )
-    
+
     # Check if the channel exists
     if not channels_manager.check_channel(
         user_id=user_id,
         channel_id=channel_id
-    ): 
+    ):
         logger.info(
             constants.CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
@@ -822,7 +822,7 @@ def remove_user_from_channel_route(
         user_id=user_id,
         channel_id=channel_id
     ):
-        
+
         logger.info(
             constants.CHANNEL_IS_NOT_PRIVATE(
                 user_id=user_id,
@@ -835,7 +835,7 @@ def remove_user_from_channel_route(
             detail=f"Channel with Channel ID: '{channel_id}' is not private. Only private channels are allowed.",
             status_code=200
         )
-    
+
     channels_manager.remove_user_from_channel(
         user_id=user_id,
         channel_id=channel_id,
