@@ -24,7 +24,7 @@ pytest = "^7.4.2"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.0"
-gunicorn = "^20.1.0"
+gunicorn = "^21.2.0"
 
 [tool.poetry.plugins."console_scripts"]
 pufferblow_api = "pufferblow_api:__main__.run"
