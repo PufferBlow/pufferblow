@@ -27,7 +27,7 @@ loguru = "^0.7.0"
 gunicorn = "^21.2.0"
 
 [tool.poetry.plugins."console_scripts"]
-pufferblow_api = "pufferblow_api:__main__.run"
+pufferblow_api = "pufferblow_api:__main__.cli"
 
 [build-system]
 requires = ["poetry-core"]

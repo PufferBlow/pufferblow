@@ -1,4 +1,4 @@
-from pufferblow_api.cli import run
+from pufferblow_api.cli import cli
 
 if __name__ == "__main__":
-    run()
+    cli()
