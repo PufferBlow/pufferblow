@@ -17,13 +17,13 @@ pyyaml = "^6.0"
 supabase = "^1.1.1"
 pycryptodome = "^3.19.0"
 bcrypt = "^4.0.1"
-loguru = "^0.7.0"
+loguru = "^0.7.2"
 pytz = "^2023.3"
 psycopg2-binary = "^2.9.8"
 pytest = "^7.4.2"
 
 [tool.poetry.group.dev.dependencies]
-loguru = "^0.7.0"
+loguru = "^0.7.2"
 gunicorn = "^21.2.0"
 
 [tool.poetry.plugins."console_scripts"]
