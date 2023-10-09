@@ -745,13 +745,13 @@ test = ["pylint", "pytest", "pytest-black", "pytest-cov", "pytest-pylint"]
 
 [[package]]
 name = "supabase"
-version = "1.1.1"
+version = "1.2.0"
 description = "Supabase client for Python."
 optional = false
 python-versions = ">=3.8,<4.0"
 files = [
-    {file = "supabase-1.1.1-py3-none-any.whl", hash = "sha256:6a98021ad1ced3f9e287c01dcad04641d07697a78e3538a3a6352d8c67836325"},
-    {file = "supabase-1.1.1.tar.gz", hash = "sha256:06499b97c05fc2f2c42aab05e2ccd3f34aca2ee573ed82f1b750f59099d0a574"},
+    {file = "supabase-1.2.0-py3-none-any.whl", hash = "sha256:1549600a3965d64de97f2eb37e4e562b7d171383f439ceaab881c5cd6a79e9f7"},
+    {file = "supabase-1.2.0.tar.gz", hash = "sha256:2597ef8ec6af973b9c9e94849204f43f47bb5f46d8c65a0c7a6bdf95ad018704"},
 ]
 
 [package.dependencies]
@@ -932,4 +932,4 @@ dev = ["black (>=19.3b0)", "pytest (>=4.6.2)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "7ee007d21366bf3d59d9fa6ad981ab1caad02cddba4f01504a61dfa72f7dab1e"
+content-hash = "3fec1e6092c85b9161ecfc055992f1b2e10df08b95f2eb93460ba576a5d1ebd2"
