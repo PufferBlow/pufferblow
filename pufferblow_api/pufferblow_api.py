@@ -191,7 +191,8 @@ async def edit_users_profile_route(
     new_password: str = None,
     old_password: str = None
 ):
-    """ Edits a user's profile data such as: status,
+    """
+    Update a user's profile metadata such us status,
     last_seen, username and password
 
     Args:
@@ -204,9 +205,9 @@ async def edit_users_profile_route(
     Returns:
         200 OK: If all parameters are correct, and the to update data was updated successfully.
         400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        401 UNAUTHORIZED: If the `password` is unvalid.
         404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
         409 CONFLICT: If the `username` is not available.
-        401 UNAUTHORIZED: If the `password` is unvalid.
     """
     # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
@@ -529,7 +530,7 @@ def create_new_channel_route(
         200 OK: If all parameters are correct, then the channel gets created.
         400 BAD REQUEST: If the `auth_token` is improperly formatted.
         403 CAN'T AUTHORIZE IT: If the user is neither the server owner nor an admin.
-        404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
+        404 NOT FOUND: The `auth_token` is unvalid.
         409 CONFLICT: If the `channel_name` is not available.
     """
     # Check `auth_token` format and validity
