@@ -24,11 +24,14 @@ class UserManager (object):
     
     def sign_up(self, username: str, password: str) -> User:
         """ 
-        Signs up a new user
+        Sign up a new user
         
-        Parameters:
-            username (str): The user's username
-            password (str): The user's password
+        Args:
+            `username` (str): The user's `username`.
+            `password` (str): The user's `password`.
+        
+        Returns:
+            User: A `User` object.
         """
         new_user = User()
 
@@ -71,14 +74,15 @@ class UserManager (object):
 
     def list_users(self, viewer_user_id: str, auth_token: str) -> list:
         """
-        Returns a list of all the existing users in the server
+        Fetch a list of metadata about all the existing
+        users in the server
         
-        Parameters:
-            viewer_user_id (str): The id of the user who requested the users list
-            auth_token (str): The user's `auth_token`
+        Args:
+            `viewer_user_id` (str): The user's `user_id`.
+            `auth_token` (str): The user's `auth_token`.
         
         Returns:
-            List of users list containing some info about them
+            list: A list of users's metadata.
         """
         users = []
 
@@ -103,14 +107,14 @@ class UserManager (object):
 
     def user_profile(self, user_id: str, hashed_auth_token: str) -> dict:
         """
-        Returns the user's profile data
+        Fetch the user's profile metadata
         
         Paramters:
-            user_id (str): The user's `user_id`
-            hashed_auth_token (str): The hashed user's `auth_token`
+            `user_id` (str): The user's `user_id`.
+            `hashed_auth_token` (str): The hashed user's `auth_token`.
         
         Returns:
-            dict: The user's profile data in a dict format
+            dict: The user's profile metadata in a dict format.
         """
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id,
@@ -171,17 +175,14 @@ class UserManager (object):
     
     def check_user(self, user_id: str, auth_token: str | None=None) -> bool:
         """
-        Checks if the user exists or not
+        Check if the user exists or not
         
-        Parameters:
-            user_id (str): The user's `user_id`
-            auth_token (str | None): The user's `auth_token`,
-                in case it is None, then we are expecting to 
-                check only if the `user_id` exists without
-                the match of the raw `auth_token` with this user's `auth_token`
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `auth_token` (str, optional, default: None): The user's `auth_token`, in case it is None, then we are expecting to check only if the `user_id` exists without the check of the user's `auth_token`.
 
         Returns:
-            bool: True is the user exists, otherswise False
+            bool: True is the user exists, otherswise False.
         """
         users_id = self.database_handler.get_users_id()
 
@@ -205,10 +206,10 @@ class UserManager (object):
     
     def is_server_owner(self, user_id: str) -> bool:
         """
-        Checks if the user is the owner of the server or not
+        Check if the user is the owner of the server or not
         
-        Parameters:
-            user_id (str): The user's id
+        Args:
+            `user_id` (str): The user's `user_id`.
         
         Returns:
             bool: True if the user is the server owner, otherwise False
@@ -223,13 +224,13 @@ class UserManager (object):
     
     def is_admin(self, user_id: str) -> bool:
         """
-        Checks if the user is an admin of the server or not
+        Check if the user is an admin of the server or not
         
-        Parameters:
-            user_id (str): The user's id
+        Args:
+            `user_id` (str): The user's `user_id`.
         
         Returns:
-            bool: True if the user is an admin, otherwise False
+            bool: True if the user is an admin, otherwise False.
         """
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id
@@ -241,13 +242,13 @@ class UserManager (object):
     
     def check_username(self, username: str) -> bool:
         """
-        Checks if the `username` already exists or not
+        Check if the `username` already exists or not
         
-        Parameters:
-            username (str): To check username
+        Args:
+            `username` (str): A `username` to check its existens.
         
         Returns:
-            bool: True is the username exists, otherwise False
+            bool: True is the username exists, otherwise False.
         """
         usernames = self.database_handler.get_usernames()
 
@@ -258,15 +259,14 @@ class UserManager (object):
 
     def check_user_password(self, user_id: str, password: str) -> bool:
         """
-        Checks if the passed password matches the user's password
+        Check if the given `password` matches the user's saved hashed `password`
         
-        Parameters:
-            user_id (str): The user's id
-            password (str): The user's password
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `password` (str): The user's `password`.
         
         Returns:
-            bool: True if the passed password matches the user's password,
-            otherwise False it returned
+            bool: True if the given `password` matches the user's saved hashed `password`, otherwise False.
         """
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id
@@ -293,11 +293,14 @@ class UserManager (object):
     
     def update_username(self, user_id: str, new_username: str) -> None:
         """ 
-        Updates the `username`
+        Update a user's `username`
         
-        Parameters:
-            user_id (str): The user's `user_id`
-            new_username (str): The new username
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `new_username` (str): The new user's `username`.
+        
+        Returns:
+            `None`.
         """
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id,
@@ -347,10 +350,13 @@ class UserManager (object):
         )
     def update_user_status(self, user_id: str, status: str) -> None:
         """
-        Updates the user's status
+        Update the user's `status`
         
-        Parameters:
-            status (str): Status value. ["online", "offline"]
+        Args:
+            `status` (str): The new status value. ["online", "offline"]
+        
+        Returns:
+            `None`.
         """
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id
@@ -380,12 +386,15 @@ class UserManager (object):
 
     def update_user_password(self, user_id: str, new_password: str) -> None:
         """ 
-        Updates the user's password
+        Update a user's `password`
         
-        Parameters:
-            user_id (srt): The user's `user_id`
-            new_password (srt): The new password to change the old one
-            old_password (str): The old password
+        Args:
+            `user_id` (srt): The user's `user_id`.
+            `new_password` (srt): The new user's `password`.
+            `old_password` (str): The old user's `password`.
+        
+        Returns:
+            `None`.
         """
         salt = self.hasher.encrypt_with_bcrypt(
             data=new_password,
@@ -416,18 +425,16 @@ class UserManager (object):
 
     def _encrypt_data(self, user_id: str, data: str, associated_to: str, algo_type: str) -> str:
         """
-        Encrypts the given data
+        Encrypt the given `data`
         
-        Parameters:
-            user_id (str): The user's user_id
-            data (str): The data to encrypt
-            associated_to (str): What will derived key will be associated to
-                [ "username", "auth_token"]
-
-            algo_type (str): Type of algorithm to use to encrypt
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `data` (str): The `data` to encrypt.
+            `associated_to` (str): What will the derived `key` will be used to encrypt ("username", "auth_token").
+            `algo_type` (str): Type of algorithm to use to encrypt ("BlowFish", "Bcrypt").
         
         Returns:
-            str: Encrypted version of the given data
+            str: Encrypted version of the given `data`.
         """
         # For username, messages, contancts data
         if algo_type == "blowfish":
@@ -485,15 +492,15 @@ class UserManager (object):
     
     def _decrypt_data(self, user_id: str, data: str, associated_to: str) -> str:
         """
-        Decrypts the given data
+        Decrypt the given `data`
 
-        Parameters:
-            user_id (str): The user's user_id
-            data (str): The data to decrypt
-            associated_to (str): What does derived key associated to
-                 [ "username", "auth_token"]
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `data` (str): The `data` to decrypt.
+            `associated_to` (str): What was the encryption key used to encrypt ("username").
+        
         Returns:
-            str: The decrypted data
+            str: The decrypted version of the `data`.
         """
         decryption_key = self.database_handler.get_decryption_key(
             user_id=user_id,
@@ -518,7 +525,15 @@ class UserManager (object):
         return decrypted_data
 
     def _generate_user_id(self, username: str) -> str:
-        """ Generates a unique user id based of the username """
+        """
+        Generate a unique `user_id` based of the user's `username`
+        
+        Args:
+            `username` (str): The user's `username`.
+        
+        Returns:
+            str: The generated `user_id`.
+        """
         username = f"{username}{''.join([char for char in random.choices(string.ascii_letters)])}" # Adding random charachters to the username
 
         hashed_username_salt = hashlib.md5(username.encode()).hexdigest()
