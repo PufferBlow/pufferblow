@@ -10,21 +10,21 @@ from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.database.database_handler import DatabaseHandler
 
 class AuthTokenManager (object):
-    """ Auth token class to manage auth tokens and preform verious operations on them """
+    """ Auth token class to manage auth tokens """
     def __init__(self, database_handler: DatabaseHandler, hasher: Hasher) -> None:
         self.database_handler =     database_handler
         self.hasher           =     hasher
     
     def token_exists(self, user_id: str, hashed_auth_token: str):
         """
-        Checks if the authentication token exists.
+        Check if the `auth_token` exists.
 
-        Parameters:
-            user_id (str): The user's `user_id`
-            hashed_auth_token (str): The hashed user's `auth_token`
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `hashed_auth_token` (str): The hashed user's `auth_token`.
         
         Returns:
-        bool: True if the token exists, False otherwise.
+            bool: True if the `auth_token` exists, False otherwise.
         """
         return self.database_handler.check_auth_token(
             user_id=user_id,
@@ -32,13 +32,14 @@ class AuthTokenManager (object):
         )
 
     def check_auth_token_format(self, auth_token: str) -> bool:
-        """ Checks the auth_token format 
+        """
+        Check the `auth_token` format 
         
-        Parameters:
-            auth_token (str): The raw auth_token
+        Args:
+            `auth_token` (str): The raw auth_token.
         
         Returns:
-            bool: False if the format of the auth_token is bad otherwise True
+            bool: False if the format of the auth_token is bad otherwise True.
         """
         # NOTE: auth_token is formed from the user_id and the auth_token itself
         # example: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.uSrBsausJJJwYsvBHfi145RYSEorgQjIfuWtpZTjc"
@@ -57,11 +58,11 @@ class AuthTokenManager (object):
     
     def is_token_valid(self, user_id: str, auth_token: str) -> bool:
         """
-        Checks if the authentication token is valid, not expired.
+        Check if the `auth_token` is valid and not expired.
 
-        Parameters:
-            user_id (str): The user's id
-            auth_token (str): Encrypted version of the auth token
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `auth_token` (str): The encrypted version of the `auth_token`.
 
         Returns:
         bool: True if the token is valid, False otherwise.
@@ -94,10 +95,10 @@ class AuthTokenManager (object):
 
     def create_token(self) -> str:
         """
-        Generates a unique auth token for a user
+        Generate a unique `auth_token` for a user
         
         Returns:
-            str: The raw auth token
+            str: The raw auth token.
         """
         size = 41
         ascii_charachters = [char for char in string.ascii_lowercase + string.ascii_uppercase] 
@@ -122,11 +123,14 @@ class AuthTokenManager (object):
 
     def delete_token(self, user_id: str, auth_token: str) -> None:
         """
-        Deletes the authentication token.
+        Delete an `auth_token` from the database.
         
         Paramters:
-            user_id (str): The user's id
-            auth_token (str): The raw version of the auth_token to delete
+            `user_id` (str): The user's `user_id`.
+            `auth_token` (str): The raw version of the `auth_token` to delete.
+        
+        Returns:
+            `None`.
         """
         hashed_auth_token = self._encrypt_auth_token(
             user_id=user_id,
@@ -139,7 +143,7 @@ class AuthTokenManager (object):
         )
     
     def auth_token_expire_time(self):
-        """ Returns the expire time for auth token """
+        """ Returns the expire time for `auth_token` """
         expire_time = datetime.date.today()
 
         if expire_time.month != 12:
@@ -159,12 +163,12 @@ class AuthTokenManager (object):
         Returns the hashed version of the auth_token using the same salt that
         is soted in the database
         
-        Parameters:
-            user_id (str): The user's id
-            auth_token (str): The raw auth_token that is given to the user when signing up
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `auth_token` (str): The raw `auth_token` that is given to the user when signing up.
         
         Returns:
-            str: hashed version of the auth token
+            str: hashed version of the `auth_token``
         """
         salt = self.database_handler.get_salt(
             user_id=user_id,
