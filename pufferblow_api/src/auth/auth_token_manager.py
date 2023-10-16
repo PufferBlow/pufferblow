@@ -65,7 +65,7 @@ class AuthTokenManager (object):
             `auth_token` (str): The encrypted version of the `auth_token`.
 
         Returns:
-        bool: True if the token is valid, False otherwise.
+            bool: True if the token is valid, False otherwise.
         """
         result = None
 
