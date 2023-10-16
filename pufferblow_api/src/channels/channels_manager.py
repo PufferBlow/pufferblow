@@ -23,7 +23,7 @@ class ChannelsManager (object):
     def list_channels(self, user_id: str) -> list[dict]:
         """
         List the public channels (and private channels
-        in case the user is an admin or the server owner)
+        in case the user is the server owner or an admin)
         
         Args:
             `user_id` (str): The user's `user_id`.
@@ -67,7 +67,7 @@ class ChannelsManager (object):
             `is_private` (bool): If it set to True then the channel is going to be private (only viewable by the server owner, admins and the users who gets added/invited to it), otherwise it will be public.
         
         Returns:
-            `Channel`
+            `Channel`.
         """
         channel = Channel()
         
@@ -93,7 +93,7 @@ class ChannelsManager (object):
             `channel_id` (str): The channel's `channel_id`.
         
         Returns:
-            `None`
+            `None`.
         """
         self.database_handler.delete_channel(
             channel_id=channel_id
@@ -144,7 +144,7 @@ class ChannelsManager (object):
             `to_add_user_id` (str): The targeted user's `user_id`.
         
         Returns:
-            None.
+            `None`.
         """
         self.database_handler.add_user_to_channel(
             channel_id=channel_id,
@@ -169,7 +169,7 @@ class ChannelsManager (object):
             `to_remove_user_id` (str): The targeted user's `user_id`.
         
         Returns:
-            None.
+            `None`.
         """
         self.database_handler.remove_user_from_channel(
             channel_id=channel_id,
@@ -185,13 +185,15 @@ class ChannelsManager (object):
         )
     
     def _generate_channel_id(self, channel_name: str) -> str:
-        """ Generates a unique id for a channel based on it's `channel_name`
+        """
+        Generate a unique `channel_id` for a
+        `channel` based on it's `channel_name`
          
         Args:
             `channel_name` (str): The channel's `channel_name`.
         
         Returns:
-            str: The generated UID.
+            str: The generated `channel_id`.
         """
         hashed_channel_name = hashlib.md5(channel_name.encode()).hexdigest()
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_channel_name)
