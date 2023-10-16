@@ -20,7 +20,15 @@ class DatabaseHandler (object):
         self.hasher                         =         hasher
     
     def sign_up(self, user_data: User) -> None:
-        """ Signs up a new user and returns a auth token """
+        """
+        Sign up a new user
+        
+        Args:
+            `user_data` (User): A `User` object.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -46,8 +54,14 @@ class DatabaseHandler (object):
 
     def fetch_user_data(self, user_id: str) -> tuple:
         """ 
-            Returns a User model containing
-            information about the given user's id
+        Fetch metadata about the given `user_id`
+        from the database
+
+        Args:
+            `user_id` (str): The user's `user_id`.
+        
+        Returns:
+            tuple: Containing the user's metadata.
         """
         database_connection = self.database_connection_pool.getconn()
         user_data = None
@@ -71,11 +85,15 @@ class DatabaseHandler (object):
 
     def delete_auth_token(self, user_id: str, auth_token: str) -> None:
         """
-        Deletes the given encrypted auth_token that belongs to the user_id
+        Delete the given encrypted `auth_token`
+        that belongs to the `user_id`
         
-        Paramters:
-            user_id (str): The user's id
-            auth_token (str): The raw version of the auth_token to delete
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `auth_token` (str): The encrypted version of the `auth_token` to delete.
+        
+        Returns:
+            `None`.
         """ 
         database_connection = self.database_connection_pool.getconn()
 
@@ -95,7 +113,16 @@ class DatabaseHandler (object):
             )
     
     def save_salt(self, salt: Salt) -> None:
-        """ Stores the salt data in the salt table """
+        """
+        Save the salt data in the `salt` table
+        in the database
+        
+        Args:
+            `salt` (Salt): A `Salt` object.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -119,13 +146,19 @@ class DatabaseHandler (object):
             )
         )
 
-    def save_auth_token(
-        self,
-        auth_token: str,
-        auth_token_expire_time: str,
-        user_id: str
-    ) -> None:
-        """ Saves the token to the auth_tokens table """
+    def save_auth_token(self, user_id: str, auth_token: str, auth_token_expire_time: str) -> None:
+        """
+        Save the `auth_token` to the `auth_tokens` table
+        in the database
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `auth_token` (str): The `auth_token` to save in the database.
+            `auth_token_expire_time` (str): The expiration time of the `auth_token` (which is date after 30 days from its creation).
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -157,12 +190,15 @@ class DatabaseHandler (object):
 
     def update_auth_token(self, user_id: str, new_auth_token: str, new_auth_token_expire_time: str) -> None:
         """
-        Updates the user's auth_token
+        Update the user's `auth_token`
         
-        Parameters:
-            user_id (str): The user's id
-            new_auth_token (str): The new hashed generated `auth_token`
-            new_auth_token_expire_time (date): The new expire time for the generated `auth_token`
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `new_auth_token` (str): The new encrypted generated `auth_token`.
+            `new_auth_token_expire_time` (date): The new expire time for the generated `auth_token`.
+        
+        Returns:
+            `None`.
         """
         database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
@@ -208,10 +244,13 @@ class DatabaseHandler (object):
         
     def get_users_id(self) -> list:
         """
-        Returns a list of all the used users id
+        Fetch a list of all the used `user_id`s
+        
+        Args:
+            `None`.
         
         Returns:
-            list: A list containing all the used `user_id`
+            list: A list containing all the used `user_id`s.
         """
         database_connection = self.database_connection_pool.getconn()
 
@@ -241,7 +280,15 @@ class DatabaseHandler (object):
         return users_id
     
     def get_usernames(self) -> list[str]:
-        """ Returns a list of all the usernames in the database """
+        """
+        Fetch a list of all the `username`s in the database
+        
+        Args:
+            `None`.
+        
+        Returns:
+            list[str]: A list containing all the `username`s in the database.
+        """
         database_connection = self.database_connection_pool.getconn()
         usernames = []
 
@@ -285,13 +332,13 @@ class DatabaseHandler (object):
 
     def get_auth_tokens_updated_at(self, user_id: str) -> str:
         """
-        Returns the value in the column `updated_at`
-        for the auth_token
+        Fetch the value of the column `updated_at`
+        for the `auth_token`
         
-        Parameters:
-            user_id (str): The user's id
+        Args:
+            `user_id` (str): The user's `user_id`.
         Returns:
-            str: The `updated_at` value in GMT
+            str: The `updated_at` value in GMT.
         """
         database_connection = self.database_connection_pool.getconn()
         updated_at = None
@@ -313,12 +360,16 @@ class DatabaseHandler (object):
         
         return updated_at
 
-    def update_username(self, user_id:str, new_username: str) -> None:
-        """ Updates the username 
+    def update_username(self, user_id: str, new_username: str) -> None:
+        """
+        Update the `username` for a user 
         
-        Parameters:
-            user_id (str): The user's `user_id`
-            new_username (str): The new username
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `new_username` (str): The new `username` for the user.
+        
+        Returns:
+            `None`.
         """
         database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
@@ -342,12 +393,15 @@ class DatabaseHandler (object):
                 close=False
             )
 
-    def update_user_status(self, user_id: str ,status: str):
+    def update_user_status(self, user_id: str , status: str) -> None:
         """ Updates the user's status 
         
-        Parameters:
-            status (str): Status value. ["online", "offline"]
-            last_seen (str): Last seen time in GMT (in case the status="offline")
+        Args:
+            `status` (str): The user's `status` value. ["online", "offline"].
+            `last_seen` (str): Last seen time in GMT (in case the status="offline").
+        
+        Returns:
+            `None`.
         """
         database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
@@ -380,9 +434,12 @@ class DatabaseHandler (object):
     def update_user_password(self, user_id: str, hashed_new_password: str) -> None:
         """Updates the user's password
         
-        Parameters:
-            user_id (srt): The user's `user_id`
-            hashed_new_password (srt): The hash of the new password to change the old one
+        Args:
+            `user_id` (srt): The user's `user_id`.
+            `hashed_new_password` (srt): The hashed version of the new `password`.
+
+        Returns:
+            `None`.
         """
         database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
@@ -407,7 +464,15 @@ class DatabaseHandler (object):
             )
     
     def update_encryption_key(self, key: EncryptionKey) -> None:
-        """ Updates the given encryption key """
+        """
+        Update the given encryption `key` in the database
+        
+        Args:
+            `key` (EncryptionKey): An `EncryptionKey` object.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
@@ -433,7 +498,15 @@ class DatabaseHandler (object):
         )
     
     def delete_encryption_key(self, key: EncryptionKey) -> None:
-        """ Deletes the given encryption key """
+        """
+        Delete the given encryption `key` from the database
+        
+        Args:
+            `key` (EncryptionKey): An `EncryptionKey` object.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -457,8 +530,17 @@ class DatabaseHandler (object):
             )
         )
     
-    def save_encryption_key(self, key: EncryptionKey):
-        """ Saves the keys that are used in encryption along side with the salt """
+    def save_encryption_key(self, key: EncryptionKey) -> None:
+        """
+        Save the encryption `key` in the `keys` table
+        in the database
+
+        Args:
+            `key` (EncryptionKey): An `EncryptionKey` object.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
         
         try:
@@ -483,7 +565,18 @@ class DatabaseHandler (object):
         )
         
     def get_decryption_key(self, associated_to: str, user_id: str| None=None, message_id: str | None=None) -> bytes:
-        """ Returns the decryption key from the database """
+        """
+        Fetch an decryption `key` from the `keys` table
+        in the database
+        
+        Args:
+            `user_id` (str, optional, default: None): The user's `user_id`.
+            `associated_to` (str): What data was this `key` used to encrypt.
+            `message_id` (str , optional, default: None): The message's `message_id` (In case the encryption `key` was used to encrypt a message).
+
+        Returns:
+            bytes: The `key` value in bytes.
+        """
         database_connection = self.database_connection_pool.getconn()
         key = None
 
@@ -507,15 +600,15 @@ class DatabaseHandler (object):
 
     def get_salt(self, user_id: str, associated_to: str) -> bytes:
         """
-        Returns the salt used to hash a password, or auth_token
-         
-        Parameters:
-            user_id (str): The user's id
-            associated_to (str): What is the salt associated to
-                    ["auth_token", "password"]
+        Returns the salt used to hash a `password`,
+        or an `auth_token`
+        
+        Args:
+            `user_id` (str): The user's id
+            `associated_to` (str): What `data` was this `salt` used to hash ['password'. 'auth_token'].
 
         Returns:
-            str: salt
+            bytes: The `salt` value in bytes.
         """
         database_connection = self.database_connection_pool.getconn()
         salt = None
@@ -548,12 +641,16 @@ class DatabaseHandler (object):
 
     def update_salt(self, user_id: str, associated_to: str, new_salt_value: str, new_hashed_data: str) -> None:
         """ 
-        Updates the salt value
+        Update the `salt` value
         
-        Parameters:
-            user_id (str): The user's id
-            associated_to (str): password, auth_token
-            new_salt_value (str): The new salt value
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `associated_to` (str): What `data` was this `salt` used to hash ['password'. 'auth_token'].
+            `new_salt_value` (str): The new `salt` value
+            `new_hashed_data` (str): The new hashed `data` with the new `salt` value.
+        
+        Returns:
+            `None`.
         """
         database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
@@ -580,7 +677,17 @@ class DatabaseHandler (object):
             )
 
     def delete_salt(self, user_id: str, associated_to: str) -> None:
-        """ Deletes the salt data from the salts table """
+        """
+        Delete the `salt` from the `salts` table
+        in the database
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `associated_to` (str): What `data` was this `salt` used to hash ['password'. 'auth_token'].
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -603,13 +710,15 @@ class DatabaseHandler (object):
 
     def get_auth_token_expire_time(self, user_id: str, auth_token: str) -> str:
         """
-        Returns the expire time for the given auth token
+        Fetch the expire time for the given `auth_token`
+        from the `auth_token_expire_time` column in the 
+        database
         
-        Parameters:
-            auth_token (str): Encrypted version of the auth token
+        Args:
+            `auth_token` (str): Encrypted version of the `auth_token`.
         
         Returns:
-            str: Expire time
+            str: The `auth_token`'s expire time value.
         """
         database_connection = self.database_connection_pool.getconn()
         expire_time = None
@@ -630,14 +739,14 @@ class DatabaseHandler (object):
     
     def check_auth_token(self, hashed_auth_token: bytes, user_id: str) -> bool:
         """
-        Checks the validity of the `auth_token`
+        Check the validity of the `auth_token`
         
-        Parameters:
-            user_id (str): The user's `user_id`
-            hashed_auth_token (bytes): The hash user's `auth_token`
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `hashed_auth_token` (bytes): The hash value of the user's `auth_token`.
         
         Returns:
-            bool: True if the `auth_token` exists, otherwise False
+            bool: True if the `auth_token` exists, otherwise False.
         """
         database_connection = self.database_connection_pool.getconn()
         is_valid = True
@@ -670,8 +779,18 @@ class DatabaseHandler (object):
         
         return is_valid
 
-    def fetch_channels(self, user_id: str) -> list:
-        """ Returns a list of all the available channels """
+    def fetch_channels(self, user_id: str) -> list[tuple]:
+        """
+        Fetch a list of all the available channels, which
+        depends on the user. If he is not the server owner
+        or an admin then the private channels won't be returned
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+        
+        Returns:
+            list[list]: Containing metadata about the server's channels.
+        """
         database_connection = self.database_connection_pool.getconn()
         channels_data = None
 
@@ -698,7 +817,16 @@ class DatabaseHandler (object):
         return channels_data
 
     def get_channels_names(self) -> list[str]:
-        """ Returns a list of channel_name """
+        """ 
+        Fetch a list of `channel_name`s from
+        the `channels` table in the database
+        
+        Args:
+            `None`.
+        
+        Returns:
+            list[str]: A list of `channel_name`s.
+        """
         database_connection = self.database_connection_pool.getconn()
         channels_names = None
 
@@ -717,7 +845,16 @@ class DatabaseHandler (object):
         return channels_names
 
     def create_new_channel(self, user_id: str, channel: Channel) -> None:
-        """ Registers a new channel into the channels table """
+        """
+        Create a new `channel` in the server
+        
+        Args:
+            `user_id` (str): The user's `user_id` (The server owner have the right to create channels).
+            `channel` (Channel): A `Channel` object.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -743,8 +880,17 @@ class DatabaseHandler (object):
             )
         )
     
-    def get_channel_data(self, user_id:str, channel_id: str) -> None:
-        """ Returns the data of a channel based off it\s channel_id """
+    def get_channel_data(self, channel_id: str) -> list:
+        """
+        Fetch the metadata of a `channel` from
+        the `channels` table in the database
+        
+        Args:
+            `channel_id` (str): The channel's `channel_id`.
+        
+        Returns:
+            list: The channel's metadata.
+        """
         database_connection = self.database_connection_pool.getconn()
         channel_data = None
 
@@ -763,17 +909,26 @@ class DatabaseHandler (object):
                 close=False
             )
         
-        logger.info(
-            constants.REQUESTED_CHANNEL_DATA(
-                viewer_user_id=user_id,
-                channel_id=channel_id
-            )
-        )
+        # logger.info(
+        #     constants.REQUESTED_CHANNEL_DATA(
+        #         viewer_user_id=user_id,
+        #         channel_id=channel_id
+        #     )
+        # )
 
         return channel_data
     
     def delete_channel(self, channel_id: str) -> None:
-        """ Deletes a channel from the channels table based off it's `channel_id` """
+        """
+        Delete a `channel` from the `channels` table
+        in the database
+        
+        Args:
+            `channel_id` (str): The channel's `channel_id`.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -792,7 +947,16 @@ class DatabaseHandler (object):
             )
     
     def add_user_to_channel(self, to_add_user_id: str, channel_id: str) -> None:
-        """ Addes a user to a private channel """
+        """
+        Add a `user` to a private channel
+        
+        Args:
+            `to_add_user_id` (str): The user's `user_id`.
+            `channel_id` (str): The channel's `channel_id`.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
@@ -811,7 +975,16 @@ class DatabaseHandler (object):
             )
 
     def remove_user_from_channel(self, to_remove_user_id: str, channel_id: str) -> None:
-        """ Removes a user from a private channel """
+        """
+        Remove a `user` from a private channel
+        
+        Args:
+            `to_remove_user_id` (str): The user's `user_id`.
+            `channel_id` (str): The channel's `channel_id`.
+        
+        Returns:
+            `None`.
+        """
         database_connection = self.database_connection_pool.getconn()
 
         try:
