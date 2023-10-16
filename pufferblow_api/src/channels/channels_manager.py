@@ -1,5 +1,4 @@
 import uuid
-
 import hashlib
 
 from loguru import logger
@@ -15,15 +14,23 @@ from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 from pufferblow_api.src.utils.current_date import date_in_gmt
 
 class ChannelsManager (object):
-    """ Server's channels manager """
-
+    """ Channels manager class to manage channels """
     def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager,hasher: Hasher) -> None:
         self.database_handler   =     database_handler
         self.auth_token_manager =     auth_token_manager
         self.hasher             =     hasher
     
     def list_channels(self, user_id: str) -> list[dict]:
-        """ Returns a list of the public channels """
+        """
+        List the public channels (and private channels
+        in case the user is an admin or the server owner)
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+        
+        Returns:
+            list[dict]: List of channels and their metadata.
+        """
         channels_data = self.database_handler.fetch_channels(
             user_id=user_id
         )
@@ -51,7 +58,17 @@ class ChannelsManager (object):
         return channels
 
     def create_channel(self, user_id: str, channel_name: str, is_private: bool) -> Channel:
-        """ Creates a new channel """
+        """
+        Create a new channel
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `channel_name` (str): The channel's `channel_name` (which is unique for each channel). 
+            `is_private` (bool): If it set to True then the channel is going to be private (only viewable by the server owner, admins and the users who gets added/invited to it), otherwise it will be public.
+        
+        Returns:
+            `Channel`
+        """
         channel = Channel()
         
         channel.channel_id = self._generate_channel_id(
@@ -69,15 +86,30 @@ class ChannelsManager (object):
         return channel
     
     def delete_channel(self, channel_id: str) -> None:
-        """ Deletes a channel based off it `channel_id` """
+        """
+        Delete a server channel
+        
+        Args:
+            `channel_id` (str): The channel's `channel_id`.
+        
+        Returns:
+            `None`
+        """
         self.database_handler.delete_channel(
             channel_id=channel_id
         )
     
-    def check_channel(self, user_id: str, channel_id: str) -> bool:
-        """ Checks the existsing of a chennal based off it's `channel_id` """
+    def check_channel(self, channel_id: str) -> bool:
+        """
+        Check the existsing of a channel
+        
+        Args:
+            `channel_id` (str): The channel's `channel_id`.
+        
+        Returns:
+            bool: True if the channel exists, otherwise False.
+        """
         channel_data = self.database_handler.get_channel_data(
-            user_id=user_id,
             channel_id=channel_id
         )
 
@@ -86,17 +118,34 @@ class ChannelsManager (object):
     
         return True
     
-    def is_private(self, user_id: str,channel_id: str) -> bool:
-        """ Checks if a channnel is private or public """
+    def is_private(self, channel_id: str) -> bool:
+        """
+        Check if a channnel is private or not
+        
+        Args:
+            `channel_id` (str): The channel's `channel_id`.
+        
+        Returns:
+            bool: True if the channel is private, otherwise False.
+        """
         channel_data = self.database_handler.get_channel_data(
-            user_id=user_id,
             channel_id=channel_id
         )
         
         return channel_data[3] # `is_private` column value
 
     def add_user_to_channel(self, user_id: str, to_add_user_id: str, channel_id: str) -> None:
-        """ Adds a user to a private channel """
+        """
+        Add a user to a private channel
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `channel_id` (str): The channel's `channel_id`.
+            `to_add_user_id` (str): The targeted user's `user_id`.
+        
+        Returns:
+            None.
+        """
         self.database_handler.add_user_to_channel(
             channel_id=channel_id,
             to_add_user_id=to_add_user_id
@@ -111,7 +160,17 @@ class ChannelsManager (object):
         )
 
     def remove_user_from_channel(self, user_id: str, to_remove_user_id: str, channel_id: str) -> None:
-        """ Removes a user from a private channel """
+        """
+        Remove a user from a private channel
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `channel_id` (str): The channel's `channel_id`.
+            `to_remove_user_id` (str): The targeted user's `user_id`.
+        
+        Returns:
+            None.
+        """
         self.database_handler.remove_user_from_channel(
             channel_id=channel_id,
             to_remove_user_id=to_remove_user_id
@@ -126,7 +185,14 @@ class ChannelsManager (object):
         )
     
     def _generate_channel_id(self, channel_name: str) -> str:
-        """ Generates a unique id for a channel based on this channel's name """
+        """ Generates a unique id for a channel based on it's `channel_name`
+         
+        Args:
+            `channel_name` (str): The channel's `channel_name`.
+        
+        Returns:
+            str: The generated UID.
+        """
         hashed_channel_name = hashlib.md5(channel_name.encode()).hexdigest()
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_channel_name)
 

@@ -87,7 +87,17 @@ async def signup_new_user(
     username: str,
     password: str
 ):
-    """ Signup a new user """
+    """
+    Signup a new user.
+
+    Args:
+        `username` (str): The user's `username` (should be unique for each user)
+        `password` (str): The user's `password`.
+    
+    Return:
+        201 OK: If the `username` is available, and the user got signed up.
+        409 CONFLICT: If the `username` is not available.
+    """
     # Check if the `username` already exists
     if users_manager.check_username(username):
         raise exceptions.HTTPException(
@@ -121,15 +131,16 @@ async def users_profile_route(
     """
     Users profile management route
 
-    Parameters:
-        user_id (str): The user_id of the target user
-        auth_token (str): The auth_token of the user who requested this user's profile
+    Args:
+        `user_id` (str): The `user_id` of the target user
+        `auth_token` (str): The `auth_token` of the user who requested this user's profile
 
     Returns:
-        dict: The User class model to json
-
+        200 OK: If the `user_id` of the targeted user exists and the `auth_token` is valid.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists.
     """
-    # Check auth_token foramt and validity
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail="Bad auth_token format. Please check your auth_token and try again.",
@@ -138,7 +149,7 @@ async def users_profile_route(
 
     viewer_user_id = extract_user_id(auth_token=auth_token)
 
-    # Check the viewer user_id
+    # Check the viewer `user_id`
     if not users_manager.check_user(
         user_id=viewer_user_id,
         auth_token=auth_token
@@ -180,23 +191,25 @@ async def edit_users_profile_route(
     new_password: str = None,
     old_password: str = None
 ):
-    """ Edits a user's profile data such as: status,
+    """
+    Update a user's profile metadata such us status,
     last_seen, username and password
 
-    Parameters:
-        auth_token (str): The user's auth_token
-        new_username (str, optional): The new username for the user
-        status (str, optional): The new status for the user ["ONLINE", "OFFLINE"]
-        new_password (str, optional): The new password for the user
-        old_password (str, optional): The old password of the user. This is in case the ```password``` was passed
+    Args:
+        `auth_token` (str): The user's `auth_token`
+        `new_username` (str, optional): The new `username` for the user
+        `status` (str, optional): The new status for the user ["ONLINE", "OFFLINE"]
+        `new_password` (str, optional): The new `password` for the user
+        `old_password` (str, optional): The old `password` of the user.
 
     Returns:
-        {
-            "status_code": 201,
-            "message": (str)
-        }
+        200 OK: If all parameters are correct, and the to update data was updated successfully.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        401 UNAUTHORIZED: If the `password` is unvalid.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
+        409 CONFLICT: If the `username` is not available.
     """
-    # Check auth_token foramt and validity
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -294,14 +307,20 @@ async def reset_users_auth_token_route(
     password: str
 ):
     """
-    Reset the user's auth_token in case they forgot it or
-    their account is being compromised by someone else.
+    Reset the user's `auth_token`.
 
-    Parameters:
-        user_id (str): The user's id
-        password (str): The user's password
+    Args:
+        `user_id` (str): The users's `user_id`.
+        `password` (str): The user's `password`.
+    
+    Returns:
+        200 OK: If all parameters are correct, and the user is able to reset their `auth_token`.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        401 UNAUTHORIZED: If the `password` is unvalid.
+        403 CAN'T AUTHORIZE IT: If the user is not authorized to reset their `auth_token` because of the suspension time.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
     """
-    # Check auth_token foramt and validity
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -394,11 +413,15 @@ def list_users_route(
     """
     Returns a list of all the users present in the server
 
-    Parameters:
-        viewer_user_id (str): The `user_id` of the user who requested to view the users list
-        auth_token (str): The viewer user's `auth_token`
+    Args:
+        `auth_token` (str): The user's `auth_token`.
+    
+    Returns:
+        200 OK: If the `auth_token` is valid, then a list of users metadata is returned to the user.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
     """
-    # Check auth_token foramt and validity
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -407,7 +430,7 @@ def list_users_route(
 
     viewer_user_id = extract_user_id(auth_token=auth_token)
 
-    # Check the viewer user_id
+    # Check the viewer `user_id`
     if not users_manager.check_user(
         user_id=viewer_user_id,
         auth_token=auth_token
@@ -435,7 +458,7 @@ def list_users_route(
 # Server's Channels routes
 @api.get("/api/v1/channels", status_code=200)
 def channels_route():
-    """ Channels route start point """
+    """ Channels routes """
     return {
         "status_code": 200,
         "message": "Channels route"
@@ -445,8 +468,21 @@ def channels_route():
 def list_channels_route(
     auth_token: str
     ):
-    """ Returns a list of all the available channels """
-    # Check auth_token foramt and validity
+    """
+    Returns a list of all available channels,
+    excluding private channels, unless the user
+    is a server admin, the server owner, or has
+    been invited to the private channel.
+    
+    Args:
+        `auth_token` (str): The user's `auth_token`.
+    
+    Returns:
+        200 OK: If the `auth_token` is valid, then a list of channels metadata is returned to the user.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
+    """
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -476,22 +512,28 @@ def list_channels_route(
 
 @api.put("/api/v1/channels/create", status_code=200)
 def create_new_channel_route(
-    # user_id: str,
     auth_token: str,
     channel_name: str,
     is_private: bool = False
 ):
     """
-    Create new channel for the server
+    Create a new channel for the server,
+    only availble for the server owner, or
+    a server admin.
 
-    Parameters:
-        user_id (str): The ID of the user creating the channel route.
-        auth_token (str): The authentication token for the user.
-        channel_name (str): The name of the channel to create.
-        is_private (bool, optional): Specifies whether the channel should be private or not.
-            Defaults to False.
+    Args:
+        `auth_token` (str): The user's `auth_token`.
+        `channel_name` (str): The name of the channel.
+        `is_private` (bool, optional, default: False): Specifies whether the channel should be private or not.
+    
+    Returns:
+        200 OK: If all parameters are correct, then the channel gets created.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        403 CAN'T AUTHORIZE IT: If the user is neither the server owner nor an admin.
+        404 NOT FOUND: The `auth_token` is unvalid.
+        409 CONFLICT: If the `channel_name` is not available.
     """
-    # Check auth_token foramt and validity
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -519,7 +561,7 @@ def create_new_channel_route(
             detail="Access forbidden. Only admins can create channels and manage them."
         )
 
-    # Check if the channel_name is not repeated
+    # Check if the `channel_name` has already been used or not
     channels_names = database_handler.get_channels_names()
 
     if channel_name in channels_names:
@@ -545,8 +587,21 @@ def delete_channel_route(
     auth_token: str,
     channel_id: str
 ):
-    """ Deletes a channel based off it's channel_id """
-    # Check auth_token foramt and validity
+    """ 
+    Deletes a server channel, only available for
+    the server owner, and the server's admins.
+
+    Args:
+        `auth_token` (str): the user's `auth_token`.
+        `channel_id` (str): The channel's `channel_id`.
+    
+    Returns:
+        200 OK: If all the parameters are correct, then the channel gets deleted.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        403 CAN'T AUTHORIZE IT: If the user is neither the server owner nor an admin.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists.
+    """
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -613,8 +668,21 @@ def add_user_to_private_channel_route(
     channel_id: str,
     to_add_user_id: str
 ):
-    """ Add a user to a private channel """
-    # Check auth_token foramt and validity
+    """
+    Add/invite a user to a private channel.
+
+    Args:
+        `auth_token` (str): the user's `auth_token`.
+        `channel_id` (str): The channel's `channel_id`.
+        `to_add_user_id` (str): The targeted user's `user_id`
+    
+    Returns:
+        200 OK: If all the parameters are correct, then the targeted user gets added/invited to the private channel.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        403 CAN'T AUTHORIZE IT: If the user is neither the server owner nor an admin.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists, or the `user_id` of the targeted user doesn't exists.
+    """
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
@@ -724,8 +792,21 @@ def remove_user_from_channel_route(
     channel_id: str,
     to_remove_user_id: str
 ):
-    """ Removes a user from a private channel """
-    # Check auth_token foramt and validity
+    """
+    Remove a user from a private channel
+    
+    Args:
+        `auth_token` (str): the user's `auth_token`.
+        `channel_id` (str): The channel's `channel_id`.
+        `to_remove_user_id` (str): The targeted user's `user_id`
+    
+    Returns:
+        200 OK: If all the parameters are correct, then the targeted user gets removed from the private channel.
+        400 BAD REQUEST: If the `auth_token` is improperly formatted.
+        403 CAN'T AUTHORIZE IT: If the user is neither the server owner nor an admin.
+        404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists, or the `user_id` of the targeted user doesn't exists.
+    """
+    # Check `auth_token` format and validity
     if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
