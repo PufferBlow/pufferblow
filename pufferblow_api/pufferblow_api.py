@@ -6,59 +6,19 @@ from fastapi import (
 from loguru import logger
 
 from pufferblow_api import constants
-
-from pufferblow_api.src.hasher.hasher import Hasher
-from pufferblow_api.src.user.user_manager import UserManager
-from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
-from pufferblow_api.src.database.database_session import DatabaseSession
-from pufferblow_api.src.database.database_handler import DatabaseHandler
-from pufferblow_api.src.channels.channels_manager import ChannelsManager
-from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+from pufferblow_api.api_initializer import api_initilizer
 
 from pufferblow_api.src.utils.extract_user_id import extract_user_id
 from pufferblow_api.src.utils.is_able_to_update import is_able_to_update
 
-# Init api
+# Init PufferBlow's API
 api = FastAPI()
 
-# PufferBlow-api's config data class
-pufferblow_api_config = PufferBlowAPIconfig()
-
-# Init the hasher (Responsible for encrypting and decrypting data)
-hasher = Hasher()
-
-# Init Database Connection
-database_session = DatabaseSession(
-    supabase_url            =   pufferblow_api_config.SUPABASE_URL,
-    supabase_key            =   pufferblow_api_config.SUPABASE_KEY,
-    pufferblow_api_config   =   pufferblow_api_config
-)
-
-# Init Database handler
-database_handler = DatabaseHandler(
-    database_connection_pool    =       database_session.database_connection_pool(),
-    hasher                      =       hasher
-)
-
-# Init Auth tokens manager
-auth_token_manager = AuthTokenManager(
-    database_handler        =       database_handler,
-    hasher                  =       hasher
-)
-
-# Init user manager
-users_manager = UserManager(
-    database_handler        =       database_handler,
-    auth_token_manager      =       auth_token_manager,
-    hasher                  =       hasher
-)
-
-# Init channels manager
-channels_manager = ChannelsManager(
-    database_handler        =       database_handler,
-    auth_token_manager      =       auth_token_manager,
-    hasher                  =       hasher
-)
+@api.on_event("startup")
+async def pufferblow_api_startup():
+    """ PufferBlow's API startup handler """
+    # Load all the needed objects
+    api_initilizer.load_objects()
 
 @api.get("/")
 def redirect_route():
@@ -99,13 +59,13 @@ async def signup_new_user(
         409 CONFLICT: If the `username` is not available.
     """
     # Check if the `username` already exists
-    if users_manager.check_username(username):
+    if api_initilizer.user_manager.check_username(username):
         raise exceptions.HTTPException(
             detail="username already exists. Please change it and try again later",
             status_code=409
         )
 
-    user_data = users_manager.sign_up(
+    user_data = api_initilizer.user_manager.sign_up(
         username=username,
         password=password
     )
@@ -141,7 +101,7 @@ async def users_profile_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -150,7 +110,7 @@ async def users_profile_route(
     viewer_user_id = extract_user_id(auth_token=auth_token)
 
     # Check the viewer `user_id`
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=viewer_user_id,
         auth_token=auth_token
     ):
@@ -160,7 +120,7 @@ async def users_profile_route(
         )
 
     # Check if the targeted user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
@@ -168,12 +128,12 @@ async def users_profile_route(
             detail=f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"
         )
 
-    hashed_auth_token = auth_token_manager._encrypt_auth_token(
+    hashed_auth_token = api_initilizer.auth_token_manager._encrypt_auth_token(
         user_id=viewer_user_id,
         auth_token=auth_token
     )
 
-    user_data = users_manager.user_profile(
+    user_data = api_initilizer.user_manager.user_profile(
         user_id=user_id,
         hashed_auth_token=hashed_auth_token
     )
@@ -210,7 +170,7 @@ async def edit_users_profile_route(
         409 CONFLICT: If the `username` is not available.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -219,7 +179,7 @@ async def edit_users_profile_route(
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if the user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -230,7 +190,7 @@ async def edit_users_profile_route(
 
     # Update username
     if new_username is not None:
-        if users_manager.check_username(
+        if api_initilizer.user_manager.check_username(
             username=new_username
         ):
             raise exceptions.HTTPException(
@@ -238,7 +198,7 @@ async def edit_users_profile_route(
                 status_code=409
             )
 
-        users_manager.update_username(
+        api_initilizer.user_manager.update_username(
             user_id=user_id,
             new_username=new_username
         )
@@ -264,7 +224,7 @@ async def edit_users_profile_route(
                 status_code=404
             )
 
-        users_manager.update_user_status(
+        api_initilizer.user_manager.update_user_status(
             user_id=user_id,
             status=status
         )
@@ -276,7 +236,7 @@ async def edit_users_profile_route(
 
     # Udate the user's password
     if new_password is not None and old_password is not None:
-        if not users_manager.check_user_password(
+        if not api_initilizer.user_manager.check_user_password(
             user_id=user_id,
             password=old_password
         ):
@@ -291,7 +251,7 @@ async def edit_users_profile_route(
                 status_code=401
             )
 
-        users_manager.update_user_password(
+        api_initilizer.user_manager.update_user_password(
             user_id=user_id,
             new_password=new_password
         )
@@ -321,7 +281,7 @@ async def reset_users_auth_token_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -330,7 +290,7 @@ async def reset_users_auth_token_route(
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if the user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -339,7 +299,7 @@ async def reset_users_auth_token_route(
             detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
-    if not users_manager.check_user_password(
+    if not api_initilizer.user_manager.check_user_password(
         user_id=user_id,
         password=password
     ):
@@ -355,7 +315,7 @@ async def reset_users_auth_token_route(
         )
 
     # Check if the user is suspended from reseting their auth_token
-    updated_at = database_handler.get_auth_tokens_updated_at(
+    updated_at = api_initilizer.database_handler.get_auth_tokens_updated_at(
         user_id=user_id
     )
     if updated_at is not None:
@@ -374,26 +334,26 @@ async def reset_users_auth_token_route(
                 status_code=403
             )
 
-    new_auth_token = f"{user_id}.{auth_token_manager.create_token()}"
+    new_auth_token = f"{user_id}.{api_initilizer.auth_token_manager.create_token()}"
 
     # Hashing the new auth_token and updating the existing salt value
     # with the new one
-    salt = hasher.encrypt_with_bcrypt(
+    salt = api_initilizer.hasher.encrypt_with_bcrypt(
         user_id=user_id,
         data=new_auth_token,
     )
 
     hashed_auth_token = salt.hashed_data
-    new_auth_token_expire_time = auth_token_manager.auth_token_expire_time()
+    new_auth_token_expire_time = api_initilizer.auth_token_manager.auth_token_expire_time()
 
-    database_handler.update_salt(
+    api_initilizer.database_handler.update_salt(
         user_id=user_id,
         associated_to="auth_token",
         new_salt_value=salt.salt_value,
         new_hashed_data=hashed_auth_token
     )
 
-    database_handler.update_auth_token(
+    api_initilizer.database_handler.update_auth_token(
         user_id=user_id,
         new_auth_token=hashed_auth_token,
         new_auth_token_expire_time=new_auth_token_expire_time
@@ -422,7 +382,7 @@ def list_users_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -431,7 +391,7 @@ def list_users_route(
     viewer_user_id = extract_user_id(auth_token=auth_token)
 
     # Check the viewer `user_id`
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=viewer_user_id,
         auth_token=auth_token
     ):
@@ -440,12 +400,12 @@ def list_users_route(
             detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
-    hashed_auth_token = auth_token_manager._encrypt_auth_token(
+    hashed_auth_token = api_initilizer.auth_token_manager._encrypt_auth_token(
         user_id=viewer_user_id,
         auth_token=auth_token
     )
 
-    users = users_manager.list_users(
+    users = api_initilizer.user_manager.list_users(
         viewer_user_id=viewer_user_id,
         auth_token=hashed_auth_token
     )
@@ -483,7 +443,7 @@ def list_channels_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -492,7 +452,7 @@ def list_channels_route(
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if the user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -501,7 +461,7 @@ def list_channels_route(
             detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
-    channels_list = channels_manager.list_channels(
+    channels_list = api_initilizer.channels_manager.list_channels(
             user_id=user_id
         )
 
@@ -534,7 +494,7 @@ def create_new_channel_route(
         409 CONFLICT: If the `channel_name` is not available.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -543,7 +503,7 @@ def create_new_channel_route(
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if the user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -553,7 +513,7 @@ def create_new_channel_route(
         )
 
     # Check if the user is the server admin
-    if not users_manager.is_admin(
+    if not api_initilizer.user_manager.is_admin(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
@@ -562,7 +522,7 @@ def create_new_channel_route(
         )
 
     # Check if the `channel_name` has already been used or not
-    channels_names = database_handler.get_channels_names()
+    channels_names = api_initilizer.database_handler.get_channels_names()
 
     if channel_name in channels_names:
         raise exceptions.HTTPException(
@@ -570,7 +530,7 @@ def create_new_channel_route(
             detail="Channel name already exists, please change it and try again."
         )
 
-    channel_data = channels_manager.create_channel(
+    channel_data = api_initilizer.channels_manager.create_channel(
         user_id=user_id,
         channel_name=channel_name,
         is_private=is_private
@@ -602,7 +562,7 @@ def delete_channel_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -611,7 +571,7 @@ def delete_channel_route(
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if the user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -621,7 +581,7 @@ def delete_channel_route(
         )
 
     # Check if the user is the server admin
-    if not users_manager.is_admin(
+    if not api_initilizer.user_manager.is_admin(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
@@ -630,7 +590,7 @@ def delete_channel_route(
         )
 
     # Check if the channel exists
-    if not channels_manager.check_channel(
+    if not api_initilizer.channels_manager.check_channel(
         user_id=user_id,
         channel_id=channel_id
     ):
@@ -646,7 +606,7 @@ def delete_channel_route(
             detail="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
         )
 
-    channels_manager.delete_channel(
+    api_initilizer.channels_manager.delete_channel(
         channel_id=channel_id
     )
 
@@ -683,7 +643,7 @@ def add_user_to_private_channel_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists, or the `user_id` of the targeted user doesn't exists.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -692,7 +652,7 @@ def add_user_to_private_channel_route(
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if the user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -702,7 +662,7 @@ def add_user_to_private_channel_route(
         )
 
     # Check if the targeted user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=to_add_user_id
     ):
         raise exceptions.HTTPException(
@@ -711,7 +671,7 @@ def add_user_to_private_channel_route(
         )
 
     # Check if the targeted user is also an admin
-    if users_manager.is_admin(
+    if api_initilizer.user_manager.is_admin(
         user_id=to_add_user_id
     ):
         return {
@@ -720,7 +680,7 @@ def add_user_to_private_channel_route(
         }
 
     # Check if the targeted user is the server owner
-    if users_manager.is_server_owner(
+    if api_initilizer.user_manager.is_server_owner(
         user_id=to_add_user_id
     ):
         return {
@@ -729,9 +689,9 @@ def add_user_to_private_channel_route(
         }
 
     # Check if the user is an admin or the server owner
-    if not users_manager.is_admin(
+    if not api_initilizer.user_manager.is_admin(
         user_id=user_id
-    ) and not users_manager.is_server_owner(
+    ) and not api_initilizer.user_manager.is_server_owner(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
@@ -740,7 +700,7 @@ def add_user_to_private_channel_route(
         )
 
     # Check if the channel exists
-    if not channels_manager.check_channel(
+    if not api_initilizer.channels_manager.check_channel(
         user_id=user_id,
         channel_id=channel_id
     ):
@@ -757,7 +717,7 @@ def add_user_to_private_channel_route(
         )
 
     # Check if the channel is private
-    if not channels_manager.is_private(
+    if not api_initilizer.channels_manager.is_private(
         user_id=user_id,
         channel_id=channel_id
     ):
@@ -775,7 +735,7 @@ def add_user_to_private_channel_route(
             status_code=200
         )
 
-    channels_manager.add_user_to_channel(
+    api_initilizer.channels_manager.add_user_to_channel(
         user_id=user_id,
         to_add_user_id=to_add_user_id,
         channel_id=channel_id
@@ -807,7 +767,7 @@ def remove_user_from_channel_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists, or the `user_id` of the targeted user doesn't exists.
     """
     # Check `auth_token` format and validity
-    if not auth_token_manager.check_auth_token_format(auth_token=auth_token):
+    if not api_initilizer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
             detail=f"Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
@@ -816,7 +776,7 @@ def remove_user_from_channel_route(
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if the user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=user_id,
         auth_token=auth_token
     ):
@@ -826,7 +786,7 @@ def remove_user_from_channel_route(
         )
 
     # Check if the targeted user exists or not
-    if not users_manager.check_user(
+    if not api_initilizer.user_manager.check_user(
         user_id=to_remove_user_id
     ):
         raise exceptions.HTTPException(
@@ -835,7 +795,7 @@ def remove_user_from_channel_route(
         )
 
     # Check if the targeted user is an admin
-    if users_manager.is_admin(
+    if api_initilizer.user_manager.is_admin(
         user_id=to_remove_user_id
     ):
 
@@ -853,7 +813,7 @@ def remove_user_from_channel_route(
         )
 
     # Check if the targeted user is the server owner
-    if users_manager.is_server_owner(
+    if api_initilizer.user_manager.is_server_owner(
         user_id=to_remove_user_id
     ):
 
@@ -871,9 +831,9 @@ def remove_user_from_channel_route(
         )
 
     # Check if the user who requested this route is an admin
-    if not users_manager.is_admin(
+    if not api_initilizer.user_manager.is_admin(
         user_id=user_id
-    ) and not users_manager.is_server_owner(
+    ) and not api_initilizer.user_manager.is_server_owner(
         user_id=user_id
     ):
         raise exceptions.HTTPException(
@@ -882,7 +842,7 @@ def remove_user_from_channel_route(
         )
 
     # Check if the channel exists
-    if not channels_manager.check_channel(
+    if not api_initilizer.channels_manager.check_channel(
         user_id=user_id,
         channel_id=channel_id
     ):
@@ -899,7 +859,7 @@ def remove_user_from_channel_route(
         )
 
     # Check if the channel is private
-    if not channels_manager.is_private(
+    if not api_initilizer.channels_manager.is_private(
         user_id=user_id,
         channel_id=channel_id
     ):
@@ -917,7 +877,7 @@ def remove_user_from_channel_route(
             status_code=200
         )
 
-    channels_manager.remove_user_from_channel(
+    api_initilizer.channels_manager.remove_user_from_channel(
         user_id=user_id,
         channel_id=channel_id,
         to_remove_user_id=to_remove_user_id
