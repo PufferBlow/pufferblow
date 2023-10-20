@@ -6,7 +6,10 @@ from pufferblow_api.tests.conftest import ValueStorage
 
 @pytest.fixture
 def client():
-    return TestClient(api)
+    # Use `TestClient` inside a `with` statment
+    # to trigger startup/shutdown events
+    with TestClient(api) as test_client:
+        return test_client
 
 route =  "/api/v1/users/profile"
 
