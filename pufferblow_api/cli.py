@@ -80,4 +80,3 @@ def serve():
     StandaloneApplication(api, OPTIONS).run()
 
 run = cli
-
