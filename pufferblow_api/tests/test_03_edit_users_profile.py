@@ -20,7 +20,7 @@ def test_edit_users_profile(client: TestClient):
     # Edit username
     data = {
         "auth_token": auth_token,
-        "new_username": "new_user1"
+        "new_username": ValueStorage.new_username
     }
 
     response = client.put(route, params=data)
@@ -84,7 +84,7 @@ def test_unvalid_status_value_exception(client: TestClient):
     status = "unvalid"
 
     data = {
-        "auth_token": ValueStorage.auth_token,
+        "auth_token": auth_token,
         "status": status
     }
 

@@ -1,23 +1,57 @@
 import base64
-import psycopg2
-import psycopg2.pool
+import sqlalchemy
 
 from loguru import logger
 
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy import (
+    select,
+    update,
+    delete,
+    and_,
+    text
+)
+
 from pufferblow_api import constants
+
+# Encryption manager
 from pufferblow_api.src.hasher.hasher import Hasher
+
+# Models
 from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.models.channel_model import Channel
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 
+# Utils
 from pufferblow_api.src.utils.current_date import date_in_gmt
+
+# Tables
+from pufferblow_api.src.database.tables.keys import Keys
+from pufferblow_api.src.database.tables.users import Users
+from pufferblow_api.src.database.tables.salts import Salts
+from pufferblow_api.src.database.tables.channels import Channels
+from pufferblow_api.src.database.tables.auth_tokens import AuthTokens
 
 class DatabaseHandler (object):
     """ Database handler for PufferBlow's API """
-    def __init__(self, database_connection_pool: psycopg2.pool.ThreadedConnectionPool, hasher: Hasher) -> None:
-        self.database_connection_pool       =         database_connection_pool
-        self.hasher                         =         hasher
+    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher) -> None:
+        self.database_engine    =    database_engine
+        self.database_session   =    sessionmaker(bind=self.database_engine)
+        self.hasher             =    hasher
+    
+    def setup_tables(self, base: DeclarativeBase) -> None:
+        """
+        Setup the needed database tables
+        
+        Args:
+            `base` (DeclarativeBase): A `DeclarativeBase` sub-class.
+        
+        Returns:
+            `None`.
+        """
+        # in case a table already exists then it will be skipped
+        base.metadata.create_all(self.database_engine)
     
     def sign_up(self, user_data: User) -> None:
         """
@@ -29,30 +63,23 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
+        user_table_metadata = user_data.create_table_metadata()
 
-        try:
-            with database_connection.cursor() as cursor:
-                add_new_user = "INSERT INTO users (user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin, is_owner) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        with self.database_session() as session:
+            session.add(user_table_metadata)
 
-                cursor.execute(
-                    add_new_user,
-                    user_data.to_tuple()
-                )
-                database_connection.commit()
-                
-                self.save_auth_token(
-                    user_id=user_data.user_id,
-                    auth_token=user_data.encrypted_auth_token,
-                    auth_token_expire_time=user_data.auth_token_expire_time
-                )
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+            session.commit()
+        
+        auth_token = AuthTokens(
+            user_id=user_data.user_id,
+            auth_token=user_data.encrypted_auth_token,
+            auth_token_expire_time=user_data.auth_token_expire_time
+        )
+        self.save_auth_token(
+            auth_token=auth_token
+        )
 
-    def fetch_user_data(self, user_id: str) -> tuple:
+    def fetch_user_data(self, user_id: str) -> Users:
         """ 
         Fetch metadata about the given `user_id`
         from the database
@@ -61,27 +88,24 @@ class DatabaseHandler (object):
             `user_id` (str): The user's `user_id`.
         
         Returns:
-            tuple: Containing the user's metadata.
+            Users: A `Users` table object.
         """
-        database_connection = self.database_connection_pool.getconn()
-        user_data = None
+        user: Users = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT user_id, username, password_hash, status, last_seen, conversations, contacts, auth_token, auth_token_expire_time, created_at, updated_at, is_admin, is_owner FROM users WHERE user_id = %s"
-
-                cursor.execute(
-                    sql,
-                    (user_id,)
-                )
-                user_data = cursor.fetchone()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = select(Users).where(
+                Users.user_id == user_id
             )
-        
-        return user_data
+
+            # NOTE: The returned data is a tuple containing a `Users` table object.
+            # To access the `user` object correctly, we specify its position as `0`,
+            # ensuring that we can access all the columns without errors.
+            # If we don't specify the position, an error will be raised when trying
+            # to access the `auth_token` column.
+
+            user = session.execute(stmt).fetchone()[0]
+
+        return user
 
     def delete_auth_token(self, user_id: str, auth_token: str) -> None:
         """
@@ -94,23 +118,17 @@ class DatabaseHandler (object):
         
         Returns:
             `None`.
-        """ 
-        database_connection = self.database_connection_pool.getconn()
-
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "DELETE * FROM auth_tokens WHERE auth_token = '%s' AND user_id = '%s'"
-                cursor.execute(
-                    sql,
-                    (auth_token, user_id)
+        """
+        with self.database_session() as session:
+            stmt = delete(AuthTokens).where(
+                and_(
+                    AuthTokens.user_id == user_id,
+                    AuthTokens.auth_token == auth_token
                 )
-
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
             )
+
+            session.execute(stmt)
+            session.commit()
     
     def save_salt(self, salt: Salt) -> None:
         """
@@ -123,22 +141,10 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
-
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "INSERT INTO salts (salt_value, hashed_data, user_id, associated_to, created_at) VALUES (%s, %s, %s, %s, %s)"
-                
-                cursor.execute(
-                    sql,
-                    salt.to_tuple()
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+        with self.database_session() as session:
+            session.add(salt.create_table_metadata())
+            
+            session.commit()
         
         logger.info(
             constants.NEW_HASH_SALT_SAVED(
@@ -146,47 +152,29 @@ class DatabaseHandler (object):
             )
         )
 
-    def save_auth_token(self, user_id: str, auth_token: str, auth_token_expire_time: str) -> None:
+    def save_auth_token(self, auth_token: AuthTokens) -> None:
         """
         Save the `auth_token` to the `auth_tokens` table
         in the database
         
         Args:
-            `user_id` (str): The user's `user_id`.
-            `auth_token` (str): The `auth_token` to save in the database.
-            `auth_token_expire_time` (str): The expiration time of the `auth_token` (which is date after 30 days from its creation).
-        
+            `auth_token` (str): An `AuthTokens` table object.
+            
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
+        hashed_auth_token_value = auth_token.auth_token
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "INSERT INTO auth_tokens (auth_token, auth_token_expire_time, user_id, updated_at) VALUES (%s, %s, %s, %s)"
+        with self.database_session() as session:
+            session.add(auth_token)
 
-                cursor.execute(
-                    sql,
-                    (   
-                        auth_token,
-                        auth_token_expire_time,
-                        user_id,
-                        None
-                    ),
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+            session.commit()
         
         logger.info(
             constants.NEW_AUTH_TOKEN_SAVED(
-                auth_token=auth_token
+                auth_token=hashed_auth_token_value
             )
         )
-        
 
     def update_auth_token(self, user_id: str, new_auth_token: str, new_auth_token_expire_time: str) -> None:
         """
@@ -200,40 +188,29 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
-        try:
-            with database_connection.cursor() as cursor:
-                update_auth_tokens_table_sql = "UPDATE auth_tokens SET auth_token = %s, auth_token_expire_time = %s, updated_at = %s WHERE user_id = %s"
-                update_users_table_sql = "UPDATE users SET auth_token = %s, updated_at = %s WHERE user_id = %s"
-
-                sql = """
-                    {update_auth_tokens_table_sql};
-                    {update_users_table_sql};
-                """.format(
-                    update_auth_tokens_table_sql=update_auth_tokens_table_sql,
-                    update_users_table_sql=update_users_table_sql
+        with self.database_session() as session:
+            stmts = [
+                update(AuthTokens).values(
+                    auth_token=new_auth_token,
+                    auth_token_expire_time=new_auth_token_expire_time,
+                    updated_at=updated_at
+                ).where(
+                    AuthTokens.user_id == user_id
+                ),
+                update(Users).values(
+                    auth_token=new_auth_token,
+                    auth_token_expire_time=new_auth_token_expire_time,
+                    updated_at=updated_at
+                ).where(
+                    Users.user_id == user_id
                 )
-                
-                cursor.execute(
-                    sql,
-                    (
-                        new_auth_token,
-                        new_auth_token_expire_time,
-                        updated_at,
-                        user_id,
-                        new_auth_token,
-                        updated_at,
-                        user_id
-                    )
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+            ]
+            for stmt in stmts:
+                session.execute(stmt)
+            
+            session.commit()
 
         logger.info(
             constants.RESET_USER_AUTH_TOKEN(
@@ -252,31 +229,21 @@ class DatabaseHandler (object):
         Returns:
             list: A list containing all the used `user_id`s.
         """
-        database_connection = self.database_connection_pool.getconn()
+        users_id = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT user_id FROM users"
-                cursor.execute(sql)
+        with self.database_session() as session:
+            stmt = select(Users.user_id)
 
-                users_id = cursor.fetchall()
-
-                if len(users_id) == 0:
-                    users_id = []
-                else:
-                    users_id = [user_id[0] for user_id in users_id]
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
-
+            reponse = session.execute(stmt).fetchall()
+            
+            users_id = [user_id[0] for user_id in reponse]
+        
         logger.info(
             constants.FETCH_USERS_ID(
                 users_id=users_id
             )
         )
-        
+
         return users_id
     
     def get_usernames(self) -> list[str]:
@@ -289,39 +256,29 @@ class DatabaseHandler (object):
         Returns:
             list[str]: A list containing all the `username`s in the database.
         """
-        database_connection = self.database_connection_pool.getconn()
-        usernames = []
+        usernames = list()
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT user_id, username FROM users"
+        with self.database_session() as session:
+            stmt = select(Users.user_id, Users.username)
 
-                cursor.execute(sql)
+            reponse = session.execute(stmt).fetchall()
+            
+            for i in range(len(reponse)):
+                user_id = reponse[i][0]
+                encrypted_username = base64.b64decode(reponse[i][1])
 
-                users_data = cursor.fetchall()
+                encryption_key = self.get_decryption_key(
+                    user_id=user_id,
+                    associated_to="username"
+                )
 
-                for user_data in users_data:
-                    user_id, username = user_data
+                decrypted_username = self.hasher.decrypt_with_blowfish(
+                    encrypted_data=encrypted_username,
+                    key=encryption_key
+                )
 
-                    username = base64.b64decode(username)
+                usernames.append(decrypted_username)
 
-                    decryption_key = self.get_decryption_key(
-                        user_id=user_id,
-                        associated_to="username"
-                    )
-
-                    username = self.hasher.decrypt_with_blowfish(
-                        encrypted_data=username,
-                        key=decryption_key
-                    )
-
-                    usernames.append(username)
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection, 
-                close=False
-            )
-        
         logger.info(
             constants.FETCH_USERNAMES(
                 usernames=usernames
@@ -340,23 +297,14 @@ class DatabaseHandler (object):
         Returns:
             str: The `updated_at` value in GMT.
         """
-        database_connection = self.database_connection_pool.getconn()
         updated_at = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT updated_at FROM auth_tokens WHERE user_id = %s"
-
-                cursor.execute(
-                    sql, 
-                    (user_id, )
-                )
-                updated_at = cursor.fetchone()[0]
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = select(AuthTokens.updated_at).where(
+                AuthTokens.user_id == user_id
             )
+
+            updated_at = session.execute(stmt).fetchone()[0]
         
         return updated_at
 
@@ -371,27 +319,19 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "UPDATE users SET username = %s, updated_at = %s WHERE user_id = %s"
-
-                cursor.execute(
-                    sql,
-                    (
-                        new_username,
-                        updated_at,
-                        user_id
-                    )
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = update(Users).values(
+                username=new_username,
+                updated_at=updated_at
+            ).where(
+                Users.user_id == user_id
             )
+
+            session.execute(stmt)
+
+            session.commit()
 
     def update_user_status(self, user_id: str , status: str) -> None:
         """ Updates the user's status 
@@ -403,33 +343,33 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = None
-                changes = None
+        with self.database_session() as session:
+            stmts = []
 
-                if status == "offline":
-                    last_seen = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-                    sql = "UPDATE users SET status = %s, last_seen = %s, updated_at = %s WHERE user_id = %s"
-                    changes = (status, last_seen, updated_at, user_id)
-                else:
-                    sql = "UPDATE users SET status = %s, updated_at = %s WHERE user_id = %s"
-                    changes = (status, updated_at, user_id)
-                
-                cursor.execute(
-                    sql,
-                    changes
+            stmts.append(
+                update(Users).values(
+                    status=status,
+                    updated_at=updated_at
+                ).where(
+                    Users.user_id == user_id
                 )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
             )
+
+            if status == "offline":
+                stmts.append(
+                    update(Users).values(
+                        last_seen=date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+                    ).where(
+                        Users.user_id == user_id
+                    )
+                )
+
+            for stmt in stmts:
+                session.execute(stmt)
+
+            session.commit()
     
     def update_user_password(self, user_id: str, hashed_new_password: str) -> None:
         """Updates the user's password
@@ -441,28 +381,20 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "UPDATE users SET password_hash = %s, updated_at = %s WHERE user_id = %s"
-
-                cursor.execute(
-                    sql,
-                    (
-                        hashed_new_password,
-                        updated_at,
-                        user_id
-                    )
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = update(Users).values(
+                password_hash=hashed_new_password,
+                updated_at=updated_at
+            ).where(
+                Users.user_id == user_id
             )
-    
+
+            session.execute(stmt)
+
+            session.commit()
+        
     def update_encryption_key(self, key: EncryptionKey) -> None:
         """
         Update the given encryption `key` in the database
@@ -473,24 +405,24 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "UPDATE keys SET key_value = %s, updated_at = %s WHERE user_id = %s AND associated_to = %s"
-
-                cursor.execute(
-                    sql,
-                    (key.key_value, updated_at, key.user_id, key.associated_to)
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
         
+        with self.database_session() as session:
+            stmt = update(Keys).values(
+                key_value=key.key_value,
+                associated_to=key.associated_to,
+                updated_at=updated_at
+            ).where(
+                and_(
+                    Keys.user_id == key.user_id,
+                    Keys.associated_to == key.associated_to
+                )
+            )
+
+            session.execute(stmt)
+
+            session.commit()
+
         logger.info(
             constants.DERIVED_KEY_UPDATED(
                 key=key
@@ -507,22 +439,10 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
+        with self.database_session() as session:
+            session.delete(key.create_table_metadata())
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "DELETE FROM keys WHERE user_id = %s AND key_value = %s AND associated_to = %s"
-
-                cursor.execute(
-                    sql,
-                    (key.user_id, key.key_value, key.associated_to)
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+            session.commit()
         
         logger.info(
             constants.DERIVED_KEY_DELETED(
@@ -541,22 +461,10 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
-        
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "INSERT INTO keys (key_value, associated_to, user_id, message_id, created_at) VALUES (%s, %s, %s, %s, %s)"
-                
-                cursor.execute(
-                    sql,
-                    key.to_tuple()
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+        with self.database_session() as session:
+            session.add(key.create_table_metadata())
+
+            session.commit()
 
         logger.info(
             constants.NEW_DERIVED_KEY_SAVED(
@@ -564,7 +472,7 @@ class DatabaseHandler (object):
             )
         )
         
-    def get_decryption_key(self, associated_to: str, user_id: str| None=None, message_id: str | None=None) -> bytes:
+    def get_decryption_key(self, associated_to: str, user_id: str| None=None, message_id: str | None=None) -> str:
         """
         Fetch an decryption `key` from the `keys` table
         in the database
@@ -575,27 +483,22 @@ class DatabaseHandler (object):
             `message_id` (str , optional, default: None): The message's `message_id` (In case the encryption `key` was used to encrypt a message).
 
         Returns:
-            bytes: The `key` value in bytes.
+            str: The encryption `key` value.
         """
-        database_connection = self.database_connection_pool.getconn()
         key = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                if user_id is not None:
-                    sql = "SELECT key_value FROM keys WHERE user_id = '%s' AND associated_to = '%s'" % (user_id, associated_to)
-                else:
-                    sql = "SELECT key_value FROM keys WHERE message_id = '%s' AND associated_to = '%s'" % (message_id, associated_to)
-
-                cursor.execute(sql)
-
-                key = cursor.fetchall()[0][0]
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = select(
+                Keys.key_value
+            ).where(
+                and_(
+                    Keys.user_id == user_id,
+                    Keys.associated_to == associated_to
+                )
             )
 
+            key = session.execute(stmt).fetchone()[0]
+        
         return key
 
     def get_salt(self, user_id: str, associated_to: str) -> bytes:
@@ -610,24 +513,20 @@ class DatabaseHandler (object):
         Returns:
             bytes: The `salt` value in bytes.
         """
-        database_connection = self.database_connection_pool.getconn()
         salt = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT salt_value FROM salts WHERE user_id = %s AND associated_to = %s" 
-
-                cursor.execute(
-                    sql,
-                    (user_id, associated_to)
+        with self.database_session() as session:
+            stmt = select(Salts.salt_value).where(
+                and_(
+                    Salts.user_id == user_id,
+                    Salts.associated_to == associated_to
                 )
-                salt = cursor.fetchone()[0]
-                salt = base64.b64decode(salt)
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
             )
+
+            salt = session.execute(stmt).fetchone()[0]
+            salt = base64.b64decode(salt)
+
+            logger.info(f"{salt = }")
         
         logger.info(
             constants.REQUEST_SALT_VALUE(
@@ -652,29 +551,22 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-        
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "UPDATE salts SET salt_value = %s, hashed_data = %s, updated_at = %s WHERE user_id = %s AND associated_to = %s"
 
-                cursor.execute(
-                    sql,
-                    (   
-                        new_salt_value,
-                        new_hashed_data,
-                        updated_at,
-                        user_id,
-                        associated_to
-                    )
+        with self.database_session() as session:
+            stmt = update(Salts).values(
+                salt_value=new_salt_value,
+                hashed_data=new_hashed_data,
+                updated_at=updated_at
+            ).where(
+                and_(
+                    Salts.user_id == user_id,
+                    Salts.associated_to == associated_to
                 )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
             )
+
+            session.execute(stmt)
+            session.commit()
 
     def delete_salt(self, user_id: str, associated_to: str) -> None:
         """
@@ -688,25 +580,17 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
-
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "DELETE FROM salts WHERE user_id = %s AND associated_to = %s"
-
-                cursor.execute(
-                    sql,
-                    (
-                        user_id,
-                        associated_to
-                    )
+        with self.database_session() as session:
+            stmt = delete(Salts).where(
+                and_(
+                    Salts.user_id == user_id,
+                    Salts.associated_to == associated_to
                 )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
             )
+
+            session.execute(stmt)
+            
+            session.commit()
 
     def get_auth_token_expire_time(self, user_id: str, auth_token: str) -> str:
         """
@@ -720,20 +604,19 @@ class DatabaseHandler (object):
         Returns:
             str: The `auth_token`'s expire time value.
         """
-        database_connection = self.database_connection_pool.getconn()
         expire_time = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT auth_token_expire_time FROM auth_tokens WHERE user_id = '%s' AND auth_token = '%s'" % (auth_token, user_id)
-                cursor.execute(sql)
-                
-                expire_time = cursor.fetchone()[0]
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = select(
+                AuthTokens.auth_token_expire_time
+            ).where(
+                and_(
+                    AuthTokens.user_id == user_id,
+                    AuthTokens.auth_token == auth_token
+                )
             )
+
+            expire_time = session.execute(stmt).fetchone()[0]
         
         return expire_time
     
@@ -748,38 +631,31 @@ class DatabaseHandler (object):
         Returns:
             bool: True if the `auth_token` exists, otherwise False.
         """
-        database_connection = self.database_connection_pool.getconn()
         is_valid = True
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT * FROM users WHERE user_id = %s AND auth_token = %s"
-
-                cursor.execute(
-                    sql,
-                    (user_id, hashed_auth_token)
+        with self.database_session() as session:
+            stmt = select(AuthTokens).where(
+                and_(
+                    AuthTokens.user_id == user_id,
+                    AuthTokens.auth_token == hashed_auth_token
                 )
-
-                user_data = cursor.fetchall()
-
-                if len(user_data) != 1:
-                    is_valid = False
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
             )
+
+            reponse = session.execute(stmt).fetchall()
+
+            if len(reponse) == 0:
+                is_valid = not is_valid
         
         logger.info(
             constants.VALIDATE_AUTH_TOKEN(
                 hashed_auth_token=hashed_auth_token,
                 is_valid=is_valid
-                )
             )
+        )
         
         return is_valid
 
-    def fetch_channels(self, user_id: str) -> list[tuple]:
+    def fetch_channels(self, user_id: str) -> list[tuple[Channels]]:
         """
         Fetch a list of all the available channels, which
         depends on the user. If he is not the server owner
@@ -789,32 +665,16 @@ class DatabaseHandler (object):
             `user_id` (str): The user's `user_id`.
         
         Returns:
-            list[list]: Containing metadata about the server's channels.
+            list[tuple[Channels]]: `Channels` table objects.
         """
-        database_connection = self.database_connection_pool.getconn()
-        channels_data = None
+        channels_metadata = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = """
-                    SELECT channel_id, channel_name, messages_ids, is_private, allowed_users, created_at
-                    FROM channels
-                    WHERE NOT is_private OR (is_private AND %s = ANY(allowed_users));
-                """
-                
-                cursor.execute(
-                    sql,
-                    (user_id, )
-                )
-                
-                channels_data = cursor.fetchall()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+        with self.database_session() as session:
+            stmt = select(Channels)
+
+            channels_metadata = session.execute(stmt).fetchall()
         
-        return channels_data
+        return channels_metadata
 
     def get_channels_names(self) -> list[str]:
         """ 
@@ -827,20 +687,12 @@ class DatabaseHandler (object):
         Returns:
             list[str]: A list of `channel_name`s.
         """
-        database_connection = self.database_connection_pool.getconn()
         channels_names = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT channel_name FROM channels"
+        with self.database_session() as session:
+            stmt = select(Channels.channel_name)
 
-                cursor.execute(sql)
-                channels_names = [channel_id[0] for channel_id in cursor.fetchall()]
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
+            channels_names = session.execute(stmt).fetchall()
         
         return channels_names
 
@@ -855,23 +707,11 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
+        with self.database_session() as session:
+            session.add(channel.create_table_metadata())
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "INSERT INTO channels (channel_id, channel_name, messages_ids, is_private, allowed_users, created_at) VALUES (%s, %s, %s, %s, %s, %s)"
-
-                cursor.execute(
-                    sql,
-                    channel.to_tuple()
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
-            )
-
+            session.commit()
+        
         logger.info(
             constants.NEW_CHANNEL_CREATED(
                 user_id=user_id,
@@ -880,7 +720,7 @@ class DatabaseHandler (object):
             )
         )
     
-    def get_channel_data(self, channel_id: str) -> list:
+    def get_channel_data(self, channel_id: str) -> Channels:
         """
         Fetch the metadata of a `channel` from
         the `channels` table in the database
@@ -889,34 +729,20 @@ class DatabaseHandler (object):
             `channel_id` (str): The channel's `channel_id`.
         
         Returns:
-            list: The channel's metadata.
+            Channels: A `Channels` table object.
         """
-        database_connection = self.database_connection_pool.getconn()
-        channel_data = None
+        channel_metadata = None
 
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "SELECT channel_id, channel_name, messages_ids, is_private, allowed_users, created_at FROM channels WHERE channel_id = %s"
-
-                cursor.execute(
-                    sql,
-                    (channel_id,)
-                )
-                channel_data = cursor.fetchone()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = select(
+                Channels
+            ).where(
+                Channels.channel_id == channel_id
             )
-        
-        # logger.info(
-        #     constants.REQUESTED_CHANNEL_DATA(
-        #         viewer_user_id=user_id,
-        #         channel_id=channel_id
-        #     )
-        # )
 
-        return channel_data
+            channel_metadata = session.execute(stmt).fetchone()[0]
+
+        return channel_metadata
     
     def delete_channel(self, channel_id: str) -> None:
         """
@@ -929,22 +755,14 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
-
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "DELETE FROM channels WHERE channel_id = %s"
-
-                cursor.execute(
-                    sql,
-                    (channel_id, )
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = delete(Channels).where(
+                Channels.channel_id == channel_id
             )
+
+            session.execute(stmt)
+            
+            session.commit()
     
     def add_user_to_channel(self, to_add_user_id: str, channel_id: str) -> None:
         """
@@ -957,22 +775,16 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
-
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "UPDATE channels SET allowed_users = array_append(allowed_users, %s) WHERE channel_id = %s"
-
-                cursor.execute(
-                    sql,
-                    (to_add_user_id, channel_id)
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = update(Channels).values(
+                allowed_users=text("array_append(allowed_users, %s)" % to_add_user_id)
+            ).where(
+                Channels.channel_id == channel_id
             )
+
+            session.execute(stmt)
+
+            session.commit()
 
     def remove_user_from_channel(self, to_remove_user_id: str, channel_id: str) -> None:
         """
@@ -985,19 +797,13 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        database_connection = self.database_connection_pool.getconn()
-
-        try:
-            with database_connection.cursor() as cursor:
-                sql = "UPDATE channels SET allowed_users = array_remove(allowed_users, %s) WHERE channel_id = %s"
-
-                cursor.execute(
-                    sql,
-                    (to_remove_user_id, channel_id)
-                )
-                database_connection.commit()
-        finally:
-            self.database_connection_pool.putconn(
-                database_connection,
-                close=False
+        with self.database_session() as session:
+            stmt = update(Channels).values(
+                allowed_users=text("array_remove(allowed_users, %s)" % to_remove_user_id)
+            ).where(
+                Channels.channel_id == channel_id
             )
+
+            session.execute(stmt)
+
+            session.commit()

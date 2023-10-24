@@ -8,7 +8,7 @@ from pufferblow_api.src.user.user_manager import UserManager
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
 
 # Database
-from pufferblow_api.src.database.database_session import DatabaseSession
+from pufferblow_api.src.database.database import Database
 from pufferblow_api.src.database.database_handler import DatabaseHandler
 
 # Channels manager
@@ -25,7 +25,7 @@ class APIInitilizer(object):
     Attributes:
         pufferblow_api_config (PufferBlowAPIconfig) : A `PufferBlowAPIconfig` object.
         hasher                (Hasher)              : A `Hasher` object.
-        database_session      (DatabaseSession)     : A `DatabaseSession` object.
+        database      (Database)     : A `Database` object.
         database_handler      (DatabaseHandler)     : A `DatabaseHandler` object.
         auth_token_manager    (AuthTokenManager)    : A `AuthTokenManager` object.
         user_manager          (UserManager)         : A `UserManger` object.
@@ -33,7 +33,7 @@ class APIInitilizer(object):
     """
     pufferblow_api_config   :       PufferBlowAPIconfig     =   None
     hasher                  :       Hasher                  =   None
-    database_session        :       DatabaseSession         =   None
+    database        :       Database                =   None
     database_handler        :       DatabaseHandler         =   None
     auth_token_manager      :       AuthTokenManager        =   None
     user_manager            :       UserManager             =   None
@@ -59,16 +59,18 @@ class APIInitilizer(object):
         self.hasher = Hasher()
 
         # Init Database Connection
-        self.database_session = DatabaseSession(
+        self.database = Database(
             supabase_url            =   self.pufferblow_api_config.SUPABASE_URL,
             supabase_key            =   self.pufferblow_api_config.SUPABASE_KEY,
             pufferblow_api_config   =   self.pufferblow_api_config
         )
 
         # Init Database handler
+        database_engine  = self.database.create_database_engine_instance()
+        
         self.database_handler = DatabaseHandler(
-            database_connection_pool    =       self.database_session.database_connection_pool(),
-            hasher                      =       self.hasher
+            database_engine       =      database_engine,
+            hasher                =      self.hasher
         )
 
         # Init Auth tokens manager

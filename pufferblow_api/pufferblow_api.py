@@ -11,6 +11,9 @@ from pufferblow_api.api_initializer import api_initilizer
 from pufferblow_api.src.utils.extract_user_id import extract_user_id
 from pufferblow_api.src.utils.is_able_to_update import is_able_to_update
 
+# Base
+from pufferblow_api.src.database.tables.declarative_base import Base
+
 # Init PufferBlow's API
 api = FastAPI()
 
@@ -19,6 +22,9 @@ async def pufferblow_api_startup():
     """ PufferBlow's API startup handler """
     # Load all the needed objects
     api_initilizer.load_objects()
+
+    # Setup the tables (will get skipped if they already exists)
+    api_initilizer.database_handler.setup_tables(Base)
 
 @api.get("/")
 def redirect_route():
@@ -128,14 +134,15 @@ async def users_profile_route(
             detail=f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"
         )
 
-    hashed_auth_token = api_initilizer.auth_token_manager._encrypt_auth_token(
-        user_id=viewer_user_id,
-        auth_token=auth_token
+    # Check if viewer user owns the targeted account
+    is_account_owner = api_initilizer.auth_token_manager.check_users_auth_token(
+        user_id=user_id,
+        raw_auth_token=auth_token
     )
 
     user_data = api_initilizer.user_manager.user_profile(
         user_id=user_id,
-        hashed_auth_token=hashed_auth_token
+        is_account_owner=is_account_owner
     )
 
     return {
@@ -340,11 +347,11 @@ async def reset_users_auth_token_route(
     # with the new one
     salt = api_initilizer.hasher.encrypt_with_bcrypt(
         user_id=user_id,
-        data=new_auth_token,
+        data=new_auth_token
     )
 
     hashed_auth_token = salt.hashed_data
-    new_auth_token_expire_time = api_initilizer.auth_token_manager.auth_token_expire_time()
+    new_auth_token_expire_time = api_initilizer.auth_token_manager.create_auth_token_expire_time()
 
     api_initilizer.database_handler.update_salt(
         user_id=user_id,
@@ -407,7 +414,7 @@ def list_users_route(
 
     users = api_initilizer.user_manager.list_users(
         viewer_user_id=viewer_user_id,
-        auth_token=hashed_auth_token
+        auth_token=auth_token
     )
 
     return {
@@ -462,8 +469,8 @@ def list_channels_route(
         )
 
     channels_list = api_initilizer.channels_manager.list_channels(
-            user_id=user_id
-        )
+        user_id=user_id
+    )
 
     return {
         "status_code": 200,
