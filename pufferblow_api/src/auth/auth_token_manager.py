@@ -1,3 +1,4 @@
+import bcrypt
 import random
 import string
 import base64
@@ -142,8 +143,18 @@ class AuthTokenManager (object):
             auth_token=hashed_auth_token
         )
     
-    def auth_token_expire_time(self):
-        """ Returns the expire time for `auth_token` """
+    def create_auth_token_expire_time(self):
+        """
+        Create the expire time for the created `auth_token`
+        `auth_token`s will get expired after 30 days by 
+        default
+
+        Args:
+            `None`.
+        
+        Returns:
+            str: A formatted date string representing the expiration time for the `auth_token`.
+        """
         expire_time = datetime.date.today()
 
         if expire_time.month != 12:
@@ -158,6 +169,36 @@ class AuthTokenManager (object):
         
         return expire_time.strftime("%Y-%m-%d")
     
+    def check_users_auth_token(self, user_id: str, raw_auth_token: str) -> bool:
+        """
+        Check wheither the `auth_token` belongs to this `user_id` or not
+        
+        Args:
+            `user_id` (str): The user's `user_id`.
+            `raw_auth_token` (str): The raw `auth_token` given by this `user_id`.
+
+        Returns:
+            bool: True if the `auth_token` belongs to this `user_id`, otherwise False.
+        """
+        user_data = self.database_handler.fetch_user_data(
+            user_id=user_id
+        )
+
+        hashed_auth_token = base64.b64decode(user_data.auth_token)
+        
+        # When hashing some data using `bcrypt` with a `salt`
+        # it's not possible to just take the `data` that we think
+        # is the one we hashed and use the same `salt` and expect it
+        # to yield the same hashed version of the `data` in order to compare
+        # what the data that the user gave and what is already hashed and saved
+        # in the database. To overcome that, we use the builtin function `checkpw`
+        # that `bcrypt` provide to compare these data in order to know if they are
+        # same, and in this context check the user's `auth_token`
+        return bcrypt.checkpw(
+            raw_auth_token.encode("utf-8"),
+            hashed_auth_token
+        )   
+
     def _encrypt_auth_token(self, user_id: str, auth_token: str) -> str:
         """ 
         Returns the hashed version of the auth_token using the same salt that
@@ -170,6 +211,10 @@ class AuthTokenManager (object):
         Returns:
             str: hashed version of the `auth_token``
         """
+        # NOTE: This function will not be used, as there is a fix
+        # for not being able to get the right hashed `auth_token`
+        # the function `auth_token_manager.check_users_auth_token`
+        # is it's replacement
         salt = self.database_handler.get_salt(
             user_id=user_id,
             associated_to="auth_token"
