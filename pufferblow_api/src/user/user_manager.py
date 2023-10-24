@@ -37,7 +37,7 @@ class UserManager (object):
 
         user_id                 =   self._generate_user_id(username=username)
         auth_token              =   f"{user_id}.{self.auth_token_manager.create_token()}"
-        auth_token_expire_time  =   self.auth_token_manager.auth_token_expire_time()
+        auth_token_expire_time  =   self.auth_token_manager.create_auth_token_expire_time()
 
         new_user.user_id                                =       user_id
         new_user.username                               =       self._encrypt_data(
@@ -89,9 +89,14 @@ class UserManager (object):
         users_id = self.database_handler.get_users_id()
 
         for user_id in users_id:
+            is_account_owner = self.auth_token_manager.check_users_auth_token(
+                user_id=user_id,
+                raw_auth_token=auth_token
+            )
+
             user_data = self.user_profile(
                 user_id=user_id,
-                hashed_auth_token=auth_token # The `auth_token` of the viewer_user_id it will not be the `auth_token` of the other users unless the current `user_id` == `viewer_user_id`
+                is_account_owner=is_account_owner
             )
 
             users.append(user_data)
@@ -105,13 +110,13 @@ class UserManager (object):
 
         return users
 
-    def user_profile(self, user_id: str, hashed_auth_token: str) -> dict:
+    def user_profile(self, user_id: str, is_account_owner: bool | None = False) -> dict:
         """
         Fetch the user's profile metadata
         
         Paramters:
             `user_id` (str): The user's `user_id`.
-            `hashed_auth_token` (str): The hashed user's `auth_token`.
+            `is_account_owner` (bool, optional, default: False): Is this `user_id` ownes this account.
         
         Returns:
             dict: The user's profile metadata in a dict format.
@@ -120,41 +125,26 @@ class UserManager (object):
             user_id=user_id,
         )
 
-        encrypted_username              =       user_data[1]
-        hashed_user_auth_token          =       user_data[7]
-        auth_token_expire_time          =       user_data[8]
-
-        status      =   user_data[3]
-        last_seen   =   user_data[4]
-        created_at  =   user_data[9]
-        updated_at  =   user_data[10]
-
-        is_admin    =   user_data[11]
-        is_owner    =   user_data[12]
-
-        conversations   =   user_data[5]
-        contacts        =   user_data[6]
-
         user = User()
 
-        user.user_id = user_id
+        user.user_id = user_data.user_id
         user.username = self._decrypt_data(
             user_id=user.user_id,
-            data=encrypted_username,
+            data=user_data.username,
             associated_to="username"
         )
-        user.status             =       status
-        user.last_seen          =       last_seen
-        user.created_at         =       created_at
-        user.is_admin           =       is_admin
-        user.is_owner           =       is_owner
+        user.status         =    user_data.status
+        user.last_seen      =    user_data.last_seen
+        user.created_at     =    user_data.created_at
+        user.is_admin       =    user_data.is_admin
+        user.is_owner       =    user_data.is_owner
         
         # Check if the user owns the account
-        if hashed_auth_token == hashed_user_auth_token:
-            user.auth_token_expire_time     =       auth_token_expire_time
-            user.conversations              =       conversations
-            user.contacts                   =       contacts
-            user.updated_at                 =       updated_at
+        if is_account_owner:
+            user.auth_token_expire_time     =       user_data.auth_token_expire_time
+            user.conversations              =       user_data.conversations
+            user.contacts                   =       user_data.contacts
+            user.updated_at                 =       user_data.updated_at
         
         user_data = user.to_json()
 
@@ -190,18 +180,13 @@ class UserManager (object):
             return False
         
         if auth_token is not None:
-            hashed_auth_token = self.auth_token_manager._encrypt_auth_token(
+            is_users_auth_token = self.auth_token_manager.check_users_auth_token(
                 user_id=user_id,
-                auth_token=auth_token
+                raw_auth_token=auth_token
             )
-            user_data = self.database_handler.fetch_user_data(user_id=user_id)
 
-            user_auth_token = user_data[7]
-
-            # Check if the `auth_token` don't match
-            if hashed_auth_token != user_auth_token:
-                return False
-
+            return is_users_auth_token
+         
         return True
     
     def is_server_owner(self, user_id: str) -> bool:
@@ -218,9 +203,7 @@ class UserManager (object):
             user_id=user_id
         )
 
-        is_server_owner = user_data[12]
-
-        return is_server_owner
+        return user_data.is_owner
     
     def is_admin(self, user_id: str) -> bool:
         """
@@ -236,9 +219,7 @@ class UserManager (object):
             user_id=user_id
         )
 
-        is_admin = user_data[11]
-
-        return is_admin
+        return user_data.is_admin
     
     def check_username(self, username: str) -> bool:
         """
@@ -251,7 +232,7 @@ class UserManager (object):
             bool: True is the username exists, otherwise False.
         """
         usernames = self.database_handler.get_usernames()
-
+        
         if username in usernames:
             return True
         
@@ -272,7 +253,7 @@ class UserManager (object):
             user_id=user_id
         )
         
-        hashed_user_password = base64.b64decode(user_data[2]) # Saved hashed version of the user's password
+        hashed_user_password = base64.b64decode(user_data.password_hash) # Saved hashed version of the user's password
 
         hashed_user_passwords_salt = self.database_handler.get_salt(
             user_id=user_id,
@@ -305,7 +286,7 @@ class UserManager (object):
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id,
         )
-        encrypted_old_username = base64.b64decode(user_data[1])
+        encrypted_old_username = base64.b64decode(user_data.username)
 
         username_decryption_key = self.database_handler.get_decryption_key(
             user_id=user_id,
@@ -323,7 +304,9 @@ class UserManager (object):
             key=username_decryption_key
         )
         
-        encrypted_new_username, encryption_key =  self.hasher.encrypt_with_blowfish(data=new_username)
+        encrypted_new_username, encryption_key =  self.hasher.encrypt_with_blowfish(
+            data=new_username
+        )
 
         encrypted_new_username = base64.b64encode(encrypted_new_username).decode("ascii")
 
@@ -361,9 +344,9 @@ class UserManager (object):
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id
         )
-        users_status = user_data[3]
+        # users_status = user_data.status
 
-        if users_status == status:
+        if user_data.status == status:
             logger.info(
                 constants.USER_STATUS_UPDATE_SKIPPED(
                     user_id=user_id,
@@ -379,7 +362,7 @@ class UserManager (object):
         logger.info(
             constants.UPDATE_USER_STATUS(
                 user_id=user_id,
-                from_status=users_status,
+                from_status=user_data.status,
                 to_status=status
             )
         )
@@ -404,16 +387,16 @@ class UserManager (object):
 
         hashed_new_password = salt.hashed_data
 
+        self.database_handler.update_salt(
+            user_id=user_id,
+            associated_to=salt.associated_to,
+            new_salt_value=salt.salt_value,
+            new_hashed_data=hashed_new_password
+        )
+
         self.database_handler.update_user_password(
             user_id=user_id,
             hashed_new_password=hashed_new_password
-        )
-
-        self.database_handler.update_salt(
-            user_id=user_id,
-            associated_to="password",
-            new_salt_value=salt.salt_value,
-            new_hashed_data=hashed_new_password
         )
 
         logger.info(
@@ -510,7 +493,7 @@ class UserManager (object):
         data = base64.b64decode(data)
 
         decrypted_data = self.hasher.decrypt_with_blowfish(
-            data,
+            encrypted_data=data,
             key=decryption_key
         )
 

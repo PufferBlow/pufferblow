@@ -1,3 +1,4 @@
+from venv import logger
 import bcrypt
 import base64
 import datetime
@@ -94,10 +95,12 @@ class Hasher (object):
                 data.encode("utf-8"),
                _salt.salt_value
             )
-
+            
             return hashed_data
 
-        _salt.salt_value   =    bcrypt.gensalt()
+        _salt.salt_value   =   bcrypt.gensalt(
+            rounds=17
+        )
 
         _salt.user_id           =   user_id
         _salt.associated_to     =   ""
@@ -110,7 +113,7 @@ class Hasher (object):
 
         _salt.salt_value  = base64.b64encode(_salt.salt_value).decode("ascii")
         _salt.hashed_data = base64.b64encode(hashed_data).decode("ascii")
-
+        
         return _salt
 
     def _generate_key(self, data: str) -> dict:

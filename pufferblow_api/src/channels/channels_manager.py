@@ -37,23 +37,15 @@ class ChannelsManager (object):
         channels = []
 
         for channel_data in channels_data:
-            channel_id      =   channel_data[0]
-            channel_name    =   channel_data[1]
-            messages_ids    =   channel_data[2]
-            is_private      =   channel_data[3]
-            allowed_users   =   channel_data[4]
-            created_at      =   channel_data[5]
-
+            channel_data = channel_data[0]
+            
             channel = Channel()
 
-            channel.channel_id      =   channel_id
-            channel.channel_name    =   channel_name
-            channel.messages_ids    =   messages_ids
-            channel.is_private      =   is_private
-            channel.allowed_users   =   allowed_users
-            channel.created_at      =   created_at
+            channel_metadata_json = channel.load_table_metadata(
+                table_metadata=channel_data
+            ) # dict formated channel's metadata
 
-            channels.append(channel.to_json())
+            channels.append(channel_metadata_json)
         
         return channels
 
@@ -113,7 +105,7 @@ class ChannelsManager (object):
             channel_id=channel_id
         )
 
-        if len(channel_data) == 0:
+        if not channel_data: # If the channel doesn't exists `None` is returned
             return False
     
         return True
@@ -132,7 +124,7 @@ class ChannelsManager (object):
             channel_id=channel_id
         )
         
-        return channel_data[3] # `is_private` column value
+        return channel_data.is_private
 
     def add_user_to_channel(self, user_id: str, to_add_user_id: str, channel_id: str) -> None:
         """
