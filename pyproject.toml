@@ -21,6 +21,7 @@ loguru = "^0.7.2"
 pytz = "^2023.3"
 psycopg2-binary = "^2.9.9"
 pytest = "^7.4.2"
+sqlalchemy = "^2.0.22"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.2"
