@@ -152,17 +152,17 @@ all = ["email-validator (>=2.0.0)", "httpx (>=0.23.0)", "itsdangerous (>=1.1.0)"
 
 [[package]]
 name = "gotrue"
-version = "1.2.0"
+version = "1.3.0"
 description = "Python Client Library for GoTrue"
 optional = false
 python-versions = ">=3.8,<4.0"
 files = [
-    {file = "gotrue-1.2.0-py3-none-any.whl", hash = "sha256:b44fb3807b1ee96751cb7a64a75aa5f21d610a0de2431e4c6e81045d8cda3c79"},
-    {file = "gotrue-1.2.0.tar.gz", hash = "sha256:f80befe60d713d5b524e70591fc22df4c5be5821d370585693cd76ac8c45eeeb"},
+    {file = "gotrue-1.3.0-py3-none-any.whl", hash = "sha256:b2b08148b253f6bb6f605a269301a5a5e328730f7ad5a13c66adb5818b07c40d"},
+    {file = "gotrue-1.3.0.tar.gz", hash = "sha256:5fdd4e01b5ab1aadec8e1fd38b2570dffb21ece5c21a523c6cb8ab0bf44f3ee1"},
 ]
 
 [package.dependencies]
-httpx = ">=0.23,<0.25"
+httpx = ">=0.23,<0.26"
 pydantic = ">=1.10,<3"
 
 [[package]]
@@ -1006,32 +1006,32 @@ test = ["pylint", "pytest", "pytest-black", "pytest-cov", "pytest-pylint"]
 
 [[package]]
 name = "supabase"
-version = "1.2.0"
+version = "2.0.3"
 description = "Supabase client for Python."
 optional = false
 python-versions = ">=3.8,<4.0"
 files = [
-    {file = "supabase-1.2.0-py3-none-any.whl", hash = "sha256:1549600a3965d64de97f2eb37e4e562b7d171383f439ceaab881c5cd6a79e9f7"},
-    {file = "supabase-1.2.0.tar.gz", hash = "sha256:2597ef8ec6af973b9c9e94849204f43f47bb5f46d8c65a0c7a6bdf95ad018704"},
+    {file = "supabase-2.0.3-py3-none-any.whl", hash = "sha256:7385c1bd7897d93ba0fb1c5f33496efcbab2264eb44738c4c14284adbfd97099"},
+    {file = "supabase-2.0.3.tar.gz", hash = "sha256:89b6556bf4f5f2e3dd1255f5840ceb12c3dc187ce8947b9bc0f5f7b0ad010971"},
 ]
 
 [package.dependencies]
-gotrue = ">=1.0.4,<2.0.0"
+gotrue = ">=1.3.0,<2.0.0"
 httpx = ">=0.24.0,<0.25.0"
-postgrest = ">=0.10.8,<0.12.0"
+postgrest = ">=0.10.8,<0.14.0"
 realtime = ">=1.0.0,<2.0.0"
 storage3 = ">=0.5.3,<0.7.0"
-supafunc = ">=0.2.3,<0.3.0"
+supafunc = ">=0.3.1,<0.4.0"
 
 [[package]]
 name = "supafunc"
-version = "0.2.3"
+version = "0.3.1"
 description = "Library for Supabase Functions"
 optional = false
 python-versions = ">=3.8,<4.0"
 files = [
-    {file = "supafunc-0.2.3-py3-none-any.whl", hash = "sha256:4124773799682207d0c6ed90b72271f717373977f7de9d12a641bf32f8e13897"},
-    {file = "supafunc-0.2.3.tar.gz", hash = "sha256:b23ec2559bcd56ad74fec42cf9dd28c131ba1f00b5ba21853557ed8960891a9b"},
+    {file = "supafunc-0.3.1-py3-none-any.whl", hash = "sha256:8d0f3e09bd2d6bef2088cf91e4337aa920bf5e8ecadd24235e4a276c8c6b301c"},
+    {file = "supafunc-0.3.1.tar.gz", hash = "sha256:8ab338216f3845d52c45c9fdc3246a719d3f9b8d8647e8bc382fb5cdda54ddb9"},
 ]
 
 [package.dependencies]
@@ -1194,4 +1194,4 @@ dev = ["black (>=19.3b0)", "pytest (>=4.6.2)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "a44fd33fc99ba5e5d71b4d2347e9bb5e0ed82bdd9786fa294f589c4167eab542"
+content-hash = "4de55e0fdd3eb869605d2b4864922fa99d6b0f8b5c7399cb106e429693842235"
