@@ -11,7 +11,7 @@ packages = [{include = "pufferblow_api"}]
 python = "^3.10"
 fastapi = "^0.104.1"
 typer = "^0.9.0"
-rich = "^13.6.0"
+rich = "^13.7.0"
 uvicorn = "^0.24.0"
 pyyaml = "^6.0"
 supabase = "^1.2.0"
