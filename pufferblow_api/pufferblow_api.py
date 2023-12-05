@@ -920,10 +920,9 @@ async def channel_load_messages(auth_token: str, channel_id: str, page: int | No
         404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists.
     """
     # Check if the value of `messages_per_page` exceeded the allowed maximal value
-    if messages_per_page > 50:
-        # TODO: Add a parameter in the config to manage the allowed maximal value for `messages_per_page` 
+    if messages_per_page > api_initializer.pufferblow_api_config.MAX_MESSAGES_PER_PAGE:
         raise exceptions.HTTPException(
-            detail="`messages_per_page` number exceeded the maximal number which is `50`",
+            detail=f"`messages_per_page` number exceeded the maximal number which is '{api_initializer.pufferblow_api_config.MAX_MESSAGES_PER_PAGE}'",
             status_code=400
         )
     
@@ -1002,12 +1001,9 @@ async def channel_send_message(auth_token: str, channel_id: str, message: str):
         404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists.
     """
     # Check if the size of the `message` exceeded the allowed size
-    # TODO: Add a config parameter that controlles the maximal size
-    # of a message
-    MAX_MESSAGE_SIZE = 1014 # 1Mb
-    if sys.getsizeof(message) > MAX_MESSAGE_SIZE:
+    if sys.getsizeof(message) > api_initializer.pufferblow_api_config.MAX_MESSAGE_SIZE:
         raise exceptions.HTTPException(
-            detail="the message is too long",
+            detail="the message is too long.",
             status_code=400
         )
 
