@@ -70,7 +70,8 @@ def serve():
     OPTIONS = {
         "bind": f"{pufferblow_api_config.API_HOST}:{pufferblow_api_config.API_PORT}",
         "workers": WORKERS(pufferblow_api_config.WORKERS),
-        "timeout": pufferblow_api_config.CONNECTION_TIMEOUT,
+        "timeout": 86400, # 24 hours
+        "keepalive": 86400, # 24 hours
         "accesslog": "-",
         "errorlog": "-",
         "worker_class": "uvicorn.workers.UvicornWorker",
