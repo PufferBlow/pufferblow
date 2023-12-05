@@ -10,17 +10,19 @@ from loguru import logger
 
 from pufferblow_api import constants
 from pufferblow_api.src.hasher.hasher import Hasher
-from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
 from pufferblow_api.src.database.database_handler import DatabaseHandler
+
+# Models
+from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 
 class UserManager (object):
     """ User manager class """
     def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager,hasher: Hasher) -> None:
-        self.database_handler   =     database_handler
-        self.auth_token_manager =     auth_token_manager
-        self.hasher             =     hasher
+        self.database_handler       =     database_handler
+        self.auth_token_manager     =     auth_token_manager
+        self.hasher                 =     hasher
     
     def sign_up(self, username: str, password: str) -> User:
         """ 

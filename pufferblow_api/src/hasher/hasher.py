@@ -1,15 +1,17 @@
-from venv import logger
 import bcrypt
 import base64
 import datetime
 
 from Crypto.Cipher import Blowfish
-from Crypto.Util.Padding import pad, unpad
+from Crypto.Util.Padding import (
+    pad,
+    unpad
+)
 
 from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 
-class Hasher (object):
+class Hasher(object):
     """
     Hasher class used to encrypt and decrypt data,
     it support two types of encryptions, the first
@@ -18,7 +20,7 @@ class Hasher (object):
     def __init__(self) -> None:
         pass
 
-    def encrypt_with_blowfish(self, data: str, is_to_check: bool | None=False, key: bytes | None=None) -> tuple[str, str] | str:
+    def encrypt_with_blowfish(self, data: str, is_to_check: bool | None = False, key: bytes | None=None) -> tuple[str, EncryptionKey] | str:
         """
         Encrypt the data using Blowfish algorithm.
         It uses CBC (Cipher Block Chaining) mode 

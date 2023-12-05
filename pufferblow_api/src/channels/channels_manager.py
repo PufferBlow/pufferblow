@@ -105,7 +105,7 @@ class ChannelsManager (object):
             channel_id=channel_id
         )
 
-        if not channel_data: # If the channel doesn't exists `None` is returned
+        if not channel_data: # If the channel doesn't exists, `None` is returned
             return False
     
         return True
