@@ -10,6 +10,7 @@ def client():
     # to trigger startup/shutdown events
     with TestClient(api) as test_client:
         return test_client
+
 route = "/api/v1/users/list"
 
 def test_list_users(client: TestClient):

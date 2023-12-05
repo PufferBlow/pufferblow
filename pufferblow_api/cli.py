@@ -39,7 +39,7 @@ def setup():
 
 @cli.command()
 def serve():
-    """ Serves the API on the passed host and port """
+    """ Serve PufferBlow's API """
     if pufferblow_api_config.SUPABASE_URL == "<your supabase url>" and pufferblow_api_config.SUPABASE_KEY == "<your supabase key>":
         print(f"[bold red] [  ?  ] [bold white] Config error: please edit the [italic yellow]`supabase_url`[/][bold white] and [italic yellow]`supabase_key`[/][bold white] feilds in [bold cyan]{constants.PUFFERBLOW_CONFIG_PATH}[white]")
         sys.exit(1)
