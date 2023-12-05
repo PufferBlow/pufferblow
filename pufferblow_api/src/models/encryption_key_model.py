@@ -6,10 +6,11 @@ from pufferblow_api.src.database.tables.keys import Keys
 
 class EncryptionKey (object):
     """ Encryption key data class """
+    
     key_value           :           str
     associated_to       :           str
-    user_id             =           None
-    message_id          =           None
+    user_id             :           str = None
+    message_id          :           str = None
     created_at          =           datetime.date.today().strftime("%Y-%m-%d")
 
     def create_table_metadata(self) -> Keys:
