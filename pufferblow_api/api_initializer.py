@@ -62,7 +62,11 @@ class APIInitializer(object):
         self.pufferblow_api_config = PufferBlowAPIconfig()
 
         # Init the hasher (Responsible for encrypting and decrypting data)
-        self.hasher = Hasher()
+        self.hasher = Hasher(
+            derived_key_bytes       =       self.pufferblow_api_config.DERIVED_KEY_BYTES,
+            derived_key_rounds      =       self.pufferblow_api_config.DERIVED_KEY_ROUNDS,
+            salt_rounds             =       self.pufferblow_api_config.SALT_ROUNDS
+        )
 
         # Init Database Connection
         self.database = Database(

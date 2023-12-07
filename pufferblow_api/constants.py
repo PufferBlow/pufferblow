@@ -1,11 +1,11 @@
 import os
 
 # PufferBlow-api info
-PACKAGE_NAME = "PufferBlow-api"
-VERSION      = "0.1.0"
-AUTHER       = "ramsy0dev"
-GITHUB       = "https://github.com/PufferBlow/PufferBlow-api"  
-ORG_GITHUB   = "https://github.com/PufferBlow"
+PACKAGE_NAME    =   "PufferBlow-api"
+VERSION         =   "0.1.0"
+AUTHER          =   "ramsy0dev"
+GITHUB          =   "https://github.com/PufferBlow/PufferBlow-api"  
+ORG_GITHUB      =   "https://github.com/PufferBlow"
 
 # `Home` path
 HOME = os.environ["HOME"]
@@ -19,13 +19,8 @@ PUFFERBLOW_CONFIG = f"""# This is the config file for pufferblow-api
 api:
  - host: "0.0.0.0"
  - port: 7575
- - logs_path: {HOME}/pufferblow_api.log
+ - logs_path: "{HOME}/pufferblow_api.log"
  - workers: 7 # number of workers for guvicorn, the higher the better
-
-messages:
- - max_message_size: 1024 # Maximum size of a message to be sent in KB
- - max_messages_per_page: 50 # Maximum number of messages for each page, recomended to be 50
- - min_messages_per_page: 20 # Minimal number of messages for each page, recommended to be 20
 
 supabase:
  - supabase_url: "<your supabase url>"
@@ -36,6 +31,16 @@ supabase:
     - password: "<your password>"
     - host: "<your database host>"
     - port: "<your database port>"
+
+encryption:
+ - derived_key_bytes: 64 # This specifies the bytes length of the derived key. A 64-bit key provides a good balance between security and performance. The bytes should be 1-512.
+ - derived_key_rounds: 14 # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
+ - salt_rounds: 14 # This represents the number of iterations for the salt generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
+
+ messages:
+ - max_message_size: 1024 # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
+ - max_messages_per_page: 50 # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
+ - min_messages_per_page: 20 # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
 """
 
 # Salt and derived key associations
