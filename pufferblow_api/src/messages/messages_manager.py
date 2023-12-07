@@ -58,7 +58,6 @@ class MessagesManager(object):
             
         messages_metadata: list[tuple] = list()
 
-        logger.debug(f"{messages = }")
         for message in messages:
             message_metadata = Message()
 

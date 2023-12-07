@@ -11,7 +11,7 @@ ORG_GITHUB   = "https://github.com/PufferBlow"
 HOME = os.environ["HOME"]
 
 # PufferBlow-api default config file
-PUFFERBLOW_CONFIG_PATH = f"{HOME}/.config/pufferblow-api/config.yaml"
+PUFFERBLOW_CONFIG_PATH = f"{HOME}/.pufferblow-api/config.yaml"
 PUFFERBLOW_CONFIG = f"""# This is the config file for pufferblow-api
 # please if you do edit this file you will need
 # to restart, in order to apply the changes
@@ -20,8 +20,12 @@ api:
  - host: "0.0.0.0"
  - port: 7575
  - logs_path: {HOME}/pufferblow_api.log
- - workers: 7 # number of workers for guvicorn
- - connection_timeout: 60 # in seconds
+ - workers: 7 # number of workers for guvicorn, the higher the better
+
+messages:
+ - max_message_size: 1024 # Maximum size of a message to be sent in KB
+ - max_messages_per_page: 50 # Maximum number of messages for each page, recomended to be 50
+ - min_messages_per_page: 20 # Minimal number of messages for each page, recommended to be 20
 
 supabase:
  - supabase_url: "<your supabase url>"
