@@ -11,11 +11,6 @@ class PufferBlowAPIconfig:
     LOGS_PATH               :       str     =   config["api"][2]["logs_path"]
     WORKERS                 :       int     =   config["api"][3]["workers"]
 
-    # Messages related parameters
-    MAX_MESSAGE_SIZE        :       int     =   config["messages"][0]["max_message_size"]
-    MAX_MESSAGES_PER_PAGE   :       int     =   config["messages"][1]["max_messages_per_page"]
-    MIN_MESSAGES_PER_PAGE   :       int     =   config["messages"][2]["min_messages_per_page"]
-
     # Supabase/postgresql related parameters
     SUPABASE_URL            :       str     =   config["supabase"][0]["supabase_url"]
     SUPABASE_KEY            :       str     =   config["supabase"][1]["supabase_key"]
@@ -24,3 +19,13 @@ class PufferBlowAPIconfig:
     DATABASE_PASSWORD       :       str     =   config["supabase"][2]["postregsql"][2]["password"]
     DATABASE_HOST           :       str     =   config["supabase"][2]["postregsql"][3]["host"]
     DATABASE_PORT           :       int     =   config["supabase"][2]["postregsql"][4]["port"]   
+
+    # Encryption
+    DERIVED_KEY_BYTES       :       int     =   config["encryption"][0]["derived_key_bytes"]
+    DERIVED_KEY_ROUNDS      :       int     =   config["encryption"][1]["derived_key_rounds"]
+    SALT_ROUNDS             :       int     =   config["encryption"][2]["salt_rounds"]
+    
+    # Messages related parameters
+    MAX_MESSAGE_SIZE        :       int     =   config["messages"][0]["max_message_size"]
+    MAX_MESSAGES_PER_PAGE   :       int     =   config["messages"][1]["max_messages_per_page"]
+    MIN_MESSAGES_PER_PAGE   :       int     =   config["messages"][2]["min_messages_per_page"]
