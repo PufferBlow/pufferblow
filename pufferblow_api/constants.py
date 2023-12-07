@@ -33,9 +33,9 @@ supabase:
     - port: "<your database port>"
 
 encryption:
- - derived_key_bytes: 64 # This specifies the bytes length of the derived key. A 64-bit key provides a good balance between security and performance. The bytes should be 1-512.
- - derived_key_rounds: 14 # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
- - salt_rounds: 14 # This represents the number of iterations for the salt generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
+ - derived_key_bytes: 56 # This specifies the bytes length of the derived key. A 56-bit key provides a good balance between security and performance. The bytes should be 5 to 56 bytes.
+ - derived_key_rounds: 49 # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
+ - salt_rounds: 49 # This represents the number of iterations for the salt generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
 
  messages:
  - max_message_size: 1024 # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
