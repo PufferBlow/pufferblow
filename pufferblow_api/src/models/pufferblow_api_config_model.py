@@ -1,9 +1,9 @@
 from pufferblow_api.src.conf_file_reader.load_config import load_config
 
 class PufferBlowAPIconfig:
-    """ PufferBlow-api's config class """
+    """ PufferBlow-api's config model class """
     
-    config = load_config()
+    config = load_config() # load config from `config.yaml` file
 
     # API related parameters
     API_HOST                :       str     =   config["api"][0]["host"]
@@ -29,3 +29,11 @@ class PufferBlowAPIconfig:
     MAX_MESSAGE_SIZE        :       int     =   config["messages"][0]["max_message_size"]
     MAX_MESSAGES_PER_PAGE   :       int     =   config["messages"][1]["max_messages_per_page"]
     MIN_MESSAGES_PER_PAGE   :       int     =   config["messages"][2]["min_messages_per_page"]
+
+    # Server info
+    SERVER_SHA256           :       str     =   config["server_info"][0]["server_sha256"]
+    SERVER_NAME             :       str     =   config["server_info"][1]["server_name"]
+    SERVER_DESCRIPTION      :       str     =   config["server_info"][2]["server_description"]
+    SERVER_AVATAR_URL       :       str     =   config["server_info"][3]["server_avatar_url"]
+    SERVER_MAINTAINER_NAME  :       str     =   config["server_info"][4]["server_maintainer_name"]
+    SERVER_WELCOME_MESSAGE  :       str     =   config["server_info"][5]["server_welcome_message"]
