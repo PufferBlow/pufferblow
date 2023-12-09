@@ -38,15 +38,24 @@ async def pufferblow_api_startup():
 
 @api.get("/")
 async def redirect_route():
-    return responses.RedirectResponse("/api/v1")
+    return responses.RedirectResponse("/api/v1/info")
 
 @api.get("/api/v1", status_code=200)
 async def home_route():
-    """ Main route """
+    """ Main route, redirect to /api/v1/info """
+    return responses.RedirectResponse("/api/v1/info")
+
+@api.get("/api/v1/info", status_code=200)
+async def server_info_route():
+    """ Server info route """
     return {
         "status_code": 200,
-        "message": "Welcome to PufferBlow's api",
-        "github": constants.ORG_GITHUB
+        "server_sha256": api_initializer.pufferblow_api_config.SERVER_SHA256,
+        "server_name": api_initializer.pufferblow_api_config.SERVER_NAME,
+        "server_description": api_initializer.pufferblow_api_config.SERVER_DESCRIPTION,
+        "server_avatar_url": api_initializer.pufferblow_api_config.SERVER_AVATAR_URL,
+        "server_maintainer_name": api_initializer.pufferblow_api_config.SERVER_MAINTAINER_NAME,
+        "number_of_users": api_initializer.database_handler.count_users()
     }
 
 # Users routes

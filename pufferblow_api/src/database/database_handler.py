@@ -9,6 +9,7 @@ from sqlalchemy import (
     update,
     delete,
     and_,
+    func,
     desc,
     text
 )
@@ -120,6 +121,23 @@ class DatabaseHandler (object):
             user = session.execute(stmt).fetchone()[0]
 
         return user
+
+    def count_users(self) -> int:
+        """
+        Counts the number of users signed up on the server
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        users_number: int = None
+
+        with self.database_session() as session:
+            users_number = session.query(func.count(Users.user_id)).scalar()
+        
+        return users_number
 
     def get_user_read_messages_ids(self, user_id: str) -> list[str]:
         """
