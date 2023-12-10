@@ -26,7 +26,7 @@ jobs:
     - name: Create config file
       run: |
         mkdir -p ~/.pufferblow-api
-        echo "${{ secrets.CONFIG_FILE }}" > ~/.pufferblow-api/config.yaml
+        cp pufferblow_api/tests/config-for-tests.yaml ~/.pufferblow-api/config.yaml
     - name: Install dependencies
       run: poetry install
     - name: Run tests
