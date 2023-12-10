@@ -34,7 +34,7 @@ supabase:
 
 encryption:
  - derived_key_bytes: 56 # This specifies the bytes length of the derived key. A 56-bit key provides a good balance between security and performance. The bytes should be 5 to 56 bytes.
- - derived_key_rounds: 49 # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
+ - derived_key_rounds: 100 # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
  - salt_rounds: 49 # This represents the number of iterations for the salt generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
 
  messages:
