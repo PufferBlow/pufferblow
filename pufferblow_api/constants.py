@@ -35,9 +35,9 @@ supabase:
 encryption:
  - derived_key_bytes: 56 # This specifies the bytes length of the derived key. A 56-bit key provides a good balance between security and performance. The bytes should be 5 to 56 bytes.
  - derived_key_rounds: 100 # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
- - salt_rounds: 49 # This represents the number of iterations for the salt generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
+ - salt_rounds: 18 # This represents the number of iterations for the salt generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
 
- messages:
+messages:
  - max_message_size: 1024 # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
  - max_messages_per_page: 50 # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
  - min_messages_per_page: 20 # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
