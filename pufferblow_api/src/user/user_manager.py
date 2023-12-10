@@ -16,14 +16,16 @@ from pufferblow_api.src.database.database_handler import DatabaseHandler
 # Models
 from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
+from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
 class UserManager (object):
     """ User manager class """
-    def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager,hasher: Hasher) -> None:
-        self.database_handler       =     database_handler
-        self.auth_token_manager     =     auth_token_manager
-        self.hasher                 =     hasher
-    
+    def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager,hasher: Hasher, pufferblow_config_model: PufferBlowAPIconfig) -> None:
+        self.database_handler           =     database_handler
+        self.auth_token_manager         =     auth_token_manager
+        self.hasher                     =     hasher
+        self.pufferblow_config_model    =     pufferblow_config_model
+
     def sign_up(self, username: str, password: str) -> User:
         """ 
         Sign up a new user
@@ -65,9 +67,11 @@ class UserManager (object):
         new_user.status                                 =       "online"
         new_user.contacts                               =       []
         new_user.conversations                          =       []
+        new_user.joined_servers_sha256                  =       [self.pufferblow_config_model.SERVER_SHA256, ]
         new_user.created_at                             =       datetime.date.today().strftime("%Y-%m-%d")
         new_user.last_seen                              =       datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
-
+        new_user.updated_at                             =       None
+        
         self.database_handler.sign_up(
             user_data=new_user
         )

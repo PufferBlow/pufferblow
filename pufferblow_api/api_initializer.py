@@ -79,8 +79,9 @@ class APIInitializer(object):
         database_engine  = self.database.create_database_engine_instance()
         
         self.database_handler = DatabaseHandler(
-            database_engine       =      database_engine,
-            hasher                =      self.hasher
+            database_engine         =      database_engine,
+            hasher                  =      self.hasher,
+            pufferblow_config_model =      self.pufferblow_api_config
         )
 
         # Init Auth tokens manager
@@ -91,9 +92,10 @@ class APIInitializer(object):
 
         # Init user manager
         self.user_manager = UserManager(
-            database_handler        =       self.database_handler,
-            auth_token_manager      =       self.auth_token_manager,
-            hasher                  =       self.hasher
+            database_handler          =     self.database_handler,
+            auth_token_manager        =     self.auth_token_manager,
+            hasher                    =     self.hasher,
+            pufferblow_config_model   =     self.pufferblow_api_config
         )
 
         # Init channels manager

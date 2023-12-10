@@ -25,6 +25,7 @@ from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.models.channel_model import Channel
 from pufferblow_api.src.models.message_model import Message
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
+from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
 # Utils
 from pufferblow_api.src.utils.current_date import date_in_gmt
@@ -40,10 +41,11 @@ from pufferblow_api.src.database.tables.message_read_history import MessageReadH
 
 class DatabaseHandler (object):
     """ Database handler for PufferBlow's API """
-    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher) -> None:
-        self.database_engine    =    database_engine
-        self.database_session   =    sessionmaker(bind=self.database_engine)
-        self.hasher             =    hasher
+    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher, pufferblow_config_model: PufferBlowAPIconfig) -> None:
+        self.database_engine            =    database_engine
+        self.database_session           =    sessionmaker(bind=self.database_engine)
+        self.hasher                     =    hasher
+        self.pufferblow_config_model    =    pufferblow_config_model
     
     def setup_tables(self, base: DeclarativeBase) -> None:
         """
