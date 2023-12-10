@@ -32,7 +32,7 @@ jobs:
     - name: Run tests
       uses: pavelzw/pytest-action@v2
       with:
-        emoji: true
-        verbose: true
+        emoji: false
+        verbose: false
         job-summary: true
         custom-pytest: 'poetry run pytest pufferblow_api/tests'
