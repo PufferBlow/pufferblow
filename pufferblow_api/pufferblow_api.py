@@ -10,6 +10,7 @@ from fastapi import (
     exceptions
 )
 from loguru import logger
+from contextlib import asynccontextmanager
 
 from pufferblow_api import constants
 from pufferblow_api.api_initializer import api_initializer
@@ -24,17 +25,21 @@ from pufferblow_api.src.models.message_model import Message
 # Base
 from pufferblow_api.src.database.tables.declarative_base import Base
 
-# Init PufferBlow's API
-api = FastAPI()
-
-@api.on_event("startup")
-async def pufferblow_api_startup():
+@asynccontextmanager
+async def lifespan(api: FastAPI):
     """ PufferBlow's API startup handler """
     # Load all the needed objects
     api_initializer.load_objects()
 
     # Setup the tables (will get skipped if they already exists)
     api_initializer.database_handler.setup_tables(Base)
+
+    yield
+
+# Init PufferBlow's API
+api = FastAPI(
+    lifespan=lifespan
+)
 
 @api.get("/")
 async def redirect_route():
