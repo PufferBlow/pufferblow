@@ -1,7 +1,7 @@
 
 class ValueStorage:
-    """ Value storage calss for 
-    sharing vars across tests cases
+    """
+    Value storage class for sharing constants across tests cases
     """
     username                    :   str     =   "user1"
     password                    :   str     =   "12345678"
