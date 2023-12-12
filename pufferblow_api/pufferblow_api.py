@@ -38,8 +38,7 @@ async def lifespan(api: FastAPI):
 
 # Init PufferBlow's API
 api = FastAPI(
-    lifespan=lifespan,
-    debug=True
+    lifespan=lifespan
 )
 
 @api.get("/")
