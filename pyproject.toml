@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "pufferblow-api"
-version = "0.1.0"
+version = "0.0.1-beta"
 description = "Official API for PufferBlow"
-authors = ["ramsy0dev <0ramsy0@gmail.com>"]
+authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 license = "GPL-3.0"
 readme = "README.md"
 packages = [{include = "pufferblow_api"}]
