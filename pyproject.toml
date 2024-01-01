@@ -1,27 +1,28 @@
 [tool.poetry]
 name = "pufferblow-api"
-version = "0.1.0"
+version = "0.0.1-beta"
 description = "Official API for PufferBlow"
-authors = ["ramsy0dev <0ramsy0@gmail.com>"]
+authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 license = "GPL-3.0"
 readme = "README.md"
 packages = [{include = "pufferblow_api"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-fastapi = "^0.104.0"
+fastapi = "^0.108.0"
 typer = "^0.9.0"
-rich = "^13.6.0"
-uvicorn = "^0.23.2"
+rich = "^13.7.0"
+uvicorn = "^0.25.0"
 pyyaml = "^6.0"
-supabase = "^1.2.0"
-pycryptodome = "^3.19.0"
-bcrypt = "^4.0.1"
+pycryptodome = "^3.19.1"
+bcrypt = "^4.1.2"
 loguru = "^0.7.2"
 pytz = "^2023.3"
 psycopg2-binary = "^2.9.9"
-pytest = "^7.4.2"
-sqlalchemy = "^2.0.22"
+pytest = "^7.4.4"
+sqlalchemy = "^2.0.24"
+websockets = "^12.0"
+httpx = "^0.26.0"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.2"

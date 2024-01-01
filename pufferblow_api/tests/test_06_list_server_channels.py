@@ -11,7 +11,7 @@ def client():
     with TestClient(api) as test_client:
         return test_client
 
-route = "/api/v1/channels/list"
+route = "/api/v1/channel/list/"
 
 def test_list_server_channels(client: TestClient):
     """ Test the list channels route """

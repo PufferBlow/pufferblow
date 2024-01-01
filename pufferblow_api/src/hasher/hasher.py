@@ -1,24 +1,28 @@
-from venv import logger
 import bcrypt
 import base64
 import datetime
 
 from Crypto.Cipher import Blowfish
-from Crypto.Util.Padding import pad, unpad
+from Crypto.Util.Padding import (
+    pad,
+    unpad
+)
 
 from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 
-class Hasher (object):
+class Hasher(object):
     """
     Hasher class used to encrypt and decrypt data,
     it support two types of encryptions, the first
     been BlowFish and the second Bcrypt.
     """
-    def __init__(self) -> None:
-        pass
+    def __init__(self, derived_key_bytes: int, derived_key_rounds: int, salt_rounds: int) -> None:
+        self.derived_key_bytes      =     derived_key_bytes
+        self.derived_key_rounds     =     derived_key_rounds
+        self.salt_rounds            =     salt_rounds
 
-    def encrypt_with_blowfish(self, data: str, is_to_check: bool | None=False, key: bytes | None=None) -> tuple[str, str] | str:
+    def encrypt_with_blowfish(self, data: str, is_to_check: bool | None = False, key: bytes | None=None) -> tuple[str, EncryptionKey] | str:
         """
         Encrypt the data using Blowfish algorithm.
         It uses CBC (Cipher Block Chaining) mode 
@@ -99,7 +103,7 @@ class Hasher (object):
             return hashed_data
 
         _salt.salt_value   =   bcrypt.gensalt(
-            rounds=17
+            rounds=self.salt_rounds
         )
 
         _salt.user_id           =   user_id
@@ -131,8 +135,8 @@ class Hasher (object):
         derived_key = bcrypt.kdf(
             password=data.encode(),
             salt=salt,
-            desired_key_bytes=32,  # Adjust the key length as per your requirement
-            rounds=100  # Adjust the number of rounds as per your requirement
+            desired_key_bytes=self.derived_key_bytes,  # Adjust the number of rounds as per your requirement in the config file
+            rounds=self.derived_key_rounds  # Adjust the number of rounds as per your requirement in the config file
         )
 
         return derived_key

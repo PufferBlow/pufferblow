@@ -9,6 +9,8 @@ from sqlalchemy import (
     update,
     delete,
     and_,
+    func,
+    desc,
     text
 )
 
@@ -21,7 +23,9 @@ from pufferblow_api.src.hasher.hasher import Hasher
 from pufferblow_api.src.models.salt_model import Salt
 from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.models.channel_model import Channel
+from pufferblow_api.src.models.message_model import Message
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
+from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
 # Utils
 from pufferblow_api.src.utils.current_date import date_in_gmt
@@ -31,14 +35,17 @@ from pufferblow_api.src.database.tables.keys import Keys
 from pufferblow_api.src.database.tables.users import Users
 from pufferblow_api.src.database.tables.salts import Salts
 from pufferblow_api.src.database.tables.channels import Channels
+from pufferblow_api.src.database.tables.messages import Messages
 from pufferblow_api.src.database.tables.auth_tokens import AuthTokens
+from pufferblow_api.src.database.tables.message_read_history import MessageReadHistory
 
 class DatabaseHandler (object):
     """ Database handler for PufferBlow's API """
-    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher) -> None:
-        self.database_engine    =    database_engine
-        self.database_session   =    sessionmaker(bind=self.database_engine)
-        self.hasher             =    hasher
+    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher, pufferblow_config_model: PufferBlowAPIconfig) -> None:
+        self.database_engine            =    database_engine
+        self.database_session           =    sessionmaker(bind=self.database_engine)
+        self.hasher                     =    hasher
+        self.pufferblow_config_model    =    pufferblow_config_model
     
     def setup_tables(self, base: DeclarativeBase) -> None:
         """
@@ -51,8 +58,13 @@ class DatabaseHandler (object):
             `None`.
         """
         # in case a table already exists then it will be skipped
-        base.metadata.create_all(self.database_engine)
-    
+        try:
+            base.metadata.create_all(self.database_engine)
+        except sqlalchemy.exc.ProgrammingError:
+            # This error occurs when there is a duplication of
+            # table names within the database.
+            return
+        
     def sign_up(self, user_data: User) -> None:
         """
         Sign up a new user
@@ -64,9 +76,14 @@ class DatabaseHandler (object):
             `None`.
         """
         user_table_metadata = user_data.create_table_metadata()
+        message_read_history = MessageReadHistory(
+            user_id=user_data.user_id,
+            viewed_messages_ids=list(),
+        )
 
         with self.database_session() as session:
             session.add(user_table_metadata)
+            session.add(message_read_history)
 
             session.commit()
         
@@ -107,6 +124,45 @@ class DatabaseHandler (object):
 
         return user
 
+    def count_users(self) -> int:
+        """
+        Counts the number of users signed up on the server
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        users_number: int = None
+
+        with self.database_session() as session:
+            users_number = session.query(func.count(Users.user_id)).scalar()
+        
+        return users_number
+
+    def get_user_read_messages_ids(self, user_id: str) -> list[str]:
+        """
+        Fetch the user's read messages_ids from the `message_read_history`
+        table in the database
+
+        Args:
+            user_id (str): The user's `user_id`.
+
+        Returns:
+            list(str): A list of `message_id`s read by this user.
+        """
+        messages_ids: list(str) = None
+
+        with self.database_session() as session:
+            stmt = select(MessageReadHistory.viewed_messages_ids).where(
+                MessageReadHistory.user_id == user_id
+            )
+
+            messages_ids = session.execute(stmt).fetchone()[0]
+        
+        return messages_ids
+    
     def delete_auth_token(self, user_id: str, auth_token: str) -> None:
         """
         Delete the given encrypted `auth_token`
@@ -472,7 +528,7 @@ class DatabaseHandler (object):
             )
         )
         
-    def get_decryption_key(self, associated_to: str, user_id: str| None=None, message_id: str | None=None) -> str:
+    def get_decryption_key(self, associated_to: str, user_id: str | None = None, message_id: str | None = None, conversation_id: str | None = None) -> str:
         """
         Fetch an decryption `key` from the `keys` table
         in the database
@@ -481,19 +537,28 @@ class DatabaseHandler (object):
             `user_id` (str, optional, default: None): The user's `user_id`.
             `associated_to` (str): What data was this `key` used to encrypt.
             `message_id` (str , optional, default: None): The message's `message_id` (In case the encryption `key` was used to encrypt a message).
-
+            conversation_id (str, optional, default: None): The conversation's `conversation_id`.
+        
         Returns:
             str: The encryption `key` value.
         """
         key = None
 
         with self.database_session() as session:
-            stmt = select(
-                Keys.key_value
-            ).where(
+            conditions = [
+                Keys.user_id == user_id,
+                Keys.associated_to == associated_to
+            ]
+            condition = None
+
+            if message_id is not None: condition = Keys.message_id == message_id
+            if conversation_id is not None: condition = Keys.message_id == conversation_id
+
+            if condition is not None: conditions.append(condition)
+
+            stmt = select(Keys.key_value).where(
                 and_(
-                    Keys.user_id == user_id,
-                    Keys.associated_to == associated_to
+                    *conditions
                 )
             )
 
@@ -720,7 +785,7 @@ class DatabaseHandler (object):
             )
         )
     
-    def get_channel_data(self, channel_id: str) -> Channels:
+    def get_channel_data(self, channel_id: str) -> Channels | None:
         """
         Fetch the metadata of a `channel` from
         the `channels` table in the database
@@ -730,18 +795,20 @@ class DatabaseHandler (object):
         
         Returns:
             Channels: A `Channels` table object.
+            None: If the channel doesn't exists.
         """
         channel_metadata = None
 
         with self.database_session() as session:
-            stmt = select(
-                Channels
-            ).where(
+            stmt = select(Channels).where(
                 Channels.channel_id == channel_id
             )
 
-            channel_metadata = session.execute(stmt).fetchone()[0]
+            channel_metadata = session.execute(stmt).fetchone()
 
+        if channel_metadata is not None:
+            channel_metadata = channel_metadata[0]
+        
         return channel_metadata
     
     def delete_channel(self, channel_id: str) -> None:
@@ -777,7 +844,7 @@ class DatabaseHandler (object):
         """
         with self.database_session() as session:
             stmt = update(Channels).values(
-                allowed_users=text("array_append(allowed_users, %s)" % to_add_user_id)
+                allowed_users=text("array_append(allowed_users, '%s')" % to_add_user_id)
             ).where(
                 Channels.channel_id == channel_id
             )
@@ -799,11 +866,165 @@ class DatabaseHandler (object):
         """
         with self.database_session() as session:
             stmt = update(Channels).values(
-                allowed_users=text("array_remove(allowed_users, %s)" % to_remove_user_id)
+                allowed_users=text("array_remove(allowed_users, '%s')" % to_remove_user_id)
             ).where(
                 Channels.channel_id == channel_id
             )
 
             session.execute(stmt)
+
+            session.commit()
+
+    def fetch_channel_messages(self, channel_id: str, messages_per_page: int, page: int) -> list[Messages]:
+        """
+        fetch a specific number of messages from a channel from
+        the `channels` table in the database
+
+        Args:
+            channel_id (str): The channel's `channel_id`.
+            messages_per_page (int, optional, default: 20): The number of messages for each page.
+            page (int, optional, default: 1): The page number (pages start from 1 to `x` depending on how many messages a channel contains).
+
+        Returns:
+            list[Messages]: A list of `Messages` table object.
+        """
+        messages: list[Messages] = list[Messages]
+
+        with self.database_session() as session:
+            channel_messages_ids = self.get_channel_data(
+                channel_id=channel_id
+            ).messages_ids
+            
+            start_index = (page*messages_per_page) - messages_per_page
+
+            response = session.query(Messages).filter(
+                Messages.message_id.in_(channel_messages_ids)
+                ).order_by(Messages.sent_at).offset(start_index).limit(messages_per_page).all()
+
+            messages = response
+
+        return messages
+
+    def fetch_unviewed_channel_messages(self, channel_id: str, viewed_messages_ids: list[str]) -> list[Messages]:
+        """
+        Fetch latest unviewed messages by this user from a server channel
+
+        Args:
+            user_id (str): The user's `user_id`.
+            channel_id (str): The channel's `channel_id`.
+            viewed_messages_ids (list[str]): A list of viewed `message_id`s by this user.
+        
+        Returns:
+            list[Messages]: A list of `Messages` table object.
+        """
+        messages: list[Messages] = None
+
+        with self.database_session() as session:
+            stmt = select(Messages).where(
+                Messages.channel_id == channel_id,
+                Messages.message_id.not_in(viewed_messages_ids)
+            )
+
+            messages = session.execute(stmt).all()
+
+        return messages
+
+    def save_message(self, message: Messages) -> None:
+        """
+        Save a message to the `messages` table in the database
+        
+        Args:
+            message(Messages): A `Messages` table object.
+        
+        Returns:
+            None
+        """
+        with self.database_session() as session:
+            stmt = update(Channels).values(
+                messages_ids=text("array_append(messages_ids, '%s')" % message.message_id)
+            ).where(
+                Channels.channel_id == message.channel_id
+            )
+            session.execute(stmt)
+            session.add(message)
+
+            session.commit()
+    
+    def get_message_metadata(self, message_id: str) -> Messages | None:
+        """
+        Fetch the message's metadata based on its `message_id`
+
+        Args:
+            message (str): The message's `message_id`.
+        
+        Returns:
+            Messages | None: A `Messages` table object, it can be None if it doesn't exists.
+        """
+        message_metadata: Messages = None
+
+        with self.database_session() as session:
+            stmt = select(Messages).where(
+                Messages.message_id == message_id
+            )
+
+            try: message_metadata = session.execute(stmt).fetchone()[0]
+            except TypeError: pass
+
+        return message_metadata
+
+    def add_message_to_read_history(self, user_id: str, message_id: str) -> None:
+        """
+        Add a message to the `viewed_messages_ids` column in the `message_read_history`
+        table in the database
+
+        Args:
+            auth_token (str): The user's `auth_token`.
+            channel_id (str): The channel's `channel_id`.
+            message_id (str): "The message's `message_id` that should added to the `viewed_messages_ids` column for this user.
+
+        Returns:
+            None.
+        """
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+
+        with self.database_session() as session:
+            stmt = update(MessageReadHistory).values(
+                viewed_messages_ids=text("array_append(viewed_messages_ids, '%s')" % message_id),
+                updated_at=updated_at
+            )
+
+            session.execute(stmt)
+
+            session.commit()
+    
+    def delete_message(self, message_id: str, channel_id: str) -> None:
+        """
+        Delete a message from a channel, and remove this message's 
+        `message_id` from the `messages_ids` of this channel
+
+        Args:
+            message_id (str): The message's `message_id`.
+            channel_id (str): The channel's `channel_id`.
+        
+        Returns:
+            None.
+        """
+        with self.database_session() as session:
+            stmts = [
+                update(Channels).where(
+                    Channels.channel_id == channel_id
+                ).values(
+                    messages_ids=text("array_remove(messages_ids, '%s')" % message_id)
+                ),
+                delete(Messages).where(
+                    Messages.message_id == message_id
+                ),
+                delete(Keys).where(
+                    Keys.message_id == message_id
+                )
+            ]
+
+            for stmt in stmts:
+                session.execute(stmt)
 
             session.commit()
