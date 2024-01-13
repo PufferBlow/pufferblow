@@ -15,11 +15,7 @@ release = '0.0.1-beta'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    "sphinx_favicon",
-    "myst_parser" # Support for Markdown
-]
-source_suffix = [
-    ".md"
+    "sphinx_favicon"
 ]
 
 templates_path = ['_templates']
@@ -28,12 +24,29 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "sphinx_book_theme"
+html_theme = 'sphinx_book_theme'
+html_static_path = ['_static']
+
+html_title = "pufferblow-api"
 html_favicon = "_static/favicon.ico"
-# html_logo = "_static/favicon.ico" NOTE: the logo needs to be redone to make it high quality, and can be exported in different sizes.
-html_title = "pufferblow-api docs"
 html_theme_options = {
+    "use_download_button": True, # Allow users to download the current page in different formats
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/PufferBlow/pufferblow-api",
+            "icon": "fa-brands fa-square-github",
+            "type": "fontawesome",
+        }
+    ],
+    "icon_links_label": "Quick Links",
     "repository_url": "https://github.com/PufferBlow/pufferblow-api",
+    "repository_branch": "docs",
+    "path_to_docs": "./docs",
     "use_repository_button": True,
+    "use_issues_button": True,
+    "use_edit_page_button": True,
+    "use_sidenotes": True,
+    # Sidebar
+    "toc_title": "Table of content",
 }
-# html_static_path = ['_static']
