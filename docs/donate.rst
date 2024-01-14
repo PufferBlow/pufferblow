@@ -1,6 +1,6 @@
-=====================================
-Donate to pufferblow-api's maintainer
-=====================================
+=========
+Donations
+=========
 
 The pufferblow-api's maintainer is `ramsy0dev <https://ramsy0dev.github.io>`__, all donations to him are acceptable through ko-fi:
 
