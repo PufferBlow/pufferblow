@@ -1,7 +1,10 @@
 import os
-import yaml
+
+from ruamel.yaml import YAML
 
 from pufferblow_api import constants
+
+yaml = YAML()
 
 def load_config() -> dict:
     """ Returns the config file content in the form of a dict """

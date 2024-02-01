@@ -1,4 +1,4 @@
-from pufferblow_api.src.conf_file_reader.load_config import load_config
+from pufferblow_api.src.config.load_config import load_config
 
 class PufferBlowAPIconfig:
     """ PufferBlow-api's config model class """
@@ -11,9 +11,11 @@ class PufferBlowAPIconfig:
     LOGS_PATH               :       str     =   config["api"][2]["logs_path"]
     WORKERS                 :       int     =   config["api"][3]["workers"]
 
-    # Supabase/postgresql related parameters
+    # Supabase
     SUPABASE_URL            :       str     =   config["supabase"][0]["supabase_url"]
     SUPABASE_KEY            :       str     =   config["supabase"][1]["supabase_key"]
+    
+    # PostgeSQL Database
     DATABASE_NAME           :       str     =   config["supabase"][2]["postregsql"][0]["database_name"]
     USERNAME                :       str     =   config["supabase"][2]["postregsql"][1]["username"]
     DATABASE_PASSWORD       :       str     =   config["supabase"][2]["postregsql"][2]["password"]
