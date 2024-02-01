@@ -23,6 +23,7 @@ pytest = "^7.4.3"
 sqlalchemy = "^2.0.23"
 websockets = "^12.0"
 httpx = "^0.25.2"
+ruamel-yaml = "^0.18.5"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.2"
@@ -34,3 +35,5 @@ pufferblow_api = "pufferblow_api:__main__.cli"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+include = ["*.yaml"]
