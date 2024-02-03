@@ -25,6 +25,12 @@ from pufferblow_api.src.models.message_model import Message
 # Base
 from pufferblow_api.src.database.tables.declarative_base import Base
 
+# TODO: Switch from using regular dict to return 
+# into using ORJSONResponse as it is much faster.
+# References:
+#    * https://fastapi.tiangolo.com/advanced/custom-response/#use-orjsonresponse
+#    * https://medium.com/@jesum/optimizing-rest-api-performance-2f554d5bfef
+
 @asynccontextmanager
 async def lifespan(api: FastAPI):
     """ PufferBlow's API startup handler """

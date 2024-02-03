@@ -54,3 +54,4 @@ class StandaloneApplication(BaseApplication):
 
     def load(self):
         return self.application
+
