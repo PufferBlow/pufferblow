@@ -1,5 +1,5 @@
-from fastapi import WebSocket
 from typing import Dict
+from fastapi import WebSocket
 
 class WebSocketsManager:
     """ WebSocketManager class is responsible to maanging websockets """
