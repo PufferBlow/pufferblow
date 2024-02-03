@@ -5,7 +5,7 @@ from rich import print
 from loguru import logger
 from rich.console import Console
 
-from pufferblow_api.src.utils.logger import (
+from pufferblow_api.src.logger.logger import (
     InterceptHandler,
     logging,
     StandaloneApplication,
@@ -16,6 +16,16 @@ from pufferblow_api.src.utils.logger import (
 )
 from pufferblow_api import constants
 from pufferblow_api.pufferblow_api import api
+
+# Log messages
+from pufferblow_api.src.logger.msgs import (
+    errors
+)
+
+# ConfigHandler
+from pufferblow_api.src.config.config_handler import ConfigHandler
+
+# Models
 from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
 # Init cli
@@ -24,8 +34,17 @@ cli = typer.Typer()
 # Init console
 console = Console()
 
-# Get config data
-pufferblow_api_config = PufferBlowAPIconfig()
+# Pre-init the config handler and the config model
+# TODO: Find a better to do this
+config_handler = ConfigHandler() 
+
+if not config_handler.check_config():
+    logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(config_handler.config_file_path))
+    sys.exit(1)
+
+pufferblow_api_config = PufferBlowAPIconfig(
+    config=config_handler.load_config()
+)
 
 @cli.command()
 def version():
@@ -34,7 +53,7 @@ def version():
 
 @cli.command()
 def setup():
-    """ Setup PufferBlow's API """
+    """ Setup pufferblow-api """
     pass
 
 @cli.command()
@@ -80,4 +99,5 @@ def serve():
 
     StandaloneApplication(api, OPTIONS).run()
 
-run = cli
+def run() -> None: cli()
+
