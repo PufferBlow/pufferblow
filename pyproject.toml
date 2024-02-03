@@ -13,7 +13,6 @@ fastapi = "^0.104.1"
 typer = "^0.9.0"
 rich = "^13.7.0"
 uvicorn = "^0.24.0"
-pyyaml = "^6.0"
 pycryptodome = "^3.19.0"
 bcrypt = "^4.1.1"
 loguru = "^0.7.2"
@@ -23,7 +22,7 @@ pytest = "^7.4.3"
 sqlalchemy = "^2.0.23"
 websockets = "^12.0"
 httpx = "^0.25.2"
-ruamel-yaml = "^0.18.5"
+tomli = "^2.0.1"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.2"
@@ -36,4 +35,4 @@ pufferblow_api = "pufferblow_api:__main__.cli"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-include = ["*.yaml"]
+include = ["*.toml"]

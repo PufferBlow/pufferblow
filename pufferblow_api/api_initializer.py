@@ -1,6 +1,9 @@
 # Encryption/Decryption manager
 from pufferblow_api.src.hasher.hasher import Hasher
 
+# Config handler
+from pufferblow_api.src.config.config_handler import ConfigHandler
+
 # Users manager
 from pufferblow_api.src.user.user_manager import UserManager
 
@@ -19,8 +22,14 @@ from pufferblow_api.src.messages.messages_manager import MessagesManager
 
 # WebSockets manager
 from pufferblow_api.src.websocket.websocket_manager import WebSocketsManager
+
 # Models
 from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+
+# Log messages
+from pufferblow_api.src.logger.msgs import (
+    errors    
+)
 
 class APIInitializer(object):
     """
@@ -58,8 +67,17 @@ class APIInitializer(object):
         Returns:
             `None`.
         """
+        # Config handler
+        self.config_handler = ConfigHandler()
+        
+        if not self.config_handler.check_config():
+            logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(self.config_handler.config_file_path))
+            sys.exit(1)
+
         # PufferBlow-api's config data class
-        self.pufferblow_api_config = PufferBlowAPIconfig()
+        self.pufferblow_api_config = PufferBlowAPIconfig(
+            config=self.config_handler.load_config()
+        )
 
         # Init the hasher (Responsible for encrypting and decrypting data)
         self.hasher = Hasher(
@@ -118,3 +136,4 @@ class APIInitializer(object):
 
 # PufferBlow's APIs objects loader
 api_initializer: APIInitializer = APIInitializer()
+

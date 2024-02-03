@@ -1,13 +1,14 @@
 import os
+import tomli 
 
-class ConfigHandler():
+class ConfigHandler(object):
     """ ConfigHandler class handles PufferBlow's API config """
 
-    pufferblow_api_config_path: str = f"{os.environ['HOME']}/.pufferblow-api/config.yaml"
-
+    config_file_path: str = f"{os.environ['HOME']}/.pufferblow-api/config.toml"
     is_config_present: bool
+    config : dict
 
-    def __init__() -> None:
+    def __init__(self) -> None:
         pass
 
     def check_config(self) -> bool:
@@ -20,9 +21,11 @@ class ConfigHandler():
         Returns:
             bool: True if the config is present, otherwise False.
         """
-        return os.path.exists(self.pufferblow_api_config_path)
-        
-    def write_config(self, ) -> None:
+        self.is_config_present = os.path.exists(self.config_file_path)
+
+        return self.is_config_present
+
+    def write_config(self) -> None:
         """
         Writes the config file to the config file path
 
@@ -32,13 +35,13 @@ class ConfigHandler():
         Returns:
             None.
         """
-        script_dir = os.path.dirname(__file__)
-        sample_config = ' '.join(open(script_dir, "r").readlines())
+        # script_dir = os.path.dirname(__file__)
+        # sample_config = ' '.join(open(script_dir, "r").readlines())
+        # sample_config.replace("{HOME}", os.environ["HOME"])
+        # open(self.config_file_path, "w").write(sample_config.split(' '))
+        
+        raise NotImplementedError
 
-        sample_config.replace("{HOME}", os.environ["HOME"])
-
-        open(self.pufferblow_api_config_path, "w").write(sample_config.split(' '))
-    
     def load_config(self) -> dict:
         """
         Loads the config file 
@@ -49,9 +52,12 @@ class ConfigHandler():
         Returns:
             dict: the config data.
         """
-        return open(self.pufferblow_api_config_path, "r")
+        with open(self.config_file_path, "rb") as config_file_content:
+            self.config = tomli.load(config_file_content)
 
-    def check_config_values() -> dict:
+        return self.config 
+
+    def check_config_values(self) -> dict:
         """
         Checks the config's values.
 
@@ -61,4 +67,5 @@ class ConfigHandler():
         Returns:
             dict: of errors the function finds those values.
         """
-        pass
+        raise NotImplementedError
+
