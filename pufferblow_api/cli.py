@@ -15,14 +15,14 @@ from pufferblow_api.src.logger.logger import (
     JSON_LOGS,
 )
 from pufferblow_api import constants
-from pufferblow_api.pufferblow_api import api
+from pufferblow_api.api import api
 
 # Log messages
 from pufferblow_api.src.logger.msgs import (
     errors
 )
 
-# ConfigHandler
+# Handlers
 from pufferblow_api.src.config.config_handler import ConfigHandler
 
 # Models
