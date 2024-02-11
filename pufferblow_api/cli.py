@@ -52,6 +52,11 @@ def version():
     print(f"[bold cyan] Version [italic white]{constants.VERSION}")
 
 @cli.command()
+def setup():
+    """ setup pufferblow's API """
+    pass
+
+@cli.command()
 def serve():
     """ Serve PufferBlow's API """
     if pufferblow_api_config.SUPABASE_URL == "<your supabase url>" and pufferblow_api_config.SUPABASE_KEY == "<your supabase key>":
