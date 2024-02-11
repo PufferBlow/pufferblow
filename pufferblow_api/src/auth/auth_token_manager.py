@@ -6,9 +6,18 @@ import datetime
 
 from loguru import logger
 
-from pufferblow_api import constants
+# Hasher
 from pufferblow_api.src.hasher.hasher import Hasher
+
+# Database handler
 from pufferblow_api.src.database.database_handler import DatabaseHandler
+
+# Log messages
+from pufferblow_api.src.logger.msgs import (
+    info,
+    errors,
+    debug
+)
 
 class AuthTokenManager (object):
     """ Auth token class to manage auth tokens """
@@ -116,7 +125,7 @@ class AuthTokenManager (object):
             break
         
         logger.info(
-            constants.NEW_AUTH_TOKEN_GENERATED(
+            debug.DEBUG_NEW_AUTH_TOKEN_GENERATED(
                 auth_token=auth_token
             )
         )

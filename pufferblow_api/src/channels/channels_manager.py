@@ -3,15 +3,29 @@ import hashlib
 
 from loguru import logger
 
-from pufferblow_api import constants
-from pufferblow_api.src.hasher.hasher import Hasher
+# Models
 from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.models.channel_model import Channel
-from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
-from pufferblow_api.src.database.database_handler import DatabaseHandler
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 
+# Hasher
+from pufferblow_api.src.hasher.hasher import Hasher
+
+# AuthToken manager
+from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
+
+# Database handler
+from pufferblow_api.src.database.database_handler import DatabaseHandler
+
+# Utils
 from pufferblow_api.src.utils.current_date import date_in_gmt
+
+# Log messages
+from pufferblow_api.src.logger.msgs import (
+    info,
+    errors,
+    debug
+)
 
 class ChannelsManager (object):
     """ Channels manager class to manage channels """
@@ -144,7 +158,7 @@ class ChannelsManager (object):
         )
 
         logger.info(
-            constants.NEW_USER_ADDED_TO_PRIVATE_CHANNEL(
+            info.INFO_NEW_USER_ADDED_TO_PRIVATE_CHANNEL(
                 user_id=user_id,
                 to_add_user_id=to_add_user_id,
                 channel_id=channel_id
@@ -169,7 +183,7 @@ class ChannelsManager (object):
         )
 
         logger.info(
-            constants.USER_REMOVED_FROM_A_PRIVATE_CHANNEL(
+            info.INFO_USER_REMOVED_FROM_A_PRIVATE_CHANNEL(
                 user_id=user_id,
                 channel_id=channel_id,
                 to_remove_user_id=to_remove_user_id

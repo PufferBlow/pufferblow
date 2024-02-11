@@ -14,8 +14,6 @@ from sqlalchemy import (
     text
 )
 
-from pufferblow_api import constants
-
 # Encryption manager
 from pufferblow_api.src.hasher.hasher import Hasher
 
@@ -38,6 +36,13 @@ from pufferblow_api.src.database.tables.channels import Channels
 from pufferblow_api.src.database.tables.messages import Messages
 from pufferblow_api.src.database.tables.auth_tokens import AuthTokens
 from pufferblow_api.src.database.tables.message_read_history import MessageReadHistory
+
+# Log messages
+from pufferblow_api.src.logger.msgs import (
+    info,
+    errors,
+    debug
+)
 
 class DatabaseHandler (object):
     """ Database handler for PufferBlow's API """
@@ -203,7 +208,7 @@ class DatabaseHandler (object):
             session.commit()
         
         logger.info(
-            constants.NEW_HASH_SALT_SAVED(
+            debug.DEBUG_NEW_HASH_SALT_SAVED(
                 salt=salt
             )
         )
@@ -227,7 +232,7 @@ class DatabaseHandler (object):
             session.commit()
         
         logger.info(
-            constants.NEW_AUTH_TOKEN_SAVED(
+            debug.DEBUG_NEW_AUTH_TOKEN_SAVED(
                 auth_token=hashed_auth_token_value
             )
         )
@@ -269,7 +274,7 @@ class DatabaseHandler (object):
             session.commit()
 
         logger.info(
-            constants.RESET_USER_AUTH_TOKEN(
+            info.INFO_RESET_USER_AUTH_TOKEN(
                 user_id=user_id,
                 new_hashed_auth_token=new_auth_token
             )
@@ -294,8 +299,8 @@ class DatabaseHandler (object):
             
             users_id = [user_id[0] for user_id in reponse]
         
-        logger.info(
-            constants.FETCH_USERS_ID(
+        logger.debug(
+            debug.DEBUG_FETCH_USERS_ID(
                 users_id=users_id
             )
         )
@@ -335,8 +340,8 @@ class DatabaseHandler (object):
 
                 usernames.append(decrypted_username)
 
-        logger.info(
-            constants.FETCH_USERNAMES(
+        logger.debug(
+            debug.DEBUG_FETCH_USERNAMES(
                 usernames=usernames
             )
         )
@@ -479,8 +484,8 @@ class DatabaseHandler (object):
 
             session.commit()
 
-        logger.info(
-            constants.DERIVED_KEY_UPDATED(
+        logger.debug(
+            debug.DEBUG_DERIVED_KEY_UPDATED(
                 key=key
             )
         )
@@ -501,7 +506,7 @@ class DatabaseHandler (object):
             session.commit()
         
         logger.info(
-            constants.DERIVED_KEY_DELETED(
+            debug.DEBUG_DERIVED_KEY_DELETED(
                 key=key
             )
         )
@@ -522,8 +527,8 @@ class DatabaseHandler (object):
 
             session.commit()
 
-        logger.info(
-            constants.NEW_DERIVED_KEY_SAVED(
+        logger.debug(
+            debug.DEBUG_NEW_DERIVED_KEY_SAVED(
                 key=key
             )
         )
@@ -590,11 +595,9 @@ class DatabaseHandler (object):
 
             salt = session.execute(stmt).fetchone()[0]
             salt = base64.b64decode(salt)
-
-            logger.info(f"{salt = }")
         
-        logger.info(
-            constants.REQUEST_SALT_VALUE(
+        logger.debug(
+            debug.DEBUG_REQUEST_SALT_VALUE(
                 user_id=user_id,
                 salt_value=salt,
                 associated_to=associated_to
@@ -711,8 +714,8 @@ class DatabaseHandler (object):
             if len(reponse) == 0:
                 is_valid = not is_valid
         
-        logger.info(
-            constants.VALIDATE_AUTH_TOKEN(
+        logger.debug(
+            debug.DEBUG_VALIDATE_AUTH_TOKEN(
                 hashed_auth_token=hashed_auth_token,
                 is_valid=is_valid
             )
@@ -778,7 +781,7 @@ class DatabaseHandler (object):
             session.commit()
         
         logger.info(
-            constants.NEW_CHANNEL_CREATED(
+            info.INFO_NEW_CHANNEL_CREATED(
                 user_id=user_id,
                 channel_id=channel.channel_id,
                 channel_name=channel.channel_name

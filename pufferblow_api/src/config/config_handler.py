@@ -4,9 +4,11 @@ import tomli
 class ConfigHandler(object):
     """ ConfigHandler class handles PufferBlow's API config """
 
-    config_file_path: str = f"{os.environ['HOME']}/.pufferblow-api/config.toml"
-    is_config_present: bool
-    config : dict
+    config_file_path            : str   =   f"{os.environ['HOME']}/.pufferblow-api/config.toml"
+    is_config_present           : bool
+    config                      : dict
+    script_dir                  : str   =   os.path.dirname(__file__)
+    default_config_file_path    : str   =   f"{script_dir}/config_sample.toml"
 
     def __init__(self) -> None:
         pass
@@ -35,14 +37,9 @@ class ConfigHandler(object):
         Returns:
             None.
         """
-        # script_dir = os.path.dirname(__file__)
-        # sample_config = ' '.join(open(script_dir, "r").readlines())
-        # sample_config.replace("{HOME}", os.environ["HOME"])
-        # open(self.config_file_path, "w").write(sample_config.split(' '))
-        
         raise NotImplementedError
 
-    def load_config(self) -> dict:
+    def load_config(self, config_file_path: str | None = None) -> dict:
         """
         Loads the config file 
         
@@ -52,6 +49,9 @@ class ConfigHandler(object):
         Returns:
             dict: the config data.
         """
+        if config_file_path is None:
+            config_file_path = self.config_file_path
+        
         with open(self.config_file_path, "rb") as config_file_content:
             self.config = tomli.load(config_file_content)
 
@@ -69,3 +69,60 @@ class ConfigHandler(object):
         """
         raise NotImplementedError
 
+    def is_default_config(self) -> bool:
+        """
+        Checks if the config values are the default ones.
+
+        Args:
+            None.
+        
+        Returns:
+            bool: True if the config values are the default ones, otherwise False.
+        """
+        default_config = self.load_config(
+            config_file_path=self.default_config_file_path
+        
+        )
+        keys = [
+            {
+                "supabase": [
+                    "supabase_url",
+                    "supabase_key",
+                    {
+                        "postgresql":[
+                            "database_name",
+                            "username",
+                            "password",
+                            "host",
+                            "port",
+                        ]
+                    }
+                ]
+            },
+            {
+                "server_info": [
+                    "server_sha256",
+                    "server_name",
+                    "server_description",
+                    "sever_avatar_url",
+                    "server_maintainer_name",
+                    "sever_welcome_message"
+                ]
+            }
+        ]
+        
+        # Checks if the values of the keys in the default_config file are the same 
+        # as the one in the config file that is located locally
+        for key in keys:
+            for element in key:
+                for i in key[element]:
+                    if type(i) == dict:
+                        for x in i:
+                            for _ in i[x]:
+                                if default_config[element][x][_] == self.config[element][x][_]:
+                                    return True
+                        continue
+                    if default_config[element][i] == self.config[element][i]:
+                        return True
+        
+        return False

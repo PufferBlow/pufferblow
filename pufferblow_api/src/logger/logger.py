@@ -6,7 +6,6 @@ from gunicorn.app.base import BaseApplication
 from gunicorn.glogging import Logger
 from loguru import logger
 
-LOG_LEVEL = logging.getLevelName(os.environ.get("LOG_LEVEL", "DEBUG"))
 JSON_LOGS = True if os.environ.get("JSON_LOGS", "0") == "1" else False
 WORKERS = lambda workers_number: int(os.environ.get("GUNICORN_WORKERS", workers_number))
 
@@ -27,14 +26,16 @@ class InterceptHandler(logging.Handler):
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 class StubbedGunicornLogger(Logger):
+    log_level: str = None
+    
     def setup(self, cfg):
         handler = logging.NullHandler()
         self.error_logger = logging.getLogger("gunicorn.error")
         self.error_logger.addHandler(handler)
         self.access_logger = logging.getLogger("gunicorn.access")
         self.access_logger.addHandler(handler)
-        self.error_logger.setLevel(LOG_LEVEL)
-        self.access_logger.setLevel(LOG_LEVEL)
+        self.error_logger.setLevel(self.log_level)
+        self.access_logger.setLevel(self.log_level)
 
 class StandaloneApplication(BaseApplication):
     """Our Gunicorn application."""
@@ -54,4 +55,3 @@ class StandaloneApplication(BaseApplication):
 
     def load(self):
         return self.application
-

@@ -36,4 +36,3 @@ server_description = "<your server description>"
 server_avatar_url = "<url to your server avatar/photo>"
 server_maintainer_name = "<the name of the server maintainer, it can be the name of the server owner>"
 server_welcome_message = "<your server's welcome message, will be returned when a GET requests goes to http://<host>:<port>/api/v1>"
-
