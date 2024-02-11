@@ -1,13 +1,13 @@
 import os
 
-# PufferBlow-api info
+# Package info
 PACKAGE_NAME    =   "pufferblow-api"
 VERSION         =   "0.0.1-beta"
 AUTHER          =   "ramsy0dev"
 REPO_GITHUB     =   "https://github.com/PufferBlow/pufferblow-api"  
 ORG_GITHUB      =   "https://github.com/PufferBlow"
 
-# `Home` path
+# The $HOME path
 HOME = os.environ["HOME"]
 
 # Logs messages
