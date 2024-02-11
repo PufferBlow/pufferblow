@@ -10,7 +10,6 @@ from pufferblow_api.src.logger.logger import (
     logging,
     StandaloneApplication,
     StubbedGunicornLogger,
-    LOG_LEVEL,
     WORKERS,
     JSON_LOGS,
 )
@@ -57,16 +56,25 @@ def setup():
     pass
 
 @cli.command()
-def serve():
+def serve(
+    log_level: int = typer.Option(0, "--log-level", help="The log level, ranges from 0 to 3. [INFO: 0, DEBUG: 1, ERROR: 2, CRITICAL: 3]")
+):
     """ Serve PufferBlow's API """
-    if pufferblow_api_config.SUPABASE_URL == "<your supabase url>" and pufferblow_api_config.SUPABASE_KEY == "<your supabase key>":
-        print(f"[bold red] [  ?  ] [bold white] Config error: please edit the [italic yellow]`supabase_url`[/][bold white] and [italic yellow]`supabase_key`[/][bold white] feilds in [bold cyan]{constants.PUFFERBLOW_CONFIG_PATH}[white]")
+    if log_level > 3:
+        console.log("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
         sys.exit(1)
+    
+    if config_handler.check_config() or config_handler.is_default_config():
+        # console.log("[bold red] [ ? ] [reset]Please finish the [bold green]setup process[reset] in the web interface before running the api.");
+        # sys.exit(1)
+        pass
+    
+    log_level = constants.log_level_map[log_level]
 
     INTERCEPT_HANDLER = InterceptHandler()
-    # logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=LOG_LEVEL)
-    # logging.root.handlers = [INTERCEPT_HANDLER]
-    logging.root.setLevel(LOG_LEVEL)
+    logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level)
+    logging.root.handlers = [INTERCEPT_HANDLER]
+    logging.root.setLevel(log_level)
 
     SEEN = set()
 
@@ -83,8 +91,10 @@ def serve():
             SEEN.add(name.split(".")[0])
             logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
-    logger.configure(handlers=[{"sink": sys.stdout, "serialize": JSON_LOGS}])
+    logger.configure(handlers=[{"sink": sys.stdout}])
     logger.add(pufferblow_api_config.LOGS_PATH, rotation="10 MB")
+
+    StubbedGunicornLogger.log_level = log_level
 
     OPTIONS = {
         "bind": f"{pufferblow_api_config.API_HOST}:{pufferblow_api_config.API_PORT}",
@@ -99,4 +109,4 @@ def serve():
 
     StandaloneApplication(api, OPTIONS).run()
 
-def run() -> None: cli()
+def run() -> None: constants.banner(); cli()
