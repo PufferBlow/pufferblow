@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "pufferblow-api"
 version = "0.0.1-beta"
-description = "Official API for PufferBlow"
+description = "The official API for PufferBlow"
 authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 license = "GPL-3.0"
 readme = "README.md"
@@ -34,7 +34,7 @@ loguru = "^0.7.2"
 gunicorn = "^21.2.0"
 
 [tool.poetry.plugins."console_scripts"]
-pufferblow_api = "pufferblow_api:__main__.cli"
+pufferblow_api = "pufferblow_api:cli.run"
 
 [build-system]
 requires = ["poetry-core"]
