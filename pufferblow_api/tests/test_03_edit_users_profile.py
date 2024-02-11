@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from pufferblow_api.pufferblow_api import api
+from pufferblow_api.api import api
 from pufferblow_api.tests.conftest import ValueStorage
 
 @pytest.fixture
