@@ -8,15 +8,26 @@ import datetime
 
 from loguru import logger
 
-from pufferblow_api import constants
+# Hasher
 from pufferblow_api.src.hasher.hasher import Hasher
+
+# AuthToken manager
 from pufferblow_api.src.auth.auth_token_manager import AuthTokenManager
+
+# Database handler
 from pufferblow_api.src.database.database_handler import DatabaseHandler
 
 # Models
 from pufferblow_api.src.models.user_model import User
 from pufferblow_api.src.models.encryption_key_model import EncryptionKey
 from pufferblow_api.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+
+# Log messages
+from pufferblow_api.src.logger.msgs import (
+    info,
+    errors,
+    debug
+)
 
 class UserManager (object):
     """ User manager class """
@@ -108,7 +119,7 @@ class UserManager (object):
             users.append(user_data)
         
         logger.info(
-            constants.REQUEST_FOR_USERS_LIST(
+            info.INFO_REQUEST_USERS_LIST(
                 viewer_user_id=viewer_user_id,
                 auth_token=auth_token
             )
@@ -161,9 +172,9 @@ class UserManager (object):
             user_data.pop(data)
         
         logger.info(
-        constants.REQUEST_FOR_USER_PROFILE(
-            user_data=user_data,
-            viewer_user_id=user_id
+            info.INFO_REQUEST_USER_PROFILE(
+                user_data=user_data,
+                viewer_user_id=user_id
             )
         )
         
@@ -331,7 +342,7 @@ class UserManager (object):
         )
 
         logger.info(
-            constants.UPDATE_USERNAME(
+            info.INFO_UPDATE_USERNAME(
                 user_id=user_id,
                 old_username=old_username,
                 new_username=new_username
@@ -354,7 +365,7 @@ class UserManager (object):
 
         if user_data.status == status:
             logger.info(
-                constants.USER_STATUS_UPDATE_SKIPPED(
+                info.INFO_USER_STATUS_UPDATE_SKIPPED(
                     user_id=user_id,
                 )
             )
@@ -366,7 +377,7 @@ class UserManager (object):
         )
 
         logger.info(
-            constants.UPDATE_USER_STATUS(
+            info.INFO_UPDATE_USER_STATUS(
                 user_id=user_id,
                 from_status=user_data.status,
                 to_status=status
@@ -406,7 +417,7 @@ class UserManager (object):
         )
 
         logger.info(
-            constants.UPDATE_USER_PASSWORD(
+            info.INFO_UPDATE_USER_PASSWORD(
                 user_id=user_id,
                 hashed_new_password=hashed_new_password
             )
@@ -435,8 +446,8 @@ class UserManager (object):
             encryption_key_data.user_id         =     user_id
 
             if encryption_key_data.associated_to == "username":
-                logger.info(
-                    constants.USERNAME_ENCRYPTED(
+                logger.debug(
+                    debug.DEBUG_USERNAME_ENCRYPTED(
                         username=data,
                         encrypted_username=encrypted_data
                     )
@@ -458,16 +469,16 @@ class UserManager (object):
             salt.associated_to = associated_to
 
             if salt.associated_to == "auth_token":
-                logger.info(
-                    constants.NEW_AUTH_TOKEN_HASHED(
+                logger.debug(
+                    debug.DEBUG_NEW_AUTH_TOKEN_HASHED(
                         auth_token=data,
                         hashed_auth_token=salt.hashed_data,
                         salt=salt
                     )
                 )
             elif salt.associated_to == "password":
-                logger.info(
-                    constants.NEW_PASSWORD_HASHED(
+                logger.debug(
+                    debug.DEBUG_NEW_PASSWORD_HASHED(
                         password=data,
                         hashed_password=salt.hashed_data
                     )
@@ -504,8 +515,8 @@ class UserManager (object):
         )
 
         if associated_to == "username":
-            logger.info(
-                constants.USERNAME_DECRYPTED(
+            logger.debug(
+                debug.DEBUG_USERNAME_DECRYPTED(
                     encrypted_username=data,
                     decrypted_username=decrypted_data
                 )
@@ -528,8 +539,8 @@ class UserManager (object):
         hashed_username_salt = hashlib.md5(username.encode()).hexdigest()
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_username_salt)
 
-        logger.info(
-            constants.NEW_USER_ID_GENERATED(
+        logger.debug(
+            debug.DEBUG_NEW_USER_ID_GENERATED(
                 user_id=str(generated_uuid)
             )
         )

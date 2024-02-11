@@ -25,6 +25,13 @@ from pufferblow_api.src.models.message_model import Message
 # Base
 from pufferblow_api.src.database.tables.declarative_base import Base
 
+# Log messages
+from pufferblow_api.src.logger.msgs import (
+    info,
+    errors,
+    debug
+)
+
 # TODO: Switch from using regular dict to return 
 # into using ORJSONResponse as it is much faster.
 # References:
@@ -107,7 +114,7 @@ async def signup_new_user(
     )
 
     logger.info(
-        constants.NEW_USER_SIGNUP_SUCCESSFULLY(
+        info.INFO_NEW_USER_SIGNUP_SUCCESSFULLY(
             user=user_data,
         )
     )
@@ -250,7 +257,7 @@ async def edit_users_profile_route(
         # Check the status value
         if status not in ["online", "offline"]:
             logger.info(
-                constants.USER_STATUS_UPDATE_FAILED(
+                info.INFO_USER_STATUS_UPDATE_FAILED(
                     user_id=user_id,
                     status=status
                 )
@@ -278,7 +285,7 @@ async def edit_users_profile_route(
             password=old_password
         ):
             logger.info(
-                constants.UPDATE_USER_PASSWORD_FAILED(
+                info.INFO_UPDATE_USER_PASSWORD_FAILED(
                     user_id=user_id
                 )
             )
@@ -341,7 +348,7 @@ async def reset_users_auth_token_route(
         password=password
     ):
         logger.info(
-            constants.RESET_USER_AUTH_TOKEN_FAILD(
+            info.INFO_RESET_USER_AUTH_TOKEN_FAILED(
                 user_id=user_id,
             )
         )
@@ -361,7 +368,7 @@ async def reset_users_auth_token_route(
             suspend_time=2 # Two days
         ):
             logger.info(
-                constants.AUTH_TOKEN_SUSPENSION_TIME(
+                info.INFO_AUTH_TOKEN_SUSPENSION_TIME(
                     user_id=user_id
                 )
             )
@@ -631,7 +638,7 @@ async def delete_channel_route(
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
@@ -647,7 +654,7 @@ async def delete_channel_route(
     )
 
     logger.info(
-        constants.CHANNEL_DELETED(
+        info.INFO_CHANNEL_DELETED(
             user_id=user_id,
             channel_id=channel_id
         )
@@ -740,7 +747,7 @@ async def add_user_to_private_channel_route(
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
@@ -757,7 +764,7 @@ async def add_user_to_private_channel_route(
     ):
 
         logger.info(
-            constants.CHANNEL_IS_NOT_PRIVATE(
+            info.INFO_CHANNEL_IS_NOT_PRIVATE(
                 user_id=user_id,
                 to_add_user_id=to_add_user_id,
                 channel_id=channel_id
@@ -880,7 +887,7 @@ async def remove_user_from_channel_route(
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
@@ -897,7 +904,7 @@ async def remove_user_from_channel_route(
     ):
 
         logger.info(
-            constants.CHANNEL_IS_NOT_PRIVATE(
+            info.INFO_CHANNEL_IS_NOT_PRIVATE(
                 user_id=user_id,
                 to_add_user_id=to_remove_user_id,
                 channel_id=channel_id
@@ -970,7 +977,7 @@ async def channel_load_messages(auth_token: str, channel_id: str, page: int | No
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
@@ -1051,7 +1058,7 @@ async def channel_send_message(auth_token: str, channel_id: str, message: str):
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
@@ -1123,7 +1130,7 @@ def channel_mark_message_as_read(auth_token: str, channel_id: str, message_id: s
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
@@ -1192,7 +1199,7 @@ def channel_delete_message(auth_token: str, channel_id: str, message_id: str):
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
@@ -1309,7 +1316,7 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
         channel_id=channel_id
     ):
         logger.info(
-            constants.CHANNEL_ID_NOT_FOUND(
+            info.INFO_CHANNEL_ID_NOT_FOUND(
                 viewer_user_id=user_id,
                 channel_id=channel_id
             )
