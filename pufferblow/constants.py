@@ -10,13 +10,13 @@ ORG_GITHUB      =   "https://github.com/PufferBlow"
 REPO_GITHUB     =   "https://github.com/PufferBlow/pufferblow-api"
 
 BANNER = """
-                  ___  ___            _     _                            _ 
-                 / __)/ __)          | |   | |                          (_)
-     ____  _   _| |__| |__ ____  ____| | _ | | ___  _ _ _ ___ ____ ____  _ 
-    |  _ \| | | |  __)  __) _  )/ ___) || \| |/ _ \| | | (___) _  |  _ \| |
-    | | | | |_| | |  | | ( (/ /| |   | |_) ) | |_| | | | |  ( ( | | | | | |
-    | ||_/ \____|_|  |_|  \____)_|   |____/|_|\___/ \____|   \_||_| ||_/|_|
-    |_|                                                           |_|      
+                  ___  ___            _     _
+                 / __)/ __)          | |   | |
+     ____  _   _| |__| |__ ____  ____| | _ | | ___  _ _ _ 
+    |  _ \| | | |  __)  __) _  )/ ___) || \| |/ _ \| | | |
+    | | | | |_| | |  | | ( (/ /| |   | |_) ) | |_| | | | |
+    | ||_/ \____|_|  |_|  \____)_|   |____/|_|\___/ \____|
+    |_|                                                   
                  Made with [bold red]❤️[reset] by [bold bright_green]'ramsy0dev'[reset]
         - Escape [bold red]surveillance[reset] and gain [bold green]anonymity[reset] -
 """
