@@ -1,13 +1,14 @@
 import os
 import logging
-import sys
 
+from loguru import logger
 from gunicorn.app.base import BaseApplication
 from gunicorn.glogging import Logger
-from loguru import logger
 
 JSON_LOGS = True if os.environ.get("JSON_LOGS", "0") == "1" else False
-WORKERS = lambda workers_number: int(os.environ.get("GUNICORN_WORKERS", workers_number))
+
+def WORKERS(workers_number) -> int:
+    return int(os.environ.get("GUNICORN_WORKERS", workers_number))
 
 class InterceptHandler(logging.Handler):
     def emit(self, record):

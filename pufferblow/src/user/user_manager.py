@@ -25,7 +25,6 @@ from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfi
 # Log messages
 from pufferblow.src.logger.msgs import (
     info,
-    errors,
     debug
 )
 

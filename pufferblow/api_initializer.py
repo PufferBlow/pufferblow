@@ -1,3 +1,6 @@
+import sys
+from loguru import logger
+
 # Encryption/Decryption manager
 from pufferblow.src.hasher.hasher import Hasher
 
@@ -136,4 +139,3 @@ class APIInitializer(object):
 
 # PufferBlow's APIs objects loader
 api_initializer: APIInitializer = APIInitializer()
-

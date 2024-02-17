@@ -10,7 +10,6 @@ from sqlalchemy import (
     delete,
     and_,
     func,
-    desc,
     text
 )
 
@@ -21,7 +20,6 @@ from pufferblow.src.hasher.hasher import Hasher
 from pufferblow.src.models.salt_model import Salt
 from pufferblow.src.models.user_model import User
 from pufferblow.src.models.channel_model import Channel
-from pufferblow.src.models.message_model import Message
 from pufferblow.src.models.encryption_key_model import EncryptionKey
 from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
@@ -40,7 +38,6 @@ from pufferblow.src.database.tables.message_read_history import MessageReadHisto
 # Log messages
 from pufferblow.src.logger.msgs import (
     info,
-    errors,
     debug
 )
 
@@ -556,10 +553,13 @@ class DatabaseHandler (object):
             ]
             condition = None
 
-            if message_id is not None: condition = Keys.message_id == message_id
-            if conversation_id is not None: condition = Keys.message_id == conversation_id
+            if message_id is not None:
+                condition = Keys.message_id == message_id
+            if conversation_id is not None:
+                condition = Keys.message_id == conversation_id
 
-            if condition is not None: conditions.append(condition)
+            if condition is not None:
+                conditions.append(condition)
 
             stmt = select(Keys.key_value).where(
                 and_(
@@ -970,8 +970,10 @@ class DatabaseHandler (object):
                 Messages.message_id == message_id
             )
 
-            try: message_metadata = session.execute(stmt).fetchone()[0]
-            except TypeError: pass
+            try:
+                message_metadata = session.execute(stmt).fetchone()[0]
+            except TypeError:
+                pass
 
         return message_metadata
 

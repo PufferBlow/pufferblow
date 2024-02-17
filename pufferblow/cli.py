@@ -10,8 +10,7 @@ from pufferblow.src.logger.logger import (
     logging,
     StandaloneApplication,
     StubbedGunicornLogger,
-    WORKERS,
-    JSON_LOGS,
+    WORKERS
 )
 from pufferblow import constants
 from pufferblow.api import api
@@ -109,4 +108,6 @@ def serve(
 
     StandaloneApplication(api, OPTIONS).run()
 
-def run() -> None: constants.banner(); cli()
+def run() -> None:
+    constants.banner()
+    cli()
