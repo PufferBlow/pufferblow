@@ -9,10 +9,14 @@ from fastapi import (
     exceptions
 )
 from loguru import logger
+from datetime import timedelta
 from contextlib import asynccontextmanager
 
 from pufferblow import constants
 from pufferblow.api_initializer import api_initializer
+
+# Middlewares
+from pufferblow.middlewares import RateLimitingMiddleware
 
 # Utils
 from pufferblow.src.utils.extract_user_id import extract_user_id
@@ -34,19 +38,28 @@ from pufferblow.src.logger.msgs import (
 
 @asynccontextmanager
 async def lifespan(api: FastAPI):
-    """ PufferBlow's API startup handler """
+    """ api startup handler """
     # Load all the needed objects
     api_initializer.load_objects()
 
     # Setup the tables (will get skipped if they already exists)
     api_initializer.database_handler.setup_tables(Base)
 
+    # Setup the rate limit middleware     
+    RateLimitingMiddleware.RATE_LIMIT_DURATION = timedelta(
+        minutes=api_initializer.pufferblow_api_config.RATE_LIMIT_DURATION
+    )
+    RateLimitingMiddleware.MAX_RATE_LIMIT_REQUESTS = api_initializer.pufferblow_api_config.MAX_RATE_LIMIT_REQUESTS
+    RateLimitingMiddleware.MAX_REQUEST_LIMIT_WARNINGS = api_initializer.pufferblow_api_config.MAX_RATE_LIMIT_WARNINGS
+
     yield
 
-# Init PufferBlow's API
+# Init the API
 api = FastAPI(
     lifespan=lifespan
 )
+
+api.add_middleware(RateLimitingMiddleware)
 
 @api.get("/")
 async def redirect_route():

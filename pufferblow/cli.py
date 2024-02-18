@@ -63,11 +63,6 @@ def serve(
         console.log("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
         sys.exit(1)
     
-    if config_handler.check_config() or config_handler.is_default_config():
-        # console.log("[bold red] [ ? ] [reset]Please finish the [bold green]setup process[reset] in the web interface before running the api.");
-        # sys.exit(1)
-        pass
-    
     log_level = constants.log_level_map[log_level]
 
     INTERCEPT_HANDLER = InterceptHandler()
@@ -110,4 +105,12 @@ def serve(
 
 def run() -> None:
     constants.banner()
+
+    # Basic checks before starting the cli, this eliminates the need for
+    # repetitive checks at the function command level.
+    if config_handler.check_config() or config_handler.is_default_config():
+        # console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
+        # sys.exit(1)
+        pass
+
     cli()

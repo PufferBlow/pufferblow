@@ -1,7 +1,7 @@
 import pytz
 import datetime
 
-def date_in_gmt(format: str) -> str:
+def date_in_gmt(format: str | None = "%Y-%m-%d %H:%M:%S") -> str:
     """
     Returns the current date in GMT timezone
     

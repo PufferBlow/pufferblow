@@ -20,6 +20,7 @@ from pufferblow.src.hasher.hasher import Hasher
 from pufferblow.src.models.salt_model import Salt
 from pufferblow.src.models.user_model import User
 from pufferblow.src.models.channel_model import Channel
+from pufferblow.src.models.blocked_ip_model import BlockedIP
 from pufferblow.src.models.encryption_key_model import EncryptionKey
 from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
@@ -32,6 +33,7 @@ from pufferblow.src.database.tables.users import Users
 from pufferblow.src.database.tables.salts import Salts
 from pufferblow.src.database.tables.channels import Channels
 from pufferblow.src.database.tables.messages import Messages
+from pufferblow.src.database.tables.blocked_ips import BlockedIPS
 from pufferblow.src.database.tables.auth_tokens import AuthTokens
 from pufferblow.src.database.tables.message_read_history import MessageReadHistory
 
@@ -312,7 +314,7 @@ class DatabaseHandler (object):
             `None`.
         
         Returns:
-            list[str]: A list containing all the `username`s in the database.
+            list[str]: A list containing all the decrypted `username`s in the database.
         """
         usernames = list()
 
@@ -359,8 +361,8 @@ class DatabaseHandler (object):
 
         with self.database_session() as session:
             stmt = select(AuthTokens.updated_at).where(
-                AuthTokens.user_id == user_id
-            )
+                    AuthTokens.user_id == user_id
+                )
 
             updated_at = session.execute(stmt).fetchone()[0]
         
@@ -1032,4 +1034,95 @@ class DatabaseHandler (object):
             for stmt in stmts:
                 session.execute(stmt)
 
+            session.commit()
+
+    def save_blocked_ip_to_blocked_ips(self, blocked_ip: BlockedIP) -> None:
+        """
+        Saves a BlockedIP model to the blocked_ips table.
+
+        Args:
+            blocked_ip (BlockedIP): A BlockedIP object.
+        
+        Returns:
+            None.
+        """
+        if self.check_is_ip_blocked(ip=blocked_ip.ip):
+            return
+        
+        blocked_ip_table_metadata = blocked_ip.create_table_metadata()
+
+        with self.database_session() as session:
+            session.add(blocked_ip_table_metadata)
+
+            session.commit()
+
+    def fetch_blocked_ips(self) -> list[str]:
+        """
+        Fetch a list of blocked ips from the blocked_ips table.
+
+        Args:
+            None.
+        
+        Returns:
+            list[str]: A list of raw blocked ip addresses.
+        """
+        blocked_ips: list[str] = list()
+
+        with self.database_session() as session:
+            stmt = select(BlockedIPS)
+
+            response = session.execute(stmt).fetchall()
+
+            for i in response:
+                ip = response[i].ip
+                blocked_ips.append(ip)
+        
+        return blocked_ips
+    
+    def check_is_ip_blocked(self, ip: str) -> bool:
+        """
+        Checks if a raw IP addresses is already in the `blocked_ips` table.
+
+        Args:
+            ip (str): The raw ip address to check.
+        
+        Returns:
+            bool: True if the ip address is already blocked, otherwise False.
+        """
+        is_blocked: bool = False
+
+        with self.database_session() as session:
+            stmt = select(BlockedIPS).where(BlockedIPS.ip == ip)
+            response = session.execute(stmt).fetchall()
+
+            if len(response) != 0:
+                is_blocked = True
+        
+        return is_blocked
+
+    def delete_blocked_ip(self, blocked_ip: BlockedIP | None = None, ip: str | None = None) -> None:
+        """
+        Deletes a blocked ip from the blocked_ips table, using either a BLockedIP model or
+        a raw ip address.
+
+        Args:
+            blocked_ip (BlockedIP): A BlockedIP model.
+            ip (str): A raw ip address to delete form the database.
+        
+        Returns:
+            None.
+        """
+        with self.database_session() as session:
+            stmts = [
+                delete(BlockedIPS).where(
+                    BlockedIPS.ip == blocked_ip.ip
+                ) if blocked_ip is not None else \
+                    delete(BlockedIPS).where(
+                        BlockedIPS.ip == ip
+                    )
+            ]
+
+            for stmt in stmts:
+                session.execute(stmt)
+            
             session.commit()
