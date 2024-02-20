@@ -6,7 +6,8 @@ authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 license = "GPL-3.0"
 readme = "README.md"
 packages = [
-    {include = "pufferblow"}
+    {include = "pufferblow"},
+    {include = "docs"}
 ]
 
 [tool.poetry.dependencies]
