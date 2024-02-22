@@ -37,7 +37,6 @@ def build_docs(docs_path: str) -> None:
         stdout=subprocess.PIPE,
     )
 
-    stdout = command_process.stdout.decode()
     stderr = command_process.stderr.decode()
 
     if "sphinx-build not found" in stderr:
@@ -57,13 +56,13 @@ def build() -> None:
     docs_path = ""
 
     pwd = os.path.abspath(os.getcwd())
-    if not pwd.endswith("pufferblow-api/docs") and not "scripts" in pwd:
+    if not pwd.endswith("pufferblow-api/docs") and "scripts" not in pwd:
         docs_path = f"{pwd}/docs"
     if not pwd.endswith("pufferblow-api/docs") and "scripts" in pwd:
         docs_path = f"{pwd.replace('scripts', 'docs')}"
     
     # Check if the `docs_path` is really the docs dir
-    if not "conf.py" in os.listdir(docs_path):
+    if "conf.py" not in os.listdir(docs_path):
         console.log("[bold red] [ - ] [bold white]Faild to locate the docs folder please change directory to it and try again.")
     
     console.log("[bold green] [ + ] [bold white]Building docs...")

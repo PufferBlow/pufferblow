@@ -1,4 +1,3 @@
-import pytz
 import datetime
 
 def is_able_to_update(updated_at: datetime.datetime, suspend_time: int) -> bool:

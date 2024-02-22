@@ -1,5 +1,4 @@
 import sys
-import json
 import asyncio
 
 from fastapi import (
@@ -10,26 +9,25 @@ from fastapi import (
     exceptions
 )
 from loguru import logger
+from datetime import timedelta
 from contextlib import asynccontextmanager
 
 from pufferblow import constants
 from pufferblow.api_initializer import api_initializer
 
+# Middlewares
+from pufferblow.middlewares import RateLimitingMiddleware
+
 # Utils
 from pufferblow.src.utils.extract_user_id import extract_user_id
 from pufferblow.src.utils.is_able_to_update import is_able_to_update
-
-# Models
-from pufferblow.src.models.message_model import Message
 
 # Base
 from pufferblow.src.database.tables.declarative_base import Base
 
 # Log messages
 from pufferblow.src.logger.msgs import (
-    info,
-    errors,
-    debug
+    info
 )
 
 # TODO: Switch from using regular dict to return 
@@ -40,19 +38,28 @@ from pufferblow.src.logger.msgs import (
 
 @asynccontextmanager
 async def lifespan(api: FastAPI):
-    """ PufferBlow's API startup handler """
+    """ api startup handler """
     # Load all the needed objects
     api_initializer.load_objects()
 
     # Setup the tables (will get skipped if they already exists)
     api_initializer.database_handler.setup_tables(Base)
 
+    # Setup the rate limit middleware     
+    RateLimitingMiddleware.RATE_LIMIT_DURATION = timedelta(
+        minutes=api_initializer.pufferblow_api_config.RATE_LIMIT_DURATION
+    )
+    RateLimitingMiddleware.MAX_RATE_LIMIT_REQUESTS = api_initializer.pufferblow_api_config.MAX_RATE_LIMIT_REQUESTS
+    RateLimitingMiddleware.MAX_REQUEST_LIMIT_WARNINGS = api_initializer.pufferblow_api_config.MAX_RATE_LIMIT_WARNINGS
+
     yield
 
-# Init PufferBlow's API
+# Init the API
 api = FastAPI(
     lifespan=lifespan
 )
+
+api.add_middleware(RateLimitingMiddleware)
 
 @api.get("/")
 async def redirect_route():
@@ -216,7 +223,7 @@ async def edit_users_profile_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -229,7 +236,7 @@ async def edit_users_profile_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
     # Update username
@@ -238,7 +245,7 @@ async def edit_users_profile_route(
             username=new_username
         ):
             raise exceptions.HTTPException(
-                detail=f"username already exists. Please change it and try again later",
+                detail="username already exists. Please change it and try again later",
                 status_code=409
             )
 
@@ -291,7 +298,7 @@ async def edit_users_profile_route(
             )
 
             raise exceptions.HTTPException(
-                detail=f"Invalid password. Please try again later.",
+                detail="Invalid password. Please try again later.",
                 status_code=401
             )
 
@@ -327,7 +334,7 @@ async def reset_users_auth_token_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -340,7 +347,7 @@ async def reset_users_auth_token_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
     if not api_initializer.user_manager.check_user_password(
@@ -428,7 +435,7 @@ async def list_users_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -441,13 +448,8 @@ async def list_users_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
-
-    hashed_auth_token = api_initializer.auth_token_manager._encrypt_auth_token(
-        user_id=viewer_user_id,
-        auth_token=auth_token
-    )
 
     users = api_initializer.user_manager.list_users(
         viewer_user_id=viewer_user_id,
@@ -489,7 +491,7 @@ async def list_channels_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -502,7 +504,7 @@ async def list_channels_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
     channels_list = api_initializer.channels_manager.list_channels(
@@ -540,7 +542,7 @@ async def create_new_channel_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -553,7 +555,7 @@ async def create_new_channel_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
     # Check if the user is the server admin
@@ -608,7 +610,7 @@ async def delete_channel_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -621,7 +623,7 @@ async def delete_channel_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
     # Check if the user is the server admin
@@ -688,7 +690,7 @@ async def add_user_to_private_channel_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -701,7 +703,7 @@ async def add_user_to_private_channel_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
     # Check if the targeted user exists or not
@@ -810,7 +812,7 @@ async def remove_user_from_channel_route(
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -823,7 +825,7 @@ async def remove_user_from_channel_route(
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
 
     # Check if the targeted user exists or not
@@ -956,7 +958,7 @@ async def channel_load_messages(auth_token: str, channel_id: str, page: int | No
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -969,7 +971,7 @@ async def channel_load_messages(auth_token: str, channel_id: str, page: int | No
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
     
     # Check if the channel exists
@@ -1037,7 +1039,7 @@ async def channel_send_message(auth_token: str, channel_id: str, message: str):
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -1050,7 +1052,7 @@ async def channel_send_message(auth_token: str, channel_id: str, message: str):
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
     
     # Check if the channel exists
@@ -1109,7 +1111,7 @@ def channel_mark_message_as_read(auth_token: str, channel_id: str, message_id: s
         # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -1122,7 +1124,7 @@ def channel_mark_message_as_read(auth_token: str, channel_id: str, message_id: s
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
     
     # Check if the channel exists
@@ -1178,7 +1180,7 @@ def channel_delete_message(auth_token: str, channel_id: str, message_id: str):
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.HTTPException(
-            detail=f"Bad auth_token format. Please check your auth_token and try again.",
+            detail="Bad auth_token format. Please check your auth_token and try again.",
             status_code=400
         )
 
@@ -1191,7 +1193,7 @@ def channel_delete_message(auth_token: str, channel_id: str, message_id: str):
     ):
         raise exceptions.HTTPException(
             status_code=404,
-            detail=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            detail="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
     
     # Check if the channel exists
@@ -1284,7 +1286,7 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
     # Check `auth_token` format and validity
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.WebSocketException(
-            reason=f"Bad auth_token format. Please check your auth_token and try again.",
+            reason="Bad auth_token format. Please check your auth_token and try again.",
             code=1001
         )
 
@@ -1297,7 +1299,7 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
     ):
         raise exceptions.WebSocketException(
             code=1001,
-            reason=f"'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+            reason="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
     
     # Check if the user who requested this route is an admin

@@ -116,7 +116,7 @@ class ConfigHandler(object):
         for key in keys:
             for element in key:
                 for i in key[element]:
-                    if type(i) == dict:
+                    if isinstance(i, dict):
                         for x in i:
                             for _ in i[x]:
                                 if default_config[element][x][_] == self.config[element][x][_]:

@@ -6,6 +6,9 @@ class PufferBlowAPIconfig:
     API_PORT                :       int
     LOGS_PATH               :       str
     WORKERS                 :       int
+    RATE_LIMIT_DURATION     :       int
+    MAX_RATE_LIMIT_REQUESTS :       int
+    MAX_RATE_LIMIT_WARNINGS :       int
 
     # Supabase
     SUPABASE_URL            :       str
@@ -50,10 +53,13 @@ class PufferBlowAPIconfig:
             None.
         """
         # API related parameters
-        self.API_HOST      =   config["api"]["host"]
-        self.API_PORT      =   config["api"]["port"]
-        self.LOGS_PATH     =   config["api"]["logs_path"]
-        self.WORKERS       =   config["api"]["workers"]
+        self.API_HOST                   =   config["api"]["host"]
+        self.API_PORT                   =   config["api"]["port"]
+        self.LOGS_PATH                  =   config["api"]["logs_path"]
+        self.WORKERS                    =   config["api"]["workers"]
+        self.RATE_LIMIT_DURATION        =   config["api"]["rate_limit_duration"]
+        self.MAX_RATE_LIMIT_REQUESTS    =   config["api"]["max_rate_limit_requests"]
+        self.MAX_RATE_LIMIT_WARNINGS    =   config["api"]["max_rate_limit_warnings"]
 
         # Supabase
         self.SUPABASE_URL     =   config["supabase"]["supabase_url"]
