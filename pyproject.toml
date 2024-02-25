@@ -6,7 +6,8 @@ authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 license = "GPL-3.0"
 readme = "README.md"
 packages = [
-    {include = "pufferblow"}
+    {include = "pufferblow"},
+    {include = "docs"}
 ]
 
 [tool.poetry.dependencies]
@@ -31,7 +32,6 @@ sphinx-autobuild = "^2024.2.4"
 sphinx-favicon = "^1.0.1"
 myst-parser = "^2.0.0"
 orjson = "^3.9.14"
-aioredis = "^2.0.1"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.2"

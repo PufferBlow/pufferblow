@@ -1,3 +1,5 @@
+import re
+
 from loguru import logger
 from datetime import datetime
 
@@ -25,10 +27,10 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
     RATE_LIMIT_DURATION: datetime = None
     MAX_RATE_LIMIT_REQUESTS: int = None
     MAX_REQUEST_LIMIT_WARNINGS: int = None
+    REQUEST_COUNT_PER_IP: dict = {}
 
     def __init__(self, app):
         super().__init__(app)
-        self.request_counts_per_ip = {} # Dictionary to store request counts for each IP
 
     async def dispatch(self, request, call_next):
         # This statements will get triggered when running
@@ -53,7 +55,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             )
         
         # Check if IP is already present in request_counts
-        request_count, rate_limit_request_warnings, last_request = self.request_counts_per_ip.get(client_ip, (0, 0,datetime.min))
+        request_count, rate_limit_request_warnings, last_request = self.REQUEST_COUNT_PER_IP.get(client_ip, (0, 0,datetime.min))
 
         # Calculate the time elapsed since the last request
         elapsed_time = datetime.now() - last_request
@@ -70,7 +72,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
                     rate_limit_warnings=rate_limit_request_warnings
                 )
             )
-            self.request_counts_per_ip[client_ip] = (request_count, rate_limit_request_warnings + 1, datetime.now())
+            self.REQUEST_COUNT_PER_IP[client_ip] = (request_count, rate_limit_request_warnings + 1, datetime.now())
 
             return ORJSONResponse(
                 status_code=429,
@@ -80,7 +82,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             request_count += 1
 
         # Update the request count, request warning cout and last request timestamp for the IP
-        self.request_counts_per_ip[client_ip] = (request_count, rate_limit_request_warnings, datetime.now())
+        self.REQUEST_COUNT_PER_IP[client_ip] = (request_count, rate_limit_request_warnings, datetime.now())
         
         # Block the IP address in case it exceeds the MAX_REQUEST_LIMIT_WARNINGS
         if rate_limit_request_warnings > self.MAX_REQUEST_LIMIT_WARNINGS:
@@ -112,3 +114,130 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         return response
+
+class SecurityMiddleware(BaseHTTPMiddleware):
+    """
+    This is a security middleware that handles checks related to auth_token, user_id, user's password ...etc
+    before, these checks were done at each api route level, which creates alot of code repitition and it's hard
+    to maintain, but now all the requests that are going to the api routes that can be accessed only by users, admins,
+    or server owner will be protected from outsiders and non server users.
+    """
+    PREVELEIDGED_API_ROUTES: list[str] = [
+        "/api/v1/users/signup",
+        "/api/v1/users/profile",
+        "/api/v1/users/profile",
+        "/api/v1/users/profile/reset-auth-token",
+        "/api/v1/users/list",                          
+        "/api/v1/channel/list/",
+        "/api/v1/channel/create/",                     
+        "/api/v1/channel/*/delete",                    
+        "/api/v1/channel/*/addUser",                   
+        "/api/v1/channel/*/removeUser",                
+        "/api/v1/channel/*/load_messages",             
+        "/api/v1/channel/*/send_message",              
+        "/api/v1/channel/*/mark_message_as_read",      
+        "/api/v1/channel/*/delete_message",            
+    ]
+
+    def __init__(self, app) -> None:
+        super().__init__(app)
+
+    async def dispatch(self, request, call_next):
+        # This statements will get triggered when running
+        # tests, beside that, it will just continue.
+        if request.client is None:
+            return await call_next(request)
+        
+        request_url = request.url.path
+        
+        url_match = self.match_request_url(
+            url=request_url,
+            method=request.method
+        )
+
+        if not url_match:
+            return await call_next(request)
+        
+        query_params = request.query_params
+
+        for param in query_params:
+            exception = None
+
+            if param == "auth_token":
+                exception = api_initializer.security_checks_handler.check_auth_token_format(
+                    auth_token=query_params.get("auth_token")
+                )
+                # Return the exception right away to break the loop
+                # and to not continue to the next check
+                if exception is not None:
+                    return exception
+                
+                exception = api_initializer.security_checks_handler.check_user(
+                    auth_token=query_params.get("auth_token")
+                )
+            if param == "user_id":
+                exception = api_initializer.security_checks_handler.check_user(
+                    user_id=query_params.get("user_id")
+                )
+            if param == "username":
+                exception = api_initializer.security_checks_handler.check_username_existence(
+                    username=query_params.get("username")
+                )
+            if param == "password":
+                if "/signup" in request_url:
+                    continue
+                exception = api_initializer.security_checks_handler.check_user_password(
+                    auth_token=query_params.get("auth_token"),
+                    password=query_params.get("password")
+                )
+            if param == "old_password":
+                exception = api_initializer.security_checks_handler.check_user_password(
+                    auth_token=query_params.get("auth_token"),
+                    password=query_params.get("old_password")
+                )
+            if param == "status":
+                exception = api_initializer.security_checks_handler.check_user_status_value(
+                    status=query_params.get("status")
+                )
+            if param == "channel_name":
+                exception = api_initializer.security_checks_handler.check_channel_name(
+                    channel_name=query_params.get("channel_name")
+                )
+            if param == "channel_id":
+                exception = api_initializer.security_checks_handler.check_channel_id(
+                    channel_id=query_params.get("channel_id")
+                )
+            if param == "to_add_user_id":
+                exception = api_initializer.security_checks_handler.check_user(
+                    user_id=query_params.get("to_add_user_id")
+                )
+            if param == "to_remove_user_id":
+                exception = api_initializer.security_checks_handler.check_user(
+                    user_id=query_params.get("to_remove_user_id")
+                )
+
+            if exception is not None:
+                return exception
+                
+        return await call_next(request)
+
+    def match_request_url(self, url: str, method: str) -> bool:
+        """
+        Tries to retrive the index of the matched url from
+        self.PREVELEIDGED_API_ROUTES
+
+        Args:
+            url (str): The url to check if we have a match for.
+        
+        Returns:
+            bool: True if the url matches, otherwise False.
+        """  
+        for route in self.PREVELEIDGED_API_ROUTES:
+            route_pattern = route.replace("*", ".*")
+
+            pattern = re.compile(route_pattern)
+
+            if pattern.match(url) or url == route:
+                return True
+
+        return False

@@ -12,11 +12,15 @@ cli = typer.Typer()
 
 # Init console
 console = Console()
+console._log_render.omit_repeated_times = False
+
+script_dir = os.path.dirname(__file__)
+docs_path = '/'.join(script_dir.split("/")[:-2]) + "/docs"
 
 def install_libs_packages() -> None:
     """ Installs the sphinx-build package """
     command_process = subprocess.run(
-        "poetry install",
+        "pip install sphinx-autobuild sphinx-book-theme",
         shell=True,
         stderr=subprocess.PIPE,
         stdout=subprocess.PIPE
@@ -31,7 +35,7 @@ def install_libs_packages() -> None:
 def build_docs(docs_path: str) -> None:
     """ Builds docs """
     command_process = subprocess.run(
-        f"cd {docs_path} && poetry run make html",
+        f"cd {docs_path} && make html",
         shell=True,
         stderr=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -53,22 +57,22 @@ def build_docs(docs_path: str) -> None:
 @cli.command()
 def build() -> None:
     """ Builds docs """
-    docs_path = ""
-
-    pwd = os.path.abspath(os.getcwd())
-    if not pwd.endswith("pufferblow-api/docs") and "scripts" not in pwd:
-        docs_path = f"{pwd}/docs"
-    if not pwd.endswith("pufferblow-api/docs") and "scripts" in pwd:
-        docs_path = f"{pwd.replace('scripts', 'docs')}"
-    
-    # Check if the `docs_path` is really the docs dir
-    if "conf.py" not in os.listdir(docs_path):
-        console.log("[bold red] [ - ] [bold white]Faild to locate the docs folder please change directory to it and try again.")
-    
-    console.log("[bold green] [ + ] [bold white]Building docs...")
+    console.log("[bold green] [ + ] [reset]Building docs")
     build_docs(
         docs_path=docs_path
     )
+
+    console.log(f"[bold green] [ + ] [reset]Docs built in: [bold yellow]'{docs_path}/_static'")
+
+@cli.command()
+def serve() -> None:
+    """ Serves the docs """
+    command = f"cd {docs_path} && sphinx-autobuild . _build"
+
+    try:
+        subprocess.run(command, shell=True)
+    except KeyboardInterrupt:
+        exit(0)
 
 def run() -> None: cli()
 

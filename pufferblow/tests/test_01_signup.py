@@ -4,11 +4,15 @@ from fastapi.testclient import TestClient
 from pufferblow.api import api
 from pufferblow.tests.conftest import ValueStorage
 
+# NOTE: The tests won't function now that we have added
+# a middleware to handle security. So we need to figure
+# a way to fix that.
+
 @pytest.fixture
 def client():
     # Use `TestClient` inside a `with` statment
     # to trigger startup/shutdown events
-    with TestClient(api) as test_client:
+    with TestClient(api) as test_client: 
         return test_client
 
 route = "/api/v1/users/signup"

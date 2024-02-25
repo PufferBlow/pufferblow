@@ -248,7 +248,7 @@ class UserManager (object):
             bool: True is the username exists, otherwise False.
         """
         usernames = self.database_handler.get_usernames()
-        
+
         if username in usernames:
             return True
         
