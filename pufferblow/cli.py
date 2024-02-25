@@ -47,7 +47,7 @@ pufferblow_api_config = PufferBlowAPIconfig(
 @cli.command()
 def version():
     """ PufferBlow's API version """
-    print(f"[bold cyan] Version [italic white]{constants.VERSION}")
+    print(f"[bold cyan]pufferblow [reset]{constants.VERSION}")
 
 @cli.command()
 def setup():
@@ -109,8 +109,8 @@ def run() -> None:
     # Basic checks before starting the cli, this eliminates the need for
     # repetitive checks at the function command level.
     if config_handler.check_config() or config_handler.is_default_config():
-        # console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
-        # sys.exit(1)
+        console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
+        sys.exit(1)
         pass
 
     cli()
