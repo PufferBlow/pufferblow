@@ -4,9 +4,6 @@ import random
 import base64
 import hashlib
 
-from loguru import logger
-
-from pufferblow import constants
 from pufferblow.src.hasher.hasher import Hasher
 from pufferblow.src.auth.auth_token_manager import AuthTokenManager
 from pufferblow.src.database.database_handler import DatabaseHandler
@@ -20,7 +17,6 @@ from pufferblow.src.user.user_manager import UserManager
 
 class MessagesManager(object):
     """ Messages manager class """
-    
     def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager, user_manager: UserManager, hasher: Hasher) -> None:
         self.database_handler        =      database_handler
         self.auth_token_manager      =      auth_token_manager
@@ -85,7 +81,8 @@ class MessagesManager(object):
             json_metadata_format["username"] = sender_user_metadata["username"]
 
             for key in ["channel_id", "conversation_id"]:
-                if json_metadata_format[key] is None: json_metadata_format.pop(key)
+                if json_metadata_format[key] is None:
+                    json_metadata_format.pop(key)
 
             # Re-order the dict
             reordered_metadata = {}

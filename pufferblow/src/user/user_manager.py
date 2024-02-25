@@ -25,7 +25,6 @@ from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfi
 # Log messages
 from pufferblow.src.logger.msgs import (
     info,
-    errors,
     debug
 )
 
@@ -249,7 +248,7 @@ class UserManager (object):
             bool: True is the username exists, otherwise False.
         """
         usernames = self.database_handler.get_usernames()
-        
+
         if username in usernames:
             return True
         

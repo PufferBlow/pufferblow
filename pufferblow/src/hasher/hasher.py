@@ -47,7 +47,7 @@ class Hasher(object):
         
         encrypted_data = cipher.iv + ciphertext
         
-        if is_to_check != True:
+        if is_to_check is not True:
             encryption_key = EncryptionKey()
             encryption_key.key_value = base64.b64encode(key).decode("ascii") # Encoding the key into base64 to save in the database
 

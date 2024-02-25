@@ -14,8 +14,6 @@ from pufferblow.src.database.database_handler import DatabaseHandler
 
 # Log messages
 from pufferblow.src.logger.msgs import (
-    info,
-    errors,
     debug
 )
 

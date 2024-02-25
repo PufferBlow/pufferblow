@@ -4,9 +4,7 @@ import hashlib
 from loguru import logger
 
 # Models
-from pufferblow.src.models.user_model import User
 from pufferblow.src.models.channel_model import Channel
-from pufferblow.src.models.encryption_key_model import EncryptionKey
 
 # Hasher
 from pufferblow.src.hasher.hasher import Hasher
@@ -22,9 +20,7 @@ from pufferblow.src.utils.current_date import date_in_gmt
 
 # Log messages
 from pufferblow.src.logger.msgs import (
-    info,
-    errors,
-    debug
+    info
 )
 
 class ChannelsManager (object):

@@ -85,3 +85,8 @@ def INFO_FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_AN_ADMIN(user_id, ch
 def INFO_FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_SERVER_OWNER(user_id, channel_id, to_remove_user_id) -> str:
     msg =  f"User ID: '{user_id}' tried to remove the server Admin ID: '{to_remove_user_id}' from Channel ID: '{channel_id}'."
     return msg
+
+def CLIENT_IP_BLOCKED(client_ip: str, requests_count: int, rate_limit_warnings: int) -> str:
+    msg = f"Malicious activities detected with the client IP: '{client_ip}', it have been [bold red]blocked[reset]. Number of requests is '{requests_count}' and number of rate limite warnings is '{rate_limit_warnings}'."
+
+    return msg

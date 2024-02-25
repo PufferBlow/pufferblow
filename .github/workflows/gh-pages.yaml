@@ -17,7 +17,7 @@ jobs:
           poetry install
       - name: Sphinx build
         run: |
-          poetry run python scripts/build_docs.py
+          poetry run python scripts/docs.py build
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
