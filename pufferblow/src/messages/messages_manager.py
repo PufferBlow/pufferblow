@@ -17,7 +17,6 @@ from pufferblow.src.user.user_manager import UserManager
 
 class MessagesManager(object):
     """ Messages manager class """
-    
     def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager, user_manager: UserManager, hasher: Hasher) -> None:
         self.database_handler        =      database_handler
         self.auth_token_manager      =      auth_token_manager

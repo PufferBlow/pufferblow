@@ -26,6 +26,9 @@ from pufferblow.src.messages.messages_manager import MessagesManager
 # WebSockets manager
 from pufferblow.src.websocket.websocket_manager import WebSocketsManager
 
+# SecurityChecks handler
+from pufferblow.src.security.security_checks_handler import SecurityChecksHandler
+
 # Models
 from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
@@ -56,6 +59,7 @@ class APIInitializer(object):
     user_manager            :       UserManager             =   None
     channels_manager        :       ChannelsManager         =   None
     websockets_manager      :       WebSocketsManager       =   None
+    security_checks_handler :       SecurityChecksHandler   =   None
 
     def __init__(self) -> None:
         pass
@@ -136,6 +140,14 @@ class APIInitializer(object):
 
         # Init websockets manager
         self.websockets_manager = WebSocketsManager()
+
+        # Init security checks handlker
+        self.security_checks_handler = SecurityChecksHandler(
+            database_handler=self.database_handler,
+            user_manager=self.user_manager,
+            channels_manager=self.channels_manager,
+            auth_token_manager=self.auth_token_manager
+        )
 
 # PufferBlow's APIs objects loader
 api_initializer: APIInitializer = APIInitializer()
