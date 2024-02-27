@@ -26,6 +26,9 @@ from pufferblow.src.config.config_handler import ConfigHandler
 # Models
 from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
+# Database
+from pufferblow.src.database.database import Database
+
 # Init cli
 cli = typer.Typer()
 
@@ -63,6 +66,21 @@ def serve(
         console.log("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
         sys.exit(1)
     
+    # Check if the database exists or not
+    database_uri = Database._create_database_uri(
+        username=pufferblow_api_config.USERNAME,
+        password=pufferblow_api_config.DATABASE_PASSWORD,
+        host=pufferblow_api_config.DATABASE_HOST,
+        port=pufferblow_api_config.DATABASE_PORT,
+        database_name=pufferblow_api_config.DATABASE_NAME,
+    )
+
+    if not Database.check_database_existense(
+        database_uri=database_uri
+    ):
+        logger.error("The specified database does not exist. Please verify the database name and connection details.")
+        sys.exit(1)
+
     log_level = constants.log_level_map[log_level]
 
     INTERCEPT_HANDLER = InterceptHandler()
@@ -107,7 +125,7 @@ def run() -> None:
     constants.banner()
 
     # Basic checks before starting the cli, this eliminates the need for
-    # repetitive checks at the function command level.
+    # repetitive checks at the command's function level.
     if config_handler.check_config() or config_handler.is_default_config():
         console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
         sys.exit(1)
