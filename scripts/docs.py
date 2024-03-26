@@ -15,7 +15,7 @@ console = Console()
 console._log_render.omit_repeated_times = False
 
 script_dir = os.path.dirname(__file__)
-docs_path = '/'.join(script_dir.split("/")[:-2]) + "/docs"
+docs_path = '/'.join(script_dir.split("/")[:-1]) + "/docs"
 
 def install_libs_packages() -> None:
     """ Installs the sphinx-build package """
@@ -47,20 +47,20 @@ def build_docs(docs_path: str) -> None:
         console.log("[bold red][ - ] [bold green] `sphinx-build`[bold white] is not installed. Installing...")
 
         install_libs_packages() # May exit due to errors while installing
-    
+
         build_docs(
             docs_path=docs_path
         )
-    
+
     return
 
 @cli.command()
 def build() -> None:
     """ Builds docs """
-    console.log("[bold green] [ + ] [reset]Building docs")
-    build_docs(
-        docs_path=docs_path
-    )
+    with console.status("Building docs...") as status:
+        build_docs(
+            docs_path=docs_path
+        )
 
     console.log(f"[bold green] [ + ] [reset]Docs built in: [bold yellow]'{docs_path}/_static'")
 
