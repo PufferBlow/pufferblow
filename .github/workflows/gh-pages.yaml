@@ -1,6 +1,9 @@
 name: PufferBlow's API docs
 
-on: [push]
+on:
+  push:
+    branches:
+      - "docs"
 
 permissions:
   contents: write
