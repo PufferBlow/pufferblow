@@ -1,4 +1,5 @@
 import sys
+
 from loguru import logger
 
 # Encryption/Decryption manager
@@ -99,7 +100,7 @@ class APIInitializer(object):
             supabase_key            =   self.pufferblow_api_config.SUPABASE_KEY,
             pufferblow_api_config   =   self.pufferblow_api_config
         )
-
+        
         # Init Database handler
         database_engine  = self.database.create_database_engine_instance()
         
