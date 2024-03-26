@@ -163,58 +163,59 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         for param in query_params:
             exception = None
 
-            if param == "auth_token":
-                exception = api_initializer.security_checks_handler.check_auth_token_format(
-                    auth_token=query_params.get("auth_token")
-                )
-                # Return the exception right away to break the loop
-                # and to not continue to the next check
-                if exception is not None:
-                    return exception
-                
-                exception = api_initializer.security_checks_handler.check_user(
-                    auth_token=query_params.get("auth_token")
-                )
-            if param == "user_id":
-                exception = api_initializer.security_checks_handler.check_user(
-                    user_id=query_params.get("user_id")
-                )
-            if param == "username":
-                exception = api_initializer.security_checks_handler.check_username_existence(
-                    username=query_params.get("username")
-                )
-            if param == "password":
-                if "/signup" in request_url:
-                    continue
-                exception = api_initializer.security_checks_handler.check_user_password(
-                    auth_token=query_params.get("auth_token"),
-                    password=query_params.get("password")
-                )
-            if param == "old_password":
-                exception = api_initializer.security_checks_handler.check_user_password(
-                    auth_token=query_params.get("auth_token"),
-                    password=query_params.get("old_password")
-                )
-            if param == "status":
-                exception = api_initializer.security_checks_handler.check_user_status_value(
-                    status=query_params.get("status")
-                )
-            if param == "channel_name":
-                exception = api_initializer.security_checks_handler.check_channel_name(
-                    channel_name=query_params.get("channel_name")
-                )
-            if param == "channel_id":
-                exception = api_initializer.security_checks_handler.check_channel_id(
-                    channel_id=query_params.get("channel_id")
-                )
-            if param == "to_add_user_id":
-                exception = api_initializer.security_checks_handler.check_user(
-                    user_id=query_params.get("to_add_user_id")
-                )
-            if param == "to_remove_user_id":
-                exception = api_initializer.security_checks_handler.check_user(
-                    user_id=query_params.get("to_remove_user_id")
-                )
+            match param:
+                case "auth_token":
+                    exception = api_initializer.security_checks_handler.check_auth_token_format(
+                        auth_token=query_params.get("auth_token")
+                    )
+                    # Return the exception right away to break the loop
+                    # and to not continue to the next check
+                    if exception is not None:
+                        return exception
+                    
+                    exception = api_initializer.security_checks_handler.check_user(
+                        auth_token=query_params.get("auth_token")
+                    )
+                case "user_id":
+                    exception = api_initializer.security_checks_handler.check_user(
+                        user_id=query_params.get("user_id")
+                    )
+                case "username":
+                    exception = api_initializer.security_checks_handler.check_username_existence(
+                        username=query_params.get("username")
+                    )
+                case "password":
+                    if "/signup" in request_url:
+                        continue
+                    exception = api_initializer.security_checks_handler.check_user_password(
+                        auth_token=query_params.get("auth_token"),
+                        password=query_params.get("password")
+                    )
+                case "old_password":
+                    exception = api_initializer.security_checks_handler.check_user_password(
+                        auth_token=query_params.get("auth_token"),
+                        password=query_params.get("old_password")
+                    )
+                case "status":
+                    exception = api_initializer.security_checks_handler.check_user_status_value(
+                        status=query_params.get("status")
+                    )
+                case "channel_name":
+                    exception = api_initializer.security_checks_handler.check_channel_name(
+                        channel_name=query_params.get("channel_name")
+                    )
+                case "channel_id":
+                    exception = api_initializer.security_checks_handler.check_channel_id(
+                        channel_id=query_params.get("channel_id")
+                    )
+                case "to_add_user_id":
+                    exception = api_initializer.security_checks_handler.check_user(
+                        user_id=query_params.get("to_add_user_id")
+                    )
+                case "to_remove_user_id":
+                    exception = api_initializer.security_checks_handler.check_user(
+                        user_id=query_params.get("to_remove_user_id")
+                    )
 
             if exception is not None:
                 return exception
