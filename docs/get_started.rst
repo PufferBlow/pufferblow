@@ -8,18 +8,17 @@ To get started on hosting your own `pufferblow <https://github.com/PufferBlow/pu
 Setup a Linux VPS
 =================
 
-**steps to setup a VPS**
+Numerous affordable VPS services are available, offering reliable Linux VPS solutions. Among the options that we recommend are:
+
+* `Oracle's Free tier <https://www.oracle.com/cloud/free>`_
+* `Contabo <https://contabo.com/en/>`_
 
 Setup supabase
 ==============
 
 Supabase is a Firebase alternative that is open-source, which is why we are using.
-To set it up, you can either use the **free plan** available at `supabase.com <https://supabase.com>`__, or you can create your own instance of it in your linux VPS or the machine that host's `pufferblow-api <https://github.com/PufferBlow/pufferblow-api>`__.
-
-Using the free-plan
--------------------
-
-head over to `supabase.com/pricing <https://supabase.com/pricing>`__ and choose a plan and create an account:
+To set it up, you can use the **free plan** available at `supabase.com <https://supabase.com>`__, or you can choose a **paid plan** option.
+We are going to be using the **free plan** so just head over to `supabase.com/pricing <https://supabase.com/pricing>`__ and choose a plan and create an account:
 
 .. image:: ./_static/images/supabase-pricing.png
     :class: image-style
@@ -42,4 +41,4 @@ After creating the project, it may take up to 5min in order to setup everything,
     :class: image-style
     :alt: Supabase project's database connection info
 
-make sure to save them in a text file because we're going to need them when setting up `pufferblow-api <https://github.com/PufferBlow/pufferblow-api>`__
+make sure to save them in a text file because we're going to need them when setting up `pufferblow <https://github.com/PufferBlow/pufferblow>`__
