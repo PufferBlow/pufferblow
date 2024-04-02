@@ -31,8 +31,8 @@ sphinx-book-theme = "^1.1.2"
 sphinx-autobuild = "^2024.2.4"
 sphinx-favicon = "^1.0.1"
 myst-parser = "^2.0.0"
-orjson = "^3.9.15"
 sqlalchemy-utils = "^0.41.2"
+orjson = "^3.10.0"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.2"
