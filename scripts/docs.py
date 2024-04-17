@@ -57,7 +57,7 @@ def build_docs(docs_path: str) -> None:
 @cli.command()
 def build() -> None:
     """ Builds docs """
-    with console.status("Building docs...") as status:
+    with console.status("Building docs...") as _:
         build_docs(
             docs_path=docs_path
         )

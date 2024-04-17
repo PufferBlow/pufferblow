@@ -8,4 +8,3 @@ Welcome to pufferblow-api docs's documentation!
     
     introduction
     get_started
-    donate
