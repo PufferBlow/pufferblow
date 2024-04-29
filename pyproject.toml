@@ -30,7 +30,7 @@ sphinx = "^7.3.7"
 sphinx-book-theme = "^1.1.2"
 sphinx-autobuild = "^2024.4.13"
 sphinx-favicon = "^1.0.1"
-myst-parser = "^2.0.0"
+myst-parser = "^3.0.1"
 sqlalchemy-utils = "^0.41.2"
 orjson = "^3.10.0"
 
