@@ -25,9 +25,6 @@ from pufferblow.middlewares import (
 from pufferblow.src.utils.extract_user_id import extract_user_id
 from pufferblow.src.utils.is_able_to_update import is_able_to_update
 
-# Base
-from pufferblow.src.database.tables.declarative_base import Base
-
 # Log messages
 from pufferblow.src.logger.msgs import (
     info
@@ -42,12 +39,6 @@ from pufferblow.src.logger.msgs import (
 @asynccontextmanager
 async def lifespan(api: FastAPI):
     """ API startup handler """
-    # Load all the needed objects
-    api_initializer.load_objects()
-
-    # Setup the tables (will get skipped if they already exists)
-    api_initializer.database_handler.setup_tables(Base)
-
     # Setup the rate limit middleware     
     RateLimitingMiddleware.RATE_LIMIT_DURATION = timedelta(
         minutes=api_initializer.pufferblow_api_config.RATE_LIMIT_DURATION

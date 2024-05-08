@@ -5,6 +5,9 @@ from rich import print
 from loguru import logger
 from rich.console import Console
 
+from pufferblow import constants
+from pufferblow.api import api
+
 from pufferblow.src.logger.logger import (
     InterceptHandler,
     logging,
@@ -12,8 +15,11 @@ from pufferblow.src.logger.logger import (
     StubbedGunicornLogger,
     WORKERS
 )
-from pufferblow import constants
-from pufferblow.api import api
+
+# Base
+from pufferblow.src.database.tables.declarative_base import Base
+
+from pufferblow.api_initializer import api_initializer
 
 # Log messages
 from pufferblow.src.logger.msgs import (
@@ -81,6 +87,12 @@ def serve(
         logger.error("The specified database does not exist. Please verify the database name and connection details.")
         sys.exit(1)
 
+    # Load shared objects
+    api_initializer.load_objects()
+
+    # Setup tables
+    api_initializer.database_handler.setup_tables(Base)
+
     log_level_str = constants.log_level_map[log_level]
 
     INTERCEPT_HANDLER = InterceptHandler()
@@ -127,8 +139,8 @@ def run() -> None:
     # Basic checks before starting the cli, this eliminates the need for
     # repetitive checks at the command's function level.
     if config_handler.check_config() or config_handler.is_default_config():
-        console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
-        sys.exit(1)
+        # console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
+        # sys.exit(1)
         pass
 
     cli()

@@ -61,13 +61,7 @@ class DatabaseHandler (object):
         Returns:
             `None`.
         """
-        # in case a table already exists then it will be skipped
-        try:
-            base.metadata.create_all(self.database_engine)
-        except sqlalchemy.exc.ProgrammingError:
-            # This error occurs when there is a duplication of
-            # table names within the database.
-            return
+        base.metadata.create_all(self.database_engine)
         
     def sign_up(self, user_data: User) -> None:
         """
