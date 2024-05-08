@@ -5,6 +5,9 @@ from rich import print
 from loguru import logger
 from rich.console import Console
 
+from pufferblow import constants
+from pufferblow.api import api
+
 from pufferblow.src.logger.logger import (
     InterceptHandler,
     logging,
@@ -12,8 +15,11 @@ from pufferblow.src.logger.logger import (
     StubbedGunicornLogger,
     WORKERS
 )
-from pufferblow import constants
-from pufferblow.api import api
+
+# Base
+from pufferblow.src.database.tables.declarative_base import Base
+
+from pufferblow.api_initializer import api_initializer
 
 # Log messages
 from pufferblow.src.logger.msgs import (
@@ -37,7 +43,7 @@ console = Console()
 
 # Pre-init the config handler and the config model
 # TODO: Find a better to do this
-config_handler = ConfigHandler() 
+config_handler = ConfigHandler()
 
 if not config_handler.check_config():
     logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(config_handler.config_file_path))
@@ -47,7 +53,7 @@ pufferblow_api_config = PufferBlowAPIconfig(
     config=config_handler.load_config()
 )
 
-@cli.command()
+cli.command()
 def version():
     """ PufferBlow's API version """
     print(f"[bold cyan]pufferblow [reset]{constants.VERSION}")
@@ -65,7 +71,7 @@ def serve(
     if log_level > 3:
         console.log("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
         sys.exit(1)
-    
+
     # Check if the database exists or not
     database_uri = Database._create_database_uri(
         username=pufferblow_api_config.USERNAME,
@@ -81,12 +87,18 @@ def serve(
         logger.error("The specified database does not exist. Please verify the database name and connection details.")
         sys.exit(1)
 
-    log_level = constants.log_level_map[log_level]
+    # Load shared objects
+    api_initializer.load_objects()
+
+    # Setup tables
+    api_initializer.database_handler.setup_tables(Base)
+
+    log_level_str = constants.log_level_map[log_level]
 
     INTERCEPT_HANDLER = InterceptHandler()
-    logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level)
+    logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
     logging.root.handlers = [INTERCEPT_HANDLER]
-    logging.root.setLevel(log_level)
+    logging.root.setLevel(log_level_str)
 
     SEEN = set()
 
@@ -106,7 +118,7 @@ def serve(
     logger.configure(handlers=[{"sink": sys.stdout}])
     logger.add(pufferblow_api_config.LOGS_PATH, rotation="10 MB")
 
-    StubbedGunicornLogger.log_level = log_level
+    StubbedGunicornLogger.log_level = log_level_str
 
     OPTIONS = {
         "bind": f"{pufferblow_api_config.API_HOST}:{pufferblow_api_config.API_PORT}",
@@ -127,8 +139,8 @@ def run() -> None:
     # Basic checks before starting the cli, this eliminates the need for
     # repetitive checks at the command's function level.
     if config_handler.check_config() or config_handler.is_default_config():
-        console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
-        sys.exit(1)
+        # console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
+        # sys.exit(1)
         pass
 
     cli()
