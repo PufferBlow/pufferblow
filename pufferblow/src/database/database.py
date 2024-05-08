@@ -1,5 +1,6 @@
 import sqlalchemy
 
+from urllib.parse import quote
 from sqlalchemy_utils import database_exists
 
 # Models
@@ -33,7 +34,7 @@ class Database(object):
             url=self.database_uri,
             pool_size=20,
             max_overflow=10,
-            pool_recycle=3600*3, # All the pool gets recycled every three hours
+            pool_recycle=3600*3, # recycled every three hours
             pool_timeout=27
         )
 
@@ -68,8 +69,12 @@ class Database(object):
         Returns:
             str: the created database uri.
         """
-        # The database type that is supported is postgreSQL
-        # because it is used by default in supabase.
+        # Encoding database creds
+        database_name = quote(database_name)
+        username = quote(username)
+        password = quote(password)
+        host = quote(host)
+        
         database_uri = f"postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}"
 
         return database_uri
