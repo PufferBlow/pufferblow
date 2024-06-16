@@ -1,10 +1,10 @@
 import os
-import tomli
+import tomllib
 
 class ConfigHandler(object):
     """ ConfigHandler class handles PufferBlow's API config """
 
-    config_file_path            : str   =   f"{os.environ['HOME']}/.pufferblow-api/config.toml"
+    config_file_path            : str   =   f"{os.environ['HOME']}/.pufferblow/config.toml"
     is_config_present           : bool
     config                      : dict
     script_dir                  : str   =   os.path.dirname(__file__)
@@ -27,17 +27,17 @@ class ConfigHandler(object):
 
         return self.is_config_present
 
-    def write_config(self) -> None:
+    def write_config(self, config: str) -> None:
         """
         Writes the config file to the config file path
 
         Args:
-
-        
+            config (str): The config in toml format.
         Returns:
             None.
         """
-        raise NotImplementedError
+        with open(self.config_file_path, "w") as f:
+            f.write(config)
 
     def load_config(self, config_file_path: str | None = None) -> dict:
         """
@@ -53,7 +53,7 @@ class ConfigHandler(object):
             config_file_path = self.config_file_path
         
         with open(self.config_file_path, "rb") as config_file_content:
-            self.config = tomli.load(config_file_content)
+            self.config = tomllib.load(config_file_content)
 
         return self.config 
 
@@ -126,3 +126,4 @@ class ConfigHandler(object):
                         return True
         
         return False
+

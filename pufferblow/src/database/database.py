@@ -7,28 +7,29 @@ from sqlalchemy_utils import database_exists
 from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
 
 class Database(object):
-    def __init__(self, supabase_url: str, supabase_key: str, pufferblow_api_config: PufferBlowAPIconfig) -> None:
-        self.supabase_url           =   supabase_url
-        self.supabase_key           =   supabase_key
+    def __init__(self, pufferblow_api_config: PufferBlowAPIconfig | None = None, database_uri: str | None = None) -> None:
         self.pufferblow_api_config  =   pufferblow_api_config
-        self.database_uri = self._create_database_uri(
-            username=self.pufferblow_api_config.USERNAME,
-            password=self.pufferblow_api_config.DATABASE_PASSWORD,
-            host=self.pufferblow_api_config.DATABASE_HOST,
-            port=self.pufferblow_api_config.DATABASE_PORT,
-            database_name=self.pufferblow_api_config.DATABASE_NAME,
-        )
-    
+        
+        if pufferblow_api_config is not None:
+            self.database_uri = self._create_database_uri(
+                username=self.pufferblow_api_config.USERNAME,
+                password=self.pufferblow_api_config.DATABASE_PASSWORD,
+                host=self.pufferblow_api_config.DATABASE_HOST,
+                port=self.pufferblow_api_config.DATABASE_PORT,
+                database_name=self.pufferblow_api_config.DATABASE_NAME,
+            )
+        else:
+            self.database_uri = database_uri
+
     def create_database_engine_instance(self) -> sqlalchemy.create_engine:
         """
         Create a database engine instance to use to interact
         with the database.
 
         Args:
-            `None`.
-        
+            None.
         Returns:
-
+            Engine: A database engine object.
         """
         database_engine = sqlalchemy.create_engine(
             url=self.database_uri,

@@ -1,6 +1,7 @@
 import sys
 
 from loguru import logger
+from sqlalchemy_utils import database_exists
 
 # Encryption/Decryption manager
 from pufferblow.src.hasher.hasher import Hasher
@@ -65,7 +66,7 @@ class APIInitializer(object):
     def __init__(self) -> None:
         pass
     
-    def load_objects(self) -> None:
+    def load_objects(self, database_uri: str | None = None) -> None:
         """
         Load all the objects that will be used by the API
 
@@ -75,17 +76,8 @@ class APIInitializer(object):
         Returns:
             `None`.
         """
-        # Config handler
-        self.config_handler = ConfigHandler()
-        
-        if not self.config_handler.check_config():
-            logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(self.config_handler.config_file_path))
-            sys.exit(1)
-
-        # PufferBlow-api's config data class
-        self.pufferblow_api_config = PufferBlowAPIconfig(
-            config=self.config_handler.load_config()
-        )
+        # Init config
+        self.load_config()
 
         # Init the hasher (Responsible for encrypting and decrypting data)
         self.hasher = Hasher(
@@ -94,21 +86,8 @@ class APIInitializer(object):
             salt_rounds             =       self.pufferblow_api_config.SALT_ROUNDS
         )
 
-        # Init Database Connection
-        self.database = Database(
-            supabase_url            =   self.pufferblow_api_config.SUPABASE_URL,
-            supabase_key            =   self.pufferblow_api_config.SUPABASE_KEY,
-            pufferblow_api_config   =   self.pufferblow_api_config
-        )
-        
-        # Init Database handler
-        database_engine  = self.database.create_database_engine_instance()
-        
-        self.database_handler = DatabaseHandler(
-            database_engine         =      database_engine,
-            hasher                  =      self.hasher,
-            pufferblow_config_model =      self.pufferblow_api_config
-        )
+        # Init Database
+        self.load_database(database_uri=database_uri) 
 
         # Init Auth tokens manager
         self.auth_token_manager = AuthTokenManager(
@@ -149,6 +128,48 @@ class APIInitializer(object):
             channels_manager=self.channels_manager,
             auth_token_manager=self.auth_token_manager
         )
+
+    def load_database(self, database_uri: str | None = None) -> None:
+        """
+        Load the database and the database handler.
+        """
+        if self.pufferblow_api_config is None and database_uri is None:
+            self.load_config()
+        
+        if database_uri is not None:
+            self.database = Database(
+                database_uri=database_uri
+            )
+        else:
+            self.database = Database(
+                pufferblow_api_config   =   self.pufferblow_api_config
+            )
+        
+        database_engine  = self.database.create_database_engine_instance() 
+
+        self.database_handler = DatabaseHandler(
+            database_engine         =      database_engine,
+            hasher                  =      self.hasher,
+            pufferblow_config_model =      self.pufferblow_api_config
+        )
+    
+    def load_config(self) -> None:
+        """
+        Load the config handler and the config model.
+        """
+        self.config_handler = ConfigHandler()
+        
+        if not self.config_handler.check_config():
+            logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(self.config_handler.config_file_path))
+            sys.exit(1)
+        
+        config = self.config_handler.load_config()
+        if len(config) == 0:
+            self.pufferblow_api_config = PufferBlowAPIconfig()
+        else:
+            self.pufferblow_api_config = PufferBlowAPIconfig(
+                config=config
+            )
 
 # PufferBlow's APIs objects loader
 api_initializer: APIInitializer = APIInitializer()

@@ -2,7 +2,9 @@ import sys
 import typer
 
 from rich import print
+from typing import Type
 from loguru import logger
+from rich.prompt import Prompt, Confirm
 from rich.console import Console
 
 from pufferblow import constants
@@ -26,7 +28,7 @@ from pufferblow.src.logger.msgs import (
     errors
 )
 
-# Handlers
+# Config handler
 from pufferblow.src.config.config_handler import ConfigHandler
 
 # Models
@@ -34,6 +36,7 @@ from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfi
 
 # Database
 from pufferblow.src.database.database import Database
+from pufferblow.src.database.database_handler import DatabaseHandler
 
 # Init cli
 cli = typer.Typer()
@@ -49,9 +52,38 @@ if not config_handler.check_config():
     logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(config_handler.config_file_path))
     sys.exit(1)
 
-pufferblow_api_config = PufferBlowAPIconfig(
-    config=config_handler.load_config()
-)
+config = config_handler.load_config()
+if len(config) == 0:
+    pufferblow_api_config = PufferBlowAPIconfig()
+else:
+    pufferblow_api_config = PufferBlowAPIconfig(
+        config=config_handler.load_config()
+    )
+
+def ask_prompt(prompt: str, name: str, default: str | int | None = None, password: bool | None = False) -> str | int:
+    """
+    Asks a prompt and makes sure the user answers it.
+    
+    Args:
+        prompt (str): The prompt to ask.
+        name (str): The prompt's name.
+        default (str, default: None): The default choice for the prompt.
+
+    Returns:
+        str | int: the user's answer to the prompt.
+    """
+    answer: str | int  = None
+
+    while True:
+        answer = Prompt.ask(prompt, default=default, password=password)
+        
+        if answer is None:
+            print(f"[bold red]{name} shouldn't be empty[reset]")
+            continue
+        
+        break
+
+    return answer
 
 cli.command()
 def version():
@@ -61,7 +93,70 @@ def version():
 @cli.command()
 def setup():
     """ setup pufferblow's API """
-    pass
+    if config_handler.check_config():
+        is_to_proceed = Confirm.ask("A config file already exists. Do you want to continue?")
+
+        if not is_to_proceed:
+            sys,exit(0)
+    
+    config = PufferBlowAPIconfig()
+    
+    # Supabase
+    supabase_url = ask_prompt(prompt="Enter your supabase url", name="supabase url")
+    supabase_key = ask_prompt(prompt="Enter your supabase key", name="supabase key")
+
+    config.SUPABASE_URL = supabase_url
+    config.SUPABASE_KEY = supabase_key
+
+    # Database related questions
+    database_name = Prompt.ask("PostgreSQL database name", default="postgres")
+    username = ask_prompt(prompt="PostgreSQl database username", name="username") 
+    password = ask_prompt(prompt="PostgreSQL database password", name="password", password=True)
+    host = ask_prompt(prompt="PostgreSQL database's host", name="host")
+    port = ask_prompt(prompt="PostgreSQL database's port", name="port", default=6543)
+    
+    logger.info("Attempting to connect to the database.")
+    
+    database_uri = Database._create_database_uri(
+        username=username,
+        password=password,
+        host=host,
+        port=port,
+        database_name=database_name
+    ) 
+
+    logger.debug(f"Database URI: '{database_uri}'")
+
+    if not Database.check_database_existense(database_uri):
+        logger.error(f"The specified database does not exist. Please verify the database name and connection details.")
+        sys.exit(1)
+    
+    config.DATABASE_NAME = database_name
+    config.USERNAME = username
+    config.DATABASE_PASSWORD = password
+    config.DATABASE_HOST = host
+    config.DATABASE_PORT = port
+
+    # Creating the server owner's account
+    api_initializer.load_objects(database_uri)
+
+    username = ask_prompt(prompt="Enter your owner account username", name="account username")
+    password = ask_prompt(prompt="Enter your owner account password", name="account password", password=True)
+
+    user = api_initializer.user_manager.sign_up(
+        username=username,
+        password=password,
+        is_admin=True,
+        is_owner=True
+    )
+
+    logger.info(f"Your auth-token is '{user.raw_auth_token}'. DO NOT GIVE IT TO ANYONE")
+    
+    # Save the config
+    config_toml = config.export_toml()
+    config_handler.write_config(config=config_toml)
+    
+    logger.info(f"Config saved at '{config_handler.config_file_path}'")
 
 @cli.command()
 def serve(
@@ -69,7 +164,7 @@ def serve(
 ):
     """ Serve PufferBlow's API """
     if log_level > 3:
-        console.log("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
+        logger.info("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
         sys.exit(1)
 
     # Check if the database exists or not
@@ -144,3 +239,4 @@ def run() -> None:
         pass
 
     cli()
+

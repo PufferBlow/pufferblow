@@ -36,14 +36,16 @@ class UserManager (object):
         self.hasher                     =     hasher
         self.pufferblow_config_model    =     pufferblow_config_model
 
-    def sign_up(self, username: str, password: str) -> User:
+    def sign_up(self, username: str, password: str, is_admin: bool | None = False, is_owner: bool | None = False) -> User:
         """ 
         Sign up a new user
         
         Args:
-            `username` (str): The user's `username`.
-            `password` (str): The user's `password`.
-        
+            username (str): The user's `username`.
+            password (str): The user's `password`.
+            is_admin (bool, default: False, Optional): Is this user going to be an admin.
+            is_owner (bool, default: False, Optional): Is this uer going to be the server owner's account.
+
         Returns:
             User: A `User` object.
         """
@@ -78,6 +80,8 @@ class UserManager (object):
         new_user.contacts                               =       []
         new_user.conversations                          =       []
         new_user.joined_servers_sha256                  =       [self.pufferblow_config_model.SERVER_SHA256, ]
+        new_user.is_admin                               =       is_admin
+        new_user.is_owner                               =       is_owner
         new_user.created_at                             =       datetime.date.today().strftime("%Y-%m-%d")
         new_user.last_seen                              =       datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
         new_user.updated_at                             =       None
