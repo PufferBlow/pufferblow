@@ -24,7 +24,6 @@ psycopg2-binary = "^2.9.9"
 pytest = "^8.2.2"
 sqlalchemy = "^2.0.30"
 websockets = "^12.0"
-tomli = "^2.0.1"
 httpx = "^0.27.0"
 sphinx = "^7.3.7"
 sphinx-book-theme = "^1.1.2"
@@ -46,3 +45,18 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 include = ["*.toml"]
+
+[tool.pyprojectx]
+main = ["pdm==2.12.4"]  # installs pdm to your project instead of globally
+
+[tool.pdm.dev-dependencies]  # or the poetry equivalent
+dev = [
+    "basedpyright", # you can pin the version here if you want, or just rely on the lockfile
+]
+
+[tool.basedpyright]
+# many settings are not enabled even in strict mode, which is why basedpyright includes an "all" option
+# you can then decide which rules you want to disable
+typeCheckingMode = "standard"
+reportMissingSuperCall = false
+
