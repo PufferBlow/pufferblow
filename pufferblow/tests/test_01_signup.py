@@ -1,19 +1,22 @@
 import pytest
+
+from datetime import timedelta
 from fastapi.testclient import TestClient
 
 from pufferblow.api import api
 from pufferblow.tests.conftest import ValueStorage
 
+from pufferblow.api_initializer import api_initializer
+
+
+# Middlewares
+from pufferblow.middlewares import (
+    RateLimitingMiddleware,
+    SecurityMiddleware
+)
 # NOTE: The tests won't function now that we have added
 # a middleware to handle security. So we need to figure
 # a way to fix that.
-
-@pytest.fixture
-def client():
-    # Use `TestClient` inside a `with` statment
-    # to trigger startup/shutdown events
-    with TestClient(api) as test_client: 
-        return test_client
 
 route = "/api/v1/users/signup"
 
@@ -46,5 +49,5 @@ def test_signup_username_duplicate_exception(client: TestClient):
 
     assert response.status_code ==  409
     assert response.json() == {
-        "detail": "username already exists. Please change it and try again later",
+        "error": "username already exists. Please change it and try again later",
     }

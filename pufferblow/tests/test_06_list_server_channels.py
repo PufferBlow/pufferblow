@@ -4,13 +4,6 @@ from fastapi.testclient import TestClient
 from pufferblow.api import api
 from pufferblow.tests.conftest import ValueStorage
 
-@pytest.fixture
-def client():
-    # Use `TestClient` inside a `with` statment
-    # to trigger startup/shutdown events
-    with TestClient(api) as test_client:
-        return test_client
-
 route = "/api/v1/channel/list/"
 
 def test_list_server_channels(client: TestClient):
@@ -33,7 +26,7 @@ def test_auth_token_bad_format(client: TestClient):
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": "Bad auth_token format. Please check your auth_token and try again."
+        "error": "Bad auth_token format. Please check your auth_token and try again."
     }
 
 def test_user_not_found(client: TestClient):
@@ -46,5 +39,5 @@ def test_user_not_found(client: TestClient):
 
     assert response.status_code == 404
     assert response.json() == {
-        "detail": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
+        "error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
     }
