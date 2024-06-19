@@ -32,7 +32,7 @@ from pufferblow.src.websocket.websocket_manager import WebSocketsManager
 from pufferblow.src.security.security_checks_handler import SecurityChecksHandler
 
 # Models
-from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+from pufferblow.src.models.config_model import Config 
 
 # Log messages
 from pufferblow.src.logger.msgs import (
@@ -45,7 +45,7 @@ class APIInitializer(object):
     that will be used by the PufferBlow's API
 
     Attributes:
-        pufferblow_api_config (PufferBlowAPIconfig) : A `PufferBlowAPIconfig` object.
+        config                (Config)              : A `Config` object.
         hasher                (Hasher)              : A `Hasher` object.
         database              (Database)            : A `Database` object.
         database_handler      (DatabaseHandler)     : A `DatabaseHandler` object.
@@ -53,7 +53,7 @@ class APIInitializer(object):
         user_manager          (UserManager)         : A `UserManger` object.
         Channels_manager      (ChannelsManager)     : A `ChannelsManager` object.
     """
-    pufferblow_api_config   :       PufferBlowAPIconfig     =   None
+    config                  :       Config                  =   None
     hasher                  :       Hasher                  =   None
     database                :       Database                =   None
     database_handler        :       DatabaseHandler         =   None
@@ -62,6 +62,8 @@ class APIInitializer(object):
     channels_manager        :       ChannelsManager         =   None
     websockets_manager      :       WebSocketsManager       =   None
     security_checks_handler :       SecurityChecksHandler   =   None
+
+    is_loaded: bool = False
 
     def __init__(self) -> None:
         pass
@@ -76,14 +78,17 @@ class APIInitializer(object):
         Returns:
             `None`.
         """
+        if self.is_loaded:
+            return
+
         # Init config
         self.load_config()
 
         # Init the hasher (Responsible for encrypting and decrypting data)
         self.hasher = Hasher(
-            derived_key_bytes       =       self.pufferblow_api_config.DERIVED_KEY_BYTES,
-            derived_key_rounds      =       self.pufferblow_api_config.DERIVED_KEY_ROUNDS,
-            salt_rounds             =       self.pufferblow_api_config.SALT_ROUNDS
+            derived_key_bytes       =       self.config.DERIVED_KEY_BYTES,
+            derived_key_rounds      =       self.config.DERIVED_KEY_ROUNDS,
+            salt_rounds             =       self.config.SALT_ROUNDS
         )
 
         # Init Database
@@ -97,10 +102,10 @@ class APIInitializer(object):
 
         # Init user manager
         self.user_manager = UserManager(
-            database_handler          =     self.database_handler,
-            auth_token_manager        =     self.auth_token_manager,
-            hasher                    =     self.hasher,
-            pufferblow_config_model   =     self.pufferblow_api_config
+            database_handler        =     self.database_handler,
+            auth_token_manager      =     self.auth_token_manager,
+            hasher                  =     self.hasher,
+            config                  =     self.config
         )
 
         # Init channels manager
@@ -123,17 +128,19 @@ class APIInitializer(object):
 
         # Init security checks handlker
         self.security_checks_handler = SecurityChecksHandler(
-            database_handler=self.database_handler,
-            user_manager=self.user_manager,
-            channels_manager=self.channels_manager,
-            auth_token_manager=self.auth_token_manager
+            database_handler        =   self.database_handler,
+            user_manager            =   self.user_manager,
+            channels_manager        =   self.channels_manager,
+            auth_token_manager      =   self.auth_token_manager
         )
+        
+        self.is_loaded = True
 
     def load_database(self, database_uri: str | None = None) -> None:
         """
         Load the database and the database handler.
         """
-        if self.pufferblow_api_config is None and database_uri is None:
+        if self.config is None and database_uri is None:
             self.load_config()
         
         if database_uri is not None:
@@ -142,15 +149,15 @@ class APIInitializer(object):
             )
         else:
             self.database = Database(
-                pufferblow_api_config   =   self.pufferblow_api_config
+                config   =   self.config
             )
         
         database_engine  = self.database.create_database_engine_instance() 
 
         self.database_handler = DatabaseHandler(
-            database_engine         =      database_engine,
-            hasher                  =      self.hasher,
-            pufferblow_config_model =      self.pufferblow_api_config
+            database_engine     =      database_engine,
+            hasher              =      self.hasher,
+            config              =      self.config
         )
     
     def load_config(self) -> None:
@@ -165,9 +172,9 @@ class APIInitializer(object):
         
         config = self.config_handler.load_config()
         if len(config) == 0:
-            self.pufferblow_api_config = PufferBlowAPIconfig()
+            self.config = Config()
         else:
-            self.pufferblow_api_config = PufferBlowAPIconfig(
+            self.config = Config(
                 config=config
             )
 

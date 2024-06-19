@@ -1,7 +1,7 @@
 from pufferblow import constants
 
-class PufferBlowAPIconfig:
-    """ PufferBlow-api's config model class """ 
+class Config:
+    """ config model class """ 
     # API related parameters
     API_HOST                :       str     =       "0.0.0.0"
     API_PORT                :       int     =       7575
@@ -145,4 +145,6 @@ server_maintainer_name = "<the name of the server maintainer, it can be the name
 server_welcome_message = "<your server's welcome message, will be returned when a GET requests goes to http://<host>:<port>/api/v1>"
 """
         return config
-
+    
+    def __repr__(self) -> str:
+        return f"Config(API_HOST={self.API_HOST!r}, API_PORT={self.API_PORT!r}, WORKERS={self.WORKERS!r}, LOGS_PATH={self.LOGS_PATH!r}, RATE_LIMIT_DURATION={self.RATE_LIMIT_DURATION!r}, MAX_RATE_LIMIT_REQUESTS={self.MAX_RATE_LIMIT_REQUESTS!r}, MAX_RATE_LIMIT_WARNINGS={self.MAX_RATE_LIMIT_WARNINGS!r})"

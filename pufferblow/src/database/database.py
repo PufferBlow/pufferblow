@@ -4,19 +4,19 @@ from urllib.parse import quote
 from sqlalchemy_utils import database_exists
 
 # Models
-from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+from pufferblow.src.models.config_model import Config
 
 class Database(object):
-    def __init__(self, pufferblow_api_config: PufferBlowAPIconfig | None = None, database_uri: str | None = None) -> None:
-        self.pufferblow_api_config  =   pufferblow_api_config
-        
-        if pufferblow_api_config is not None:
+    def __init__(self, config: Config | None = None, database_uri: str | None = None) -> None:
+        self.config = config 
+
+        if self.config is not None:
             self.database_uri = self._create_database_uri(
-                username=self.pufferblow_api_config.USERNAME,
-                password=self.pufferblow_api_config.DATABASE_PASSWORD,
-                host=self.pufferblow_api_config.DATABASE_HOST,
-                port=self.pufferblow_api_config.DATABASE_PORT,
-                database_name=self.pufferblow_api_config.DATABASE_NAME,
+                username=self.config.USERNAME,
+                password=self.config.DATABASE_PASSWORD,
+                host=self.config.DATABASE_HOST,
+                port=self.config.DATABASE_PORT,
+                database_name=self.config.DATABASE_NAME,
             )
         else:
             self.database_uri = database_uri
@@ -31,6 +31,7 @@ class Database(object):
         Returns:
             Engine: A database engine object.
         """
+        
         database_engine = sqlalchemy.create_engine(
             url=self.database_uri,
             pool_size=20,

@@ -20,7 +20,7 @@ from pufferblow.src.database.database_handler import DatabaseHandler
 # Models
 from pufferblow.src.models.user_model import User
 from pufferblow.src.models.encryption_key_model import EncryptionKey
-from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+from pufferblow.src.models.config_model import Config 
 
 # Log messages
 from pufferblow.src.logger.msgs import (
@@ -30,11 +30,11 @@ from pufferblow.src.logger.msgs import (
 
 class UserManager (object):
     """ User manager class """
-    def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager,hasher: Hasher, pufferblow_config_model: PufferBlowAPIconfig) -> None:
-        self.database_handler           =     database_handler
-        self.auth_token_manager         =     auth_token_manager
-        self.hasher                     =     hasher
-        self.pufferblow_config_model    =     pufferblow_config_model
+    def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager,hasher: Hasher, config: Config) -> None:
+        self.database_handler       =     database_handler
+        self.auth_token_manager     =     auth_token_manager
+        self.hasher                 =     hasher
+        self.config                 =     config
 
     def sign_up(self, username: str, password: str, is_admin: bool | None = False, is_owner: bool | None = False) -> User:
         """ 
@@ -79,7 +79,7 @@ class UserManager (object):
         new_user.status                                 =       "online"
         new_user.contacts                               =       []
         new_user.conversations                          =       []
-        new_user.joined_servers_sha256                  =       [self.pufferblow_config_model.SERVER_SHA256, ]
+        new_user.joined_servers_sha256                  =       [self.config.SERVER_SHA256, ]
         new_user.is_admin                               =       is_admin
         new_user.is_owner                               =       is_owner
         new_user.created_at                             =       datetime.date.today().strftime("%Y-%m-%d")

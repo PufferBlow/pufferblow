@@ -22,12 +22,13 @@ from pufferblow.src.models.user_model import User
 from pufferblow.src.models.channel_model import Channel
 from pufferblow.src.models.blocked_ip_model import BlockedIP
 from pufferblow.src.models.encryption_key_model import EncryptionKey
-from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+from pufferblow.src.models.config_model import Config 
 
 # Utils
 from pufferblow.src.utils.current_date import date_in_gmt
 
 # Tables
+from pufferblow.src.database.tables.declarative_base import Base
 from pufferblow.src.database.tables.keys import Keys
 from pufferblow.src.database.tables.users import Users
 from pufferblow.src.database.tables.salts import Salts
@@ -45,12 +46,14 @@ from pufferblow.src.logger.msgs import (
 
 class DatabaseHandler (object):
     """ Database handler for PufferBlow's API """
-    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher, pufferblow_config_model: PufferBlowAPIconfig) -> None:
-        self.database_engine            =    database_engine
-        self.database_session           =    sessionmaker(bind=self.database_engine)
-        self.hasher                     =    hasher
-        self.pufferblow_config_model    =    pufferblow_config_model
+    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher, config: Config) -> None:
+        self.database_engine        =    database_engine
+        self.database_session       =    sessionmaker(bind=self.database_engine)
+        self.hasher                 =    hasher
+        self.config                 =    config 
     
+        self.setup_tables(base=Base)
+
     def setup_tables(self, base: DeclarativeBase) -> None:
         """
         Setup the needed database tables

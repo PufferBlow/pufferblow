@@ -32,7 +32,7 @@ from pufferblow.src.logger.msgs import (
 from pufferblow.src.config.config_handler import ConfigHandler
 
 # Models
-from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+from pufferblow.src.models.config_model import Config 
 
 # Database
 from pufferblow.src.database.database import Database
@@ -52,11 +52,11 @@ if not config_handler.check_config():
     logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(config_handler.config_file_path))
     sys.exit(1)
 
-config = config_handler.load_config()
-if len(config) == 0:
-    pufferblow_api_config = PufferBlowAPIconfig()
+config_content = config_handler.load_config()
+if len(config_content) == 0:
+    config = Config()
 else:
-    pufferblow_api_config = PufferBlowAPIconfig(
+    config = Config(
         config=config_handler.load_config()
     )
 
@@ -87,12 +87,12 @@ def ask_prompt(prompt: str, name: str, default: str | int | None = None, passwor
 
 cli.command()
 def version():
-    """ PufferBlow's API version """
+    """ pufferblow's current version """
     print(f"[bold cyan]pufferblow [reset]{constants.VERSION}")
 
 @cli.command()
 def setup():
-    """ setup pufferblow's API """
+    """ setup pufferblow """
     if config_handler.check_config():
         is_to_proceed = Confirm.ask("A config file already exists. Do you want to continue?")
 
@@ -162,18 +162,18 @@ def setup():
 def serve(
     log_level: int = typer.Option(0, "--log-level", help="The log level, ranges from 0 to 3. [INFO: 0, DEBUG: 1, ERROR: 2, CRITICAL: 3]")
 ):
-    """ Serve PufferBlow's API """
+    """ Serve the API """
     if log_level > 3:
         logger.info("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
         sys.exit(1)
 
     # Check if the database exists or not
     database_uri = Database._create_database_uri(
-        username=pufferblow_api_config.USERNAME,
-        password=pufferblow_api_config.DATABASE_PASSWORD,
-        host=pufferblow_api_config.DATABASE_HOST,
-        port=pufferblow_api_config.DATABASE_PORT,
-        database_name=pufferblow_api_config.DATABASE_NAME,
+        username=config.USERNAME,
+        password=config.DATABASE_PASSWORD,
+        host=config.DATABASE_HOST,
+        port=config.DATABASE_PORT,
+        database_name=config.DATABASE_NAME,
     )
 
     if not Database.check_database_existense(
@@ -211,13 +211,13 @@ def serve(
             logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
     logger.configure(handlers=[{"sink": sys.stdout}])
-    logger.add(pufferblow_api_config.LOGS_PATH, rotation="10 MB")
+    logger.add(config.LOGS_PATH, rotation="10 MB")
 
     StubbedGunicornLogger.log_level = log_level_str
 
     OPTIONS = {
-        "bind": f"{pufferblow_api_config.API_HOST}:{pufferblow_api_config.API_PORT}",
-        "workers": WORKERS(pufferblow_api_config.WORKERS),
+        "bind": f"{config.API_HOST}:{config.API_PORT}",
+        "workers": WORKERS(config.WORKERS),
         "timeout": 86400, # 24 hours
         "keepalive": 86400, # 24 hours
         "accesslog": "-",
