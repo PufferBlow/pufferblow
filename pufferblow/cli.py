@@ -28,6 +28,9 @@ from pufferblow.src.logger.msgs import (
     errors
 )
 
+# Utils
+from pufferblow.src.utils.prompt import ask_prompt
+
 # Config handler
 from pufferblow.src.config.config_handler import ConfigHandler
 
@@ -60,32 +63,7 @@ else:
         config=config_handler.load_config()
     )
 
-def ask_prompt(prompt: str, name: str, default: str | int | None = None, password: bool | None = False) -> str | int:
-    """
-    Asks a prompt and makes sure the user answers it.
-    
-    Args:
-        prompt (str): The prompt to ask.
-        name (str): The prompt's name.
-        default (str, default: None): The default choice for the prompt.
-
-    Returns:
-        str | int: the user's answer to the prompt.
-    """
-    answer: str | int  = None
-
-    while True:
-        answer = Prompt.ask(prompt, default=default, password=password)
-        
-        if answer is None:
-            print(f"[bold red]{name} shouldn't be empty[reset]")
-            continue
-        
-        break
-
-    return answer
-
-cli.command()
+@cli.command()
 def version():
     """ pufferblow's current version """
     print(f"[bold cyan]pufferblow [reset]{constants.VERSION}")
