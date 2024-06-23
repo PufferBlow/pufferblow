@@ -10,7 +10,7 @@ class User:
     last_seen                :       str
     conversations            :       list                   =       []
     contacts                 :       list                   =       []
-    joined_servers_sha256    :       list                   =       []
+    joined_servers_ids       :       list                   =       []
     created_at               :       str    
     raw_auth_token           :       str                    =       ""    
     encrypted_auth_token     :       str                    =       ""
@@ -41,7 +41,7 @@ class User:
             last_seen              =   self.last_seen,
             conversations          =   self.conversations,
             contacts               =   self.contacts,
-            joined_servers_sha256  =   self.joined_servers_sha256,
+            joined_servers_ids     =   self.joined_servers_ids,
             created_at             =   self.created_at,
             auth_token             =   self.encrypted_auth_token,
             auth_token_expire_time =   self.auth_token_expire_time,
@@ -70,7 +70,7 @@ class User:
         self.last_seen               =   table_metadata.last_seen
         self.conversations           =   table_metadata.conversations
         self.contacts                =   table_metadata.contacts
-        self.joined_servers_sha256   =   table_metadata.joined_servers_sha256
+        self.joined_servers_ids      =   table_metadata.joined_servers_ids
         self.created_at              =   table_metadata.created_at
         self.auth_token              =   table_metadata.auth_token
         self.auth_token_expire_time  =   table_metadata.auth_token_expire_time
@@ -90,7 +90,7 @@ class User:
             "last_seen"                 :       self.last_seen,
             "conversations"             :       self.conversations,
             "contacts"                  :       self.contacts,
-            "joined_servers_sha256"     :       self.joined_servers_sha256,
+            "joined_servers_ids"        :       self.joined_servers_ids,
             "auth_token"                :       self.encrypted_auth_token,
             "auth_token_expire_time"    :       self.auth_token_expire_time,
             "created_at"                :       self.created_at,
@@ -111,7 +111,7 @@ class User:
             self.last_seen,
             self.conversations,
             self.contacts,
-            self.joined_servers_sha256,
+            self.joined_servers_ids,
             self.encrypted_auth_token,
             self.auth_token_expire_time,
             self.created_at,
