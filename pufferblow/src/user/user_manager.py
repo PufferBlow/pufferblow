@@ -79,7 +79,7 @@ class UserManager (object):
         new_user.status                                 =       "online"
         new_user.contacts                               =       []
         new_user.conversations                          =       []
-        new_user.joined_servers_sha256                  =       [self.config.SERVER_SHA256, ]
+        new_user.joined_servers_ids                     =       [self.database_handler.get_server_id(), ]
         new_user.is_admin                               =       is_admin
         new_user.is_owner                               =       is_owner
         new_user.created_at                             =       datetime.date.today().strftime("%Y-%m-%d")
