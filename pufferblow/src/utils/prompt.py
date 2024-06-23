@@ -1,3 +1,4 @@
+from rich import print
 from rich.prompt import Prompt
 
 def ask_prompt(prompt: str, name: str, default: str | int | None = None, password: bool | None = False) -> str | int:
@@ -12,7 +13,7 @@ def ask_prompt(prompt: str, name: str, default: str | int | None = None, passwor
     Returns:
         str | int: the user's answer to the prompt.
     """
-    answer: str | int  = None
+    answer: str | int
 
     while True:
         answer = Prompt.ask(prompt, default=default, password=password)
