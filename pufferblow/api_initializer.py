@@ -19,6 +19,9 @@ from pufferblow.src.auth.auth_token_manager import AuthTokenManager
 from pufferblow.src.database.database import Database
 from pufferblow.src.database.database_handler import DatabaseHandler
 
+# Server manager
+from pufferblow.src.server.server_manager import ServerManager
+
 # Channels manager
 from pufferblow.src.channels.channels_manager import ChannelsManager
 
@@ -57,6 +60,7 @@ class APIInitializer(object):
     hasher                  :       Hasher                  =   None
     database                :       Database                =   None
     database_handler        :       DatabaseHandler         =   None
+    server_manager          :       ServerManager           =   None
     auth_token_manager      :       AuthTokenManager        =   None
     user_manager            :       UserManager             =   None
     channels_manager        :       ChannelsManager         =   None
@@ -93,6 +97,11 @@ class APIInitializer(object):
 
         # Init Database
         self.load_database(database_uri=database_uri) 
+        
+        # Server manager
+        self.server_manager = ServerManager(
+            database_handler=self.database_handler
+        )
 
         # Init Auth tokens manager
         self.auth_token_manager = AuthTokenManager(
