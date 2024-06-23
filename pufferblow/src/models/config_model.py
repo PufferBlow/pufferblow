@@ -31,15 +31,7 @@ class Config:
     MAX_MESSAGE_SIZE        :       int     =       1024
     MAX_MESSAGES_PER_PAGE   :       int     =       50
     MIN_MESSAGES_PER_PAGE   :       int     =       20
-
-    # Server info
-    SERVER_SHA256           :       str     =       None
-    SERVER_NAME             :       str     =       None
-    SERVER_DESCRIPTION      :       str     =       None
-    SERVER_AVATAR_URL       :       str     =       None
-    SERVER_MAINTAINER_NAME  :       str     =       None
-    SERVER_WELCOME_MESSAGE  :       str     =       None
-    
+   
     def __init__(self, config: dict | None = None) -> None:
         if config is not None:    
             self.set_attr_from_config(config)
@@ -83,15 +75,7 @@ class Config:
         self.MAX_MESSAGE_SIZE        =   config["messages"]["max_message_size"]
         self.MAX_MESSAGES_PER_PAGE   =   config["messages"]["max_messages_per_page"]
         self.MIN_MESSAGES_PER_PAGE   =   config["messages"]["min_messages_per_page"]
-
-        # Server info
-        self.SERVER_SHA256              =   config["server_info"]["server_sha256"]
-        self.SERVER_NAME                =   config["server_info"]["server_name"]
-        self.SERVER_DESCRIPTION         =   config["server_info"]["server_description"]
-        self.SERVER_AVATAR_URL          =   config["server_info"]["server_avatar_url"]
-        self.SERVER_MAINTAINER_NAME     =   config["server_info"]["server_maintainer_name"]
-        self.SERVER_WELCOME_MESSAGE     =   config["server_info"]["server_welcome_message"]
-    
+   
     def export_toml(self) -> str:
         """
         Exports the attributes into a toml format.
@@ -135,14 +119,6 @@ salt_rounds = {self.SALT_ROUNDS} # This represents the number of iterations for 
 max_message_size = {self.MAX_MESSAGE_SIZE} # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
 max_messages_per_page = {self.MAX_MESSAGES_PER_PAGE} # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
 min_messages_per_page = {self.MIN_MESSAGES_PER_PAGE} # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
-
-[server_info]
-server_sha256 = "<your server's sha256>" # Unique identifier for this server. Auto generated, do not change it!
-server_name = "<your server name>"
-server_description = "<your server description>"
-server_avatar_url = "<url to your server avatar/photo>"
-server_maintainer_name = "<the name of the server maintainer, it can be the name of the server owner>"
-server_welcome_message = "<your server's welcome message, will be returned when a GET requests goes to http://<host>:<port>/api/v1>"
 """
         return config
     

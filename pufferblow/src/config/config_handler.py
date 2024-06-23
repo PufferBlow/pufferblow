@@ -98,17 +98,7 @@ class ConfigHandler(object):
                         ]
                     }
                 ]
-            },
-            {
-                "server_info": [
-                    "server_sha256",
-                    "server_name",
-                    "server_description",
-                    "sever_avatar_url",
-                    "server_maintainer_name",
-                    "sever_welcome_message"
-                ]
-            }
+            } 
         ]
 
         # Checks if the values of the keys in the default_config file are the same 
