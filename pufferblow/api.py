@@ -9,7 +9,6 @@ from fastapi import (
     exceptions
 )
 from loguru import logger
-from datetime import timedelta
 from contextlib import asynccontextmanager
 
 from pufferblow import constants
