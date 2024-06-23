@@ -1,8 +1,8 @@
 import sys
+from typing import Callable
 import typer
 
 from rich import print
-from typing import Type
 from loguru import logger
 from rich.prompt import Prompt, Confirm
 from rich.console import Console
@@ -39,7 +39,6 @@ from pufferblow.src.models.config_model import Config
 
 # Database
 from pufferblow.src.database.database import Database
-from pufferblow.src.database.database_handler import DatabaseHandler
 
 # Init cli
 cli = typer.Typer()
@@ -53,7 +52,7 @@ config_handler = ConfigHandler()
 
 if not config_handler.check_config():
     logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(config_handler.config_file_path))
-    sys.exit(1)
+    exit(1)
 
 config_content = config_handler.load_config()
 if len(config_content) == 0:
@@ -63,30 +62,31 @@ else:
         config=config_handler.load_config()
     )
 
-@cli.command()
-def version():
-    """ pufferblow's current version """
-    print(f"[bold cyan]pufferblow [reset]{constants.VERSION}")
+def setup_supabase() -> tuple:
+    """
+    Setup supabase.
 
-@cli.command()
-def setup():
-    """ setup pufferblow """
-    if config_handler.check_config():
-        is_to_proceed = Confirm.ask("A config file already exists. Do you want to continue?")
+    Args:
+        None.
 
-        if not is_to_proceed:
-            sys,exit(0)
-    
-    config = PufferBlowAPIconfig()
-    
-    # Supabase
+    Returns:
+        tuple: Supabase project's info.
+    """
     supabase_url = ask_prompt(prompt="Enter your supabase url", name="supabase url")
     supabase_key = ask_prompt(prompt="Enter your supabase key", name="supabase key")
 
-    config.SUPABASE_URL = supabase_url
-    config.SUPABASE_KEY = supabase_key
+    return (supabase_url, supabase_key)
 
-    # Database related questions
+def setup_database() -> tuple:
+    """
+    Setups the database.
+
+    Args:
+        None.
+
+    Returns:
+        tuple: The database's connection info.
+    """
     database_name = Prompt.ask("PostgreSQL database name", default="postgres")
     username = ask_prompt(prompt="PostgreSQl database username", name="username") 
     password = ask_prompt(prompt="PostgreSQL database password", name="password", password=True)
@@ -96,10 +96,10 @@ def setup():
     logger.info("Attempting to connect to the database.")
     
     database_uri = Database._create_database_uri(
-        username=username,
-        password=password,
-        host=host,
-        port=port,
+        username=str(username),
+        password=str(password),
+        host=str(host),
+        port=int(port),
         database_name=database_name
     ) 
 
@@ -107,33 +107,125 @@ def setup():
 
     if not Database.check_database_existense(database_uri):
         logger.error(f"The specified database does not exist. Please verify the database name and connection details.")
-        sys.exit(1)
+        exit(1)
+
+    return (database_uri, database_name, username, password, host, port)
+
+def setup_owner_account() -> str:
+    """
+    Setup the owner's account.
+
+    Args:
+        None.
+
+    Returns:
+        str: The owner account's auth_token.
+    """
+    username = ask_prompt(prompt="Enter your owner account username", name="account username")
+    password = ask_prompt(prompt="Enter your owner account password", name="account password", password=True)
+
+    user = api_initializer.user_manager.sign_up(
+        username=str(username),
+        password=str(password),
+        is_admin=True,
+        is_owner=True
+    )
+
+    return user.raw_auth_token
+
+def setup_server(is_update: bool | None = False) -> None:
+    """
+    Setup the server info.
+
+    Args:
+        is_update (bool, default: False): Wether to update the row containing the server info instead of creating it.
+
+    Returns:
+        None.
+    """
+    server_name = ask_prompt(prompt="Enter your server's name", name="server's name")
+    server_description = ask_prompt(prompt="Enter your server's description", name="server's description")
+    server_welcome_message = ask_prompt(prompt="Enter your server's welcome message for new members", name="sever's welcome message")
+    
+    if is_update:
+        func = api_initializer.server_manager.update_server
+    else:
+        func = api_initializer.server_manager.create_server
+
+    func(
+        server_name=str(server_name),
+        description=str(server_description),
+        server_welcome_message=str(server_welcome_message)
+    )
+
+@cli.command()
+def version():
+    """ pufferblow's current version """
+    print(f"[bold cyan]pufferblow [reset]{constants.VERSION}")
+
+@cli.command()
+def setup(
+    is_setup_server: bool = typer.Option(False, "--setup-server", help="Only setup the server's info."),
+    is_update_server: bool = typer.Option(False, "--update-server", help="Update the server's info like name, description and welcome message.")
+):
+    """ setup pufferblow """
+    is_config_present = config_handler.check_config()
+
+    if is_setup_server or is_update_server:
+        if not is_config_present:
+            logger.error("Faild to setup the server, no config file was found to proceed with this operation.")
+            exit(1) 
+
+        api_initializer.load_objects()
+        
+        if api_initializer.server_manager.check_server_exists() and is_setup_server:
+            logger.error("Server info are already set if you want to update them, then please use the flag '--update-server' instead of '--setup-server'")
+            exit(1)
+
+        setup_server(is_update=is_update_server)
+
+        logger.info(f"Server {'created' if not is_update_server else 'updated'} successfuly")
+
+        exit(0)
+    
+    if is_config_present:
+        is_to_proceed = Confirm.ask("A config file already exists. Do you want to continue?")
+
+        if not is_to_proceed:
+            exit(0)
+    
+    config = Config()
+    
+    # Supabase 
+    supabase_url, supabase_key = setup_supabase()
+
+    config.SUPABASE_URL = supabase_url
+    config.SUPABASE_KEY = supabase_key
+
+    # Database related questions
+    database_uri, database_name, username, password, host, port = setup_database() 
     
     config.DATABASE_NAME = database_name
     config.USERNAME = username
     config.DATABASE_PASSWORD = password
     config.DATABASE_HOST = host
     config.DATABASE_PORT = port
+    
+    # Load the objects
+    api_initializer.load_objects(database_uri)
+    
+    # Create the server
+    setup_server()
 
     # Creating the server owner's account
-    api_initializer.load_objects(database_uri)
+    auth_token = setup_owner_account() 
 
-    username = ask_prompt(prompt="Enter your owner account username", name="account username")
-    password = ask_prompt(prompt="Enter your owner account password", name="account password", password=True)
-
-    user = api_initializer.user_manager.sign_up(
-        username=username,
-        password=password,
-        is_admin=True,
-        is_owner=True
-    )
-
-    logger.info(f"Your auth-token is '{user.raw_auth_token}'. DO NOT GIVE IT TO ANYONE")
+    logger.info(f"Your auth-token is '{auth_token}'. DO NOT GIVE IT TO ANYONE")
     
     # Save the config
     config_toml = config.export_toml()
     config_handler.write_config(config=config_toml)
-    
+     
     logger.info(f"Config saved at '{config_handler.config_file_path}'")
 
 @cli.command()
@@ -143,7 +235,7 @@ def serve(
     """ Serve the API """
     if log_level > 3:
         logger.info("[bold red] [ ? ] [reset]The log level is set too high (max is 3).")
-        sys.exit(1)
+        exit(1)
 
     # Check if the database exists or not
     database_uri = Database._create_database_uri(
@@ -158,7 +250,7 @@ def serve(
         database_uri=database_uri
     ):
         logger.error("The specified database does not exist. Please verify the database name and connection details.")
-        sys.exit(1)
+        exit(1)
 
     # Load shared objects
     api_initializer.load_objects()
@@ -213,7 +305,7 @@ def run() -> None:
     # repetitive checks at the command's function level.
     if config_handler.check_config() or config_handler.is_default_config():
         # console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
-        # sys.exit(1)
+        # exit(1)
         pass
 
     cli()

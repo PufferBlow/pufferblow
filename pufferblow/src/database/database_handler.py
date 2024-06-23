@@ -32,12 +32,12 @@ from pufferblow.src.database.tables.declarative_base import Base
 from pufferblow.src.database.tables.keys import Keys
 from pufferblow.src.database.tables.users import Users
 from pufferblow.src.database.tables.salts import Salts
+from pufferblow.src.database.tables.server import Server
 from pufferblow.src.database.tables.channels import Channels
 from pufferblow.src.database.tables.messages import Messages
 from pufferblow.src.database.tables.blocked_ips import BlockedIPS
 from pufferblow.src.database.tables.auth_tokens import AuthTokens
 from pufferblow.src.database.tables.message_read_history import MessageReadHistory
-
 # Log messages
 from pufferblow.src.logger.msgs import (
     info,
@@ -1123,3 +1123,98 @@ class DatabaseHandler (object):
                 session.execute(stmt)
             
             session.commit()
+    
+    def create_server_row(self, server: Server) -> None:
+        """
+        Creates a row in the server table.
+        
+        Args:
+            server (Server): The server object to create.
+
+        Returns:
+            None.
+        """
+        with self.database_session() as session:
+            session.add(server)
+            session.commit()
+    
+    def update_server_values(self, server_name: str, server_welcome_message: str, description: str | None = None,) -> None:
+        """
+        Updates the server's info.
+        """
+        with self.database_session() as session:
+            stmt = update(Server).values(
+                server_name = server_name,
+                server_welcome_message=server_welcome_message,
+                description=description
+            )
+
+            session.execute(stmt)
+            session.commit()
+
+    def get_server(self) -> Server:
+        """
+        Fetches the server row from the server table.
+
+        Args:
+            None.
+
+        Returns:
+            Server: A server table row object.
+        """
+        server: Server
+
+        with self.database_session() as session:
+            stmt = select(Server)
+            server = session.execute(stmt).fetchone()
+        
+        return server if server is None else server[0]
+
+    def get_server_id(self) -> str:
+        """
+        Fetches the server id.
+
+        Args:
+            None.
+
+        Returns:
+            str: The server's id.
+        """
+        server = self.get_server()
+
+        return server.server_id
+    
+    def get_server_members_count(self) -> int:
+        """
+        Fetches the members_count row from the server table.
+
+        Args:
+            None.
+
+        Returns:
+            int: members_count value.
+        """
+        server = self.get_server()
+
+        return server.members_count
+
+    def update_server_members_count(self, n: int) -> None:
+        """
+        Update the members_count column in the server table.
+
+        Args:
+            n (int): By how much should members_count be increased (can be negative in case of decrease).
+
+        Returns:
+            None.
+        """
+        current_members_count = self.get_server_members_count()
+
+        with self.database_session() as session:
+            stmt = update(Server).values(
+                members_count = current_members_count + n
+            )
+
+            session.execute(stmt)
+            session.commit()
+
