@@ -78,13 +78,13 @@ dev = ["freezegun (>=1.0,<2.0)", "pytest (>=6.0)", "pytest-cov"]
 
 [[package]]
 name = "basedpyright"
-version = "1.13.0"
+version = "1.13.1"
 description = "static type checking for Python (but based)"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "basedpyright-1.13.0-py3-none-any.whl", hash = "sha256:e298dcbdafdfb87216a6e9288b57b14728ef0cd82385a9d151bb5ad9d3017312"},
-    {file = "basedpyright-1.13.0.tar.gz", hash = "sha256:155dc07645ad8df39d20a67c3c637c565273c21e0d9c4cfdd6fb2031d852372d"},
+    {file = "basedpyright-1.13.1-py3-none-any.whl", hash = "sha256:c8cc378a0c42d6f80a5148da1cc733d285cc69828904003768ecb2071f31590f"},
+    {file = "basedpyright-1.13.1.tar.gz", hash = "sha256:de8196e5e4ec7db7f482280b45d45444f57caeff3d1a1f4a1ae3aa941274c2d1"},
 ]
 
 [package.dependencies]
@@ -2098,4 +2098,4 @@ dev = ["black (>=19.3b0)", "pytest (>=4.6.2)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "39f8f51df90c5bbfc1a0a968d2652dad2b3e99925e7ef67bc835c7110eb2c9e1"
+content-hash = "38df5ad5711556035dc5e64bdfab74d45a94a10501d8411425a817862c68d1ca"
