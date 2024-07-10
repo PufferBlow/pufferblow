@@ -31,7 +31,7 @@ sphinx-autobuild = "^2024.4.13"
 sphinx-favicon = "^1.0.1"
 myst-parser = "^3.0.1"
 sqlalchemy-utils = "^0.41.2"
-orjson = "^3.10.3"
+orjson = "^3.10.6"
 basedpyright = "^1.13.2"
 
 [tool.poetry.group.dev.dependencies]
