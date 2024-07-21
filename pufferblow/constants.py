@@ -26,15 +26,3 @@ def banner() -> None: print(BANNER)
 # The $HOME path
 HOME = os.environ["HOME"]
 
-# Log levels
-INFO        =   0
-DEBUG       =   1
-ERROR       =   2
-CRITICAL    =   3
-
-log_level_map = {
-    INFO: "INFO",
-    DEBUG: "DEBUG",
-    ERROR: "ERROR",
-    CRITICAL: "CRITICAL"
-}
