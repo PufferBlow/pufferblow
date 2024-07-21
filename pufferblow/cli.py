@@ -27,6 +27,9 @@ from pufferblow.api_initializer import api_initializer
 from pufferblow.src.logger.msgs import (
     errors
 )
+from pufferblow.src.logger.levels import (
+    LOG_LEVEL_MAP
+)
 
 # Utils
 from pufferblow.src.utils.prompt import ask_prompt
@@ -258,7 +261,7 @@ def serve(
     # Setup tables
     api_initializer.database_handler.setup_tables(Base)
 
-    log_level_str = constants.log_level_map[log_level]
+    log_level_str = LOG_LEVEL_MAP[log_level]
 
     INTERCEPT_HANDLER = InterceptHandler()
     logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
