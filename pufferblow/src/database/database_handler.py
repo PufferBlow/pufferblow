@@ -1142,11 +1142,14 @@ class DatabaseHandler (object):
         """
         Updates the server's info.
         """
+        updated_at = date_in_gmt()
+
         with self.database_session() as session:
             stmt = update(Server).values(
                 server_name = server_name,
                 server_welcome_message=server_welcome_message,
-                description=description
+                description=description,
+                updated_at=updated_at
             )
 
             session.execute(stmt)
@@ -1182,7 +1185,7 @@ class DatabaseHandler (object):
         """
         server = self.get_server()
 
-        return server.server_id
+        return str(server.server_id)
     
     def get_server_members_count(self) -> int:
         """
