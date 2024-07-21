@@ -152,10 +152,10 @@ async def users_profile_route(
 @api.put("/api/v1/users/profile", status_code=200)
 async def edit_users_profile_route(
     auth_token: str,
-    new_username: str = None,
-    status: str = None,
-    new_password: str = None,
-    old_password: str = None
+    new_username: str | None = None,
+    status: str | None = None,
+    new_password: str | None = None,
+    old_password: str | None = None
 ):
     """
     Update a user's profile metadata such us status,
@@ -912,7 +912,7 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
     ) and not api_initializer.user_manager.is_server_owner(
         user_id=user_id
     ):
-        raise exceptions.HTTPException(
+        raise exceptions.WebSocketException(
             code=1001,
             reason="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
         )
@@ -954,13 +954,13 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
                 if message["message_id"] in sent_messages_ids:
                     continue
                 
-                api_initializer.websockets_manager.send_message(
+                await api_initializer.websockets_manager.send_message(
                     websocket=websocket,
                     message=str(message)
                 )
 
                 sent_messages_ids.append(message["message_id"])
 
-                asyncio.sleep(DELAY)
+                await asyncio.sleep(DELAY)
     except WebSocketDisconnect:
-        api_initializer.websockets_manager.disconnect(websocket)
+        await api_initializer.websockets_manager.disconnect(websocket)
