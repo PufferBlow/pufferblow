@@ -9,6 +9,9 @@ class Salt (object):
     user_id                 :       str
     associated_to           :       str
     created_at              :       str
+    
+    def __init__(self) -> None:
+        pass
 
     def create_table_metadata(self) -> Salts:
         """
@@ -31,17 +34,15 @@ class Salt (object):
         
         return salt
     
-    def to_json(self) -> dict:
-        """ Returns the salt data as json """
-        salt_data = {
-            "salt_value"            :   self.salt_value,
-            "hashed_data"           :   self.hashed_data,
-            "user_id"               :   self.user_id,
-            "associated_to"         :   self.associated_to,
-            "created_at"            :   self.created_at
+    def to_dict(self) -> dict:
+        """ Returns the salt data as dict """
+        return {
+            "salt_value"    :   self.salt_value,
+            "hashed_data"   :   self.hashed_data,
+            "user_id"       :   self.user_id,
+            "associated_to" :   self.associated_to,
+            "created_at"    :   self.created_at
         }
-
-        return salt_data
 
     def to_tuple(self) -> tuple:
         """ Reutns the salt data in tuple format """

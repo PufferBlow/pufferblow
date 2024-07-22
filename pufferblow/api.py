@@ -426,7 +426,7 @@ async def create_new_channel_route(
     return {
         "status_code": 200,
         "message": "Channel created successfully",
-        "channel_data": channel_data.to_json()
+        "channel_data": channel_data.to_dict()
     }
 
 @api.delete("/api/v1/channel/{channel_id}/delete")

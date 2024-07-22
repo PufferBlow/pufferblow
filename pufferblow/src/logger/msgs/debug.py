@@ -20,7 +20,7 @@ def DEBUG_NEW_DERIVED_KEY_CREATED(user, key) -> str:
     return msg
 
 def DEBUG_NEW_DERIVED_KEY_SAVED(key) -> str:
-    msg = f"Saved new derived key in 'keys': '{key.to_json()}'."
+    msg = f"Saved new derived key in 'keys': '{key.to_dict()}'."
     return msg
 
 def DEBUG_DERIVED_KEY_UPDATED(key) -> str:
@@ -28,7 +28,7 @@ def DEBUG_DERIVED_KEY_UPDATED(key) -> str:
     return msg
     
 def DEBUG_DERIVED_KEY_DELETED(key) -> str:
-    msg = f"Deleted derived key from 'keys': {key.to_json()}."
+    msg = f"Deleted derived key from 'keys': {key.to_dict()}."
     return msg
     
 def DEBUG_NEW_HASH_SALT_CREATED(salt) -> str:
@@ -36,7 +36,7 @@ def DEBUG_NEW_HASH_SALT_CREATED(salt) -> str:
     return msg
     
 def DEBUG_NEW_HASH_SALT_SAVED(salt) -> str:
-    msg = f"Saved new hash salt in 'salts': {salt.to_json()}."
+    msg = f"Saved new hash salt in 'salts': {salt.to_dict()}."
     return msg
     
 def DEBUG_NEW_PASSWORD_HASHED(password, hashed_password) -> str:

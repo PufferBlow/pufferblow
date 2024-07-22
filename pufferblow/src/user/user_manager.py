@@ -166,7 +166,7 @@ class UserManager (object):
             user.contacts                   =       user_data.contacts
             user.updated_at                 =       user_data.updated_at
         
-        user_data = user.to_json()
+        user_data = user.to_dict()
 
         # Cleaning up the dict
         element_to_pop = [data for data in user_data if user_data[data] == ""]

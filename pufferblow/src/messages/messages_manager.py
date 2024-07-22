@@ -72,7 +72,7 @@ class MessagesManager(object):
                 encrypted_message=base64.b64decode(message_metadata.hashed_message)
             )
 
-            json_metadata_format = message_metadata.to_json()
+            json_metadata_format = message_metadata.to_dict()
 
             # injecting in the `username` of the sender
             sender_user_metadata = self.user_manager.user_profile(

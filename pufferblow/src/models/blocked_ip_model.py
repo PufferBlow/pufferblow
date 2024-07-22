@@ -48,25 +48,23 @@ class BlockedIP(object):
             `table_metadata` (User): The `BlockedIPS` table object containing the metadata to load.
         
         Returns:
-            dict: The metadata formated in dict.
+            dict: The metadata in dict format.
         """
         self.ip_id          =   table_metadata.ip_id
         self.ip             =   table_metadata.ip
         self.block_reason   =   table_metadata.block_reason
         self.blocked_at     =   table_metadata.blocked_at
 
-        return self.to_json()
+        return self.to_dict()
 
-    def to_json(self) -> dict:
-        """ Returns the BlockedIP data in json format """
-        blocked_ips_model_data = {
+    def to_dict(self) -> dict:
+        """ Returns the BlockedIP data in dict format """
+        return {
             "ip_id"         :   self.ip_id,
             "ip"            :   self.ip,
             "block_reason"  :   self.block_reason,
             "blocked_at"    :   self.blocked_at
         }
-
-        return blocked_ips_model_data
 
     def to_tuple(self) -> tuple:
         """ Reutns the channel data in tuple format """

@@ -52,7 +52,7 @@ class User:
 
         return user
     
-    def load_table_metadata(self, table_metadata: Users) -> None:
+    def load_table_metadata(self, table_metadata: Users) -> dict:
         """
         Load metadata from a `Users` table object into
         the `self`'s attributes
@@ -61,7 +61,7 @@ class User:
             `table_metadata` (User): The `Users` table object containing the metadata to load.
         
         Returns:
-            tuple: The metadata formated in tuple.
+            tuple: The metadata in dict format.
         """
         self.user_id                 =   table_metadata.user_id
         self.username                =   table_metadata.username
@@ -78,10 +78,10 @@ class User:
         self.is_admin                =   table_metadata.is_admin
         self.is_owner                =   table_metadata.is_owner
 
-        return self.to_tuple()
+        return self.to_dict()
     
-    def to_json(self) -> dict:
-        """ Returns the user data as json """
+    def to_dict(self) -> dict:
+        """ Returns the user data as dict """
         USER_DATA = {
             "user_id"                   :       self.user_id,
             "username"                  :       self.username,
