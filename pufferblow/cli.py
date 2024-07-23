@@ -218,6 +218,10 @@ def setup(
     api_initializer.load_objects(database_uri)
     
     # Create the server
+    if api_initializer.server_manager.check_server_exists():
+        logger.warning("The server was already created, if you want to update the server info then please run the setup command with the --update-server flag")
+        exit(1)
+
     setup_server()
 
     # Creating the server owner's account
