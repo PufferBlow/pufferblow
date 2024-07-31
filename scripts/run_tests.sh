@@ -2,4 +2,5 @@
 
 set -rx
 
-pytest ./tests/ -q
+pytest ./pufferblow/tests/ -x
+
