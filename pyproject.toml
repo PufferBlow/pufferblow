@@ -37,7 +37,7 @@ pymemcache = "^4.0.0"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.2"
-gunicorn = "^22.0.0"
+gunicorn = "^23.0.0"
 
 [tool.poetry.plugins."console_scripts"]
 pufferblow = "pufferblow:cli.run"
