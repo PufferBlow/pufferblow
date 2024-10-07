@@ -78,13 +78,13 @@ dev = ["freezegun (>=1.0,<2.0)", "pytest (>=6.0)", "pytest-cov"]
 
 [[package]]
 name = "basedpyright"
-version = "1.15.0"
+version = "1.18.3"
 description = "static type checking for Python (but based)"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "basedpyright-1.15.0-py3-none-any.whl", hash = "sha256:6eac46689ced3094d775f13ce839315ec04e167eb3a7d3fd5f1b61202556f067"},
-    {file = "basedpyright-1.15.0.tar.gz", hash = "sha256:3f268d7909a17df5a01f380693c91ef389f8471b720641b9a829f1aa45798aca"},
+    {file = "basedpyright-1.18.3-py3-none-any.whl", hash = "sha256:e2f060999004fe92d61d150d8e32fda35a73af2f237fdc41583d9cd7b08cb4c5"},
+    {file = "basedpyright-1.18.3.tar.gz", hash = "sha256:996215cee36a504447678d5d26ec0f7932d7c8f9ff187b69ca8314e11dd5034d"},
 ]
 
 [package.dependencies]
@@ -854,6 +854,8 @@ files = [
     {file = "orjson-3.10.6-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:960db0e31c4e52fa0fc3ecbaea5b2d3b58f379e32a95ae6b0ebeaa25b93dfd34"},
     {file = "orjson-3.10.6-cp312-none-win32.whl", hash = "sha256:a6ea7afb5b30b2317e0bee03c8d34c8181bc5a36f2afd4d0952f378972c4efd5"},
     {file = "orjson-3.10.6-cp312-none-win_amd64.whl", hash = "sha256:874ce88264b7e655dde4aeaacdc8fd772a7962faadfb41abe63e2a4861abc3dc"},
+    {file = "orjson-3.10.6-cp313-none-win32.whl", hash = "sha256:efdf2c5cde290ae6b83095f03119bdc00303d7a03b42b16c54517baa3c4ca3d0"},
+    {file = "orjson-3.10.6-cp313-none-win_amd64.whl", hash = "sha256:8e190fe7888e2e4392f52cafb9626113ba135ef53aacc65cd13109eb9746c43e"},
     {file = "orjson-3.10.6-cp38-cp38-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", hash = "sha256:66680eae4c4e7fc193d91cfc1353ad6d01b4801ae9b5314f17e11ba55e934183"},
     {file = "orjson-3.10.6-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:caff75b425db5ef8e8f23af93c80f072f97b4fb3afd4af44482905c9f588da28"},
     {file = "orjson-3.10.6-cp38-cp38-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:3722fddb821b6036fd2a3c814f6bd9b57a89dc6337b9924ecd614ebce3271394"},
@@ -2038,4 +2040,4 @@ dev = ["black (>=19.3b0)", "pytest (>=4.6.2)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "ce806c9add0636c5b1f832ae16c08733e2a281bcfdf170c53542821043ce2fca"
+content-hash = "cff69e69b4fece36b167704b164da17d20b44422ddaec95c38a89f18d2b9fbfa"
