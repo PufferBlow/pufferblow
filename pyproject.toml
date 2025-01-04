@@ -31,7 +31,7 @@ sphinx-autobuild = "^2024.10.3"
 sphinx-favicon = "^1.0.1"
 myst-parser = "^4.0.0"
 sqlalchemy-utils = "^0.41.2"
-orjson = "^3.10.12"
+orjson = "^3.10.13"
 basedpyright = "^1.22.1"
 pymemcache = "^4.0.0"
 
