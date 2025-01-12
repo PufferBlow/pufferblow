@@ -1,6 +1,6 @@
 import sys
-from typing import Callable
 import typer
+import platform
 
 from rich import print
 from loguru import logger
@@ -55,7 +55,7 @@ config_handler = ConfigHandler()
 
 if not config_handler.check_config():
     logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(config_handler.config_file_path))
-    exit(1)
+    # exit(1)
 
 config_content = config_handler.load_config()
 if len(config_content) == 0:
@@ -267,9 +267,6 @@ def serve(
 
     log_level_str = LOG_LEVEL_MAP[log_level]
 
-    INTERCEPT_HANDLER = InterceptHandler()
-    logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
-    logging.root.handlers = [INTERCEPT_HANDLER]
     logging.root.setLevel(log_level_str)
 
     SEEN = set()
@@ -285,35 +282,45 @@ def serve(
     ]:
         if name not in SEEN:
             SEEN.add(name.split(".")[0])
-            logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
     logger.configure(handlers=[{"sink": sys.stdout}])
     logger.add(config.LOGS_PATH, rotation="10 MB")
+    
+    if platform.system() == "Windows":
+        logger.info("Starting server with uvicorn (Windows-compatible).")
 
-    StubbedGunicornLogger.log_level = log_level_str
+        import uvicorn
+        import asyncio
 
-    OPTIONS = {
-        "bind": f"{config.API_HOST}:{config.API_PORT}",
-        "workers": WORKERS(config.WORKERS),
-        "timeout": 86400, # 24 hours
-        "keepalive": 86400, # 24 hours
-        "accesslog": "-",
-        "errorlog": "-",
-        "worker_class": "uvicorn.workers.UvicornWorker",
-        "logger_class": StubbedGunicornLogger
-    }
+        async def run():
+            u_config = uvicorn.Config(api, host=config.API_HOST, port=config.API_PORT)
+            server = uvicorn.Server(u_config)
+            await server.serve()
+        
+        asyncio.run(run())
+    else:
+        logger.info("Starting server with guvicorn (Unix-compatible).")
 
-    StandaloneApplication(api, OPTIONS).run()
+        INTERCEPT_HANDLER = InterceptHandler()
+        logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
+        logging.root.handlers = [INTERCEPT_HANDLER]
+        
+        StubbedGunicornLogger.log_level = log_level_str
 
+        OPTIONS = {
+            "bind": f"{config.API_HOST}:{config.API_PORT}",
+            "workers": WORKERS(config.WORKERS),
+            "timeout": 86400, # 24 hours
+            "keepalive": 86400, # 24 hours
+            "accesslog": "-",
+            "errorlog": "-",
+            "worker_class": "uvicorn.workers.UvicornWorker",
+            "logger_class": StubbedGunicornLogger
+        }
+
+        StandaloneApplication(api, OPTIONS).run()
+        
 def run() -> None:
     constants.banner()
-
-    # Basic checks before starting the cli, this eliminates the need for
-    # repetitive checks at the command's function level.
-    if config_handler.check_config() or config_handler.is_default_config():
-        # console.log("[bold red][ ? ] [reset]Please start the [bold green]setup process[reset] using the [bold green]setup[reset] command.")
-        # exit(1)
-        pass
-
+    
     cli()
-

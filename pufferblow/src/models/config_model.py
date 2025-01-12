@@ -3,7 +3,7 @@ from pufferblow import constants
 class Config:
     """ config model class """ 
     # API related parameters
-    API_HOST                :       str     =       "0.0.0.0"
+    API_HOST                :       str     =       "127.0.0.1"
     API_PORT                :       int     =       7575
     LOGS_PATH               :       str     =       f"{constants.HOME}/logs/pufferblow_api.log"     
     WORKERS                 :       int     =       7
@@ -11,10 +11,6 @@ class Config:
     MAX_RATE_LIMIT_REQUESTS :       int     =       6000
     MAX_RATE_LIMIT_WARNINGS :       int     =       15
 
-    # Supabase
-    SUPABASE_URL            :       str
-    SUPABASE_KEY            :       str
-    
     # PostgeSQL Database
     DATABASE_NAME           :       str
     USERNAME                :       str
@@ -25,7 +21,6 @@ class Config:
     # Encryption
     DERIVED_KEY_BYTES       :       int     =       56
     DERIVED_KEY_ROUNDS      :       int     =       100
-    SALT_ROUNDS             :       int     =       18 
     
     # Messages related parameters
     MAX_MESSAGE_SIZE        :       int     =       1024
@@ -54,10 +49,6 @@ class Config:
         self.RATE_LIMIT_DURATION        =   config["api"]["rate_limit_duration"]
         self.MAX_RATE_LIMIT_REQUESTS    =   config["api"]["max_rate_limit_requests"]
         self.MAX_RATE_LIMIT_WARNINGS    =   config["api"]["max_rate_limit_warnings"]
-
-        # Supabase
-        self.SUPABASE_URL     =   config["supabase"]["supabase_url"]
-        self.SUPABASE_KEY     =   config["supabase"]["supabase_key"]
     
         # PostgeSQL Database
         self.DATABASE_NAME        =   config["supabase"]["postregsql"]["database_name"]
@@ -69,7 +60,6 @@ class Config:
         # Encryption
         self.DERIVED_KEY_BYTES     =   config["encryption"]["derived_key_bytes"]
         self.DERIVED_KEY_ROUNDS    =   config["encryption"]["derived_key_rounds"]
-        self.SALT_ROUNDS           =   config["encryption"]["salt_rounds"]
 
         # Messages related parameters
         self.MAX_MESSAGE_SIZE        =   config["messages"]["max_message_size"]
@@ -94,14 +84,10 @@ class Config:
 host = "{self.API_HOST}"
 port = {self.API_PORT}
 logs_path = "{self.LOGS_PATH}"
-workers = {self.WORKERS} # number of workers for guvicorn, the higher the better
+workers = {self.WORKERS} # number of workers for the ASGI, the higher the better
 rate_limit_duration = {self.RATE_LIMIT_DURATION} # the duration of a rate limit of an IP address (in minutes)
 max_rate_limit_requests = {self.MAX_RATE_LIMIT_REQUESTS} # number of request before a rate limit warning
 max_rate_limit_warnings = {self.MAX_RATE_LIMIT_WARNINGS} # number of rate limit warnings before blocking the IP address
-
-[supabase]
-supabase_url = "{self.SUPABASE_URL}"
-supabase_key = "{self.SUPABASE_KEY}"
 
 [supabase.postregsql]
 database_name = "{self.DATABASE_NAME}"
@@ -113,7 +99,6 @@ port = "{self.DATABASE_PORT}"
 [encryption]
 derived_key_bytes = {self.DERIVED_KEY_BYTES} # This specifies the bytes length of the derived key. A 56-bit key provides a good balance between security and performance. The bytes should be 5 to 56 bytes.
 derived_key_rounds = {self.DERIVED_KEY_ROUNDS} # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
-salt_rounds = {self.SALT_ROUNDS} # This represents the number of iterations for the salt generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
 
 [messages]
 max_message_size = {self.MAX_MESSAGE_SIZE} # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.

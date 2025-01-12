@@ -15,6 +15,7 @@ class Keys(Base):
     __tablename__ = "keys"
 
     key_value       =   Column(String, primary_key=True, nullable=False)
+    iv              =   Column(String, nullable=False)
     associated_to   =   Column(String)
     user_id         =   Column(String, default=None)
     message_id      =   Column(String, default=None)
@@ -22,4 +23,4 @@ class Keys(Base):
     updated_at      =   Column(DateTime)
 
     def __repr__(self):
-        return f"Keys(key_value={self.key_value!r}, associated_to={self.associated_to!r}, user_id={self.user_id!r}, message_id={self.message_id!r}, created_at={self.created_at!r}, updated_at={self.updated_at!r})"
+        return f"Keys(key_value={self.key_value!r}, iv={self.iv!r}, associated_to={self.associated_to!r}, user_id={self.user_id!r}, message_id={self.message_id!r}, created_at={self.created_at!r}, updated_at={self.updated_at!r})"

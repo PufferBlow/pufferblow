@@ -19,7 +19,7 @@ from pufferblow.src.database.database_handler import DatabaseHandler
 
 # Models
 from pufferblow.src.models.user_model import User
-from pufferblow.src.models.encryption_key_model import EncryptionKey
+from pufferblow.src.models.keys_model import EncryptionKey
 from pufferblow.src.models.config_model import Config 
 
 # Log messages
@@ -60,20 +60,20 @@ class UserManager (object):
             user_id=new_user.user_id,
             data=username,
             associated_to="username",
-            algo_type="blowfish"
+            algo_type="AES"
         )
-        new_user.password_hash                          =       self._encrypt_data(
+        new_user.password                               =       self._encrypt_data(
             user_id=new_user.user_id,
             data=password,
             associated_to="password",
-            algo_type="bcrypt"
+            algo_type="AES"
         )
         new_user.raw_auth_token                         =       auth_token
         new_user.encrypted_auth_token                   =       self._encrypt_data(
             user_id=new_user.user_id,
             data=auth_token,
             associated_to="auth_token",
-            algo_type="bcrypt"
+            algo_type="AES"
         )
         new_user.auth_token_expire_time                 =       auth_token_expire_time
         new_user.status                                 =       "online"
@@ -272,24 +272,17 @@ class UserManager (object):
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id
         )
-        
-        hashed_user_password = base64.b64decode(user_data.password_hash) # Saved hashed version of the user's password
+        ciphered_user_password = user_data.password
 
-        hashed_user_passwords_salt = self.database_handler.get_salt(
+        raw_password = self._decrypt_data(
             user_id=user_id,
-            associated_to="password"
-        ) # Salt used to encrypt the password
-
-        # Hashed version of the passed password
-        hashed_password = self.hasher.encrypt_with_bcrypt(
-            data=password,
-            salt=hashed_user_passwords_salt,
-            is_to_check=True
+            associated_to="password",
+            data=ciphered_user_password
         )
 
-        if hashed_password != hashed_user_password:
+        if raw_password != password:
             return False
-
+        
         return True
     
     def update_username(self, user_id: str, new_username: str) -> None:
@@ -306,32 +299,22 @@ class UserManager (object):
         user_data = self.database_handler.fetch_user_data(
             user_id=user_id,
         )
-        encrypted_old_username = base64.b64decode(user_data.username)
+        ciphered_old_username = user_data.username
 
-        username_decryption_key = self.database_handler.get_decryption_key(
+        raw_old_username = self._decrypt_data(
             user_id=user_id,
-            associated_to="username"
-        )
-
-        decryption_key = EncryptionKey()
-
-        decryption_key.key_value = username_decryption_key
-        decryption_key.user_id = user_id
-        decryption_key.associated_to = "username"
-
-        old_username = self.hasher.decrypt_with_blowfish(
-            encrypted_data=encrypted_old_username,
-            key=username_decryption_key
+            associated_to="username",
+            data=ciphered_old_username
         )
         
-        encrypted_new_username, encryption_key =  self.hasher.encrypt_with_blowfish(
+        encrypted_new_username, key =  self.hasher.encrypt(
             data=new_username
         )
 
         encrypted_new_username = base64.b64encode(encrypted_new_username).decode("ascii")
 
-        encryption_key.user_id = user_id
-        encryption_key.associated_to = "username"
+        key.user_id = user_id
+        key.associated_to = "username"
 
         # Update the username
         self.database_handler.update_username(
@@ -340,14 +323,14 @@ class UserManager (object):
         )
 
         # Update the encryption key info in the database
-        self.database_handler.update_encryption_key(
-            key=encryption_key
+        self.database_handler.update_key(
+            key=key
         )
 
         logger.info(
             info.INFO_UPDATE_USERNAME(
                 user_id=user_id,
-                old_username=old_username,
+                old_username=raw_old_username,
                 new_username=new_username
             )
         )
@@ -399,30 +382,24 @@ class UserManager (object):
         Returns:
             `None`.
         """
-        salt = self.hasher.encrypt_with_bcrypt(
-            data=new_password,
-            user_id=user_id
+        ciphered_new_password, key = self.hasher.encrypt(
+            data=new_password
         )
-        salt.associated_to = "password"
+        ciphered_new_password = base64.b64encode(ciphered_new_password).decode("ascii")
 
-        hashed_new_password = salt.hashed_data
+        key.user_id = user_id
+        key.associated_to = "password"
 
-        self.database_handler.update_salt(
-            user_id=user_id,
-            associated_to=salt.associated_to,
-            new_salt_value=salt.salt_value,
-            new_hashed_data=hashed_new_password
-        )
-
+        self.database_handler.update_key(key)
         self.database_handler.update_user_password(
             user_id=user_id,
-            hashed_new_password=hashed_new_password
+            ciphered_new_password=ciphered_new_password
         )
 
         logger.info(
             info.INFO_UPDATE_USER_PASSWORD(
                 user_id=user_id,
-                hashed_new_password=hashed_new_password
+                hashed_new_password=ciphered_new_password
             )
         )
 
@@ -431,67 +408,49 @@ class UserManager (object):
         Encrypt the given `data`
         
         Args:
-            `user_id` (str): The user's `user_id`.
-            `data` (str): The `data` to encrypt.
-            `associated_to` (str): What will the derived `key` will be used to encrypt ("username", "auth_token").
-            `algo_type` (str): Type of algorithm to use to encrypt ("BlowFish", "Bcrypt").
+            user_id` (str): The user's `user_id`.
+            data` (str): The `data` to encrypt.
+            associated_to` (str): What will the derived `key` will be used to encrypt ("username", "auth_token").
+            algo_type` (str): Type of algorithm to use to encrypt ("AES", "bcrypt").
         
         Returns:
             str: Encrypted version of the given `data`.
         """
-        # For username, messages, contancts data
-        if algo_type == "blowfish":
-            encrypted_data, encryption_key_data  =  self.hasher.encrypt_with_blowfish(data)
+        ciphered_data, key  =  self.hasher.encrypt(data)
 
-            encrypted_data = base64.b64encode(encrypted_data).decode("ascii")
+        ciphered_data = base64.b64encode(ciphered_data).decode("ascii")
 
-            encryption_key_data.associated_to   =     associated_to
-            encryption_key_data.user_id         =     user_id
+        key.associated_to   =     associated_to
+        key.user_id         =     user_id
 
-            if encryption_key_data.associated_to == "username":
-                logger.debug(
-                    debug.DEBUG_USERNAME_ENCRYPTED(
-                        username=data,
-                        encrypted_username=encrypted_data
-                    )
+        if key.associated_to == "username":
+            logger.debug(
+                debug.DEBUG_USERNAME_ENCRYPTED(
+                    username=data,
+                    encrypted_username=ciphered_data
                 )
-
-            self.database_handler.save_encryption_key(
-                key=encryption_key_data
+            )
+        elif key.associated_to == "auth_token":
+            logger.debug(
+                debug.DEBUG_NEW_AUTH_TOKEN_HASHED(
+                    auth_token=data,
+                    hashed_auth_token=ciphered_data,
+                    key=key
+                )
+            )
+        elif key.associated_to == "password":
+            logger.debug(
+                debug.DEBUG_NEW_PASSWORD_HASHED(
+                    password=data,
+                    hashed_password=ciphered_data
+                )
             )
 
-            return encrypted_data
+        self.database_handler.save_keys(
+            key=key
+        )
 
-        # For passwords, and auth_tokens
-        if algo_type == "bcrypt":
-            salt = self.hasher.encrypt_with_bcrypt(
-                data=data,
-                user_id=user_id
-            )
-
-            salt.associated_to = associated_to
-
-            if salt.associated_to == "auth_token":
-                logger.debug(
-                    debug.DEBUG_NEW_AUTH_TOKEN_HASHED(
-                        auth_token=data,
-                        hashed_auth_token=salt.hashed_data,
-                        salt=salt
-                    )
-                )
-            elif salt.associated_to == "password":
-                logger.debug(
-                    debug.DEBUG_NEW_PASSWORD_HASHED(
-                        password=data,
-                        hashed_password=salt.hashed_data
-                    )
-                )
-            
-            self.database_handler.save_salt(
-                salt=salt
-            )
-
-            return salt.hashed_data
+        return ciphered_data
     
     def _decrypt_data(self, user_id: str, data: str, associated_to: str) -> str:
         """
@@ -505,16 +464,17 @@ class UserManager (object):
         Returns:
             str: The decrypted version of the `data`.
         """
-        decryption_key = self.database_handler.get_decryption_key(
+        key = self.database_handler.get_keys(
             user_id=user_id,
             associated_to=associated_to
         )
         
         data = base64.b64decode(data)
 
-        decrypted_data = self.hasher.decrypt_with_blowfish(
-            encrypted_data=data,
-            key=decryption_key
+        decrypted_data = self.hasher.decrypt(
+            ciphertext=data,
+            key=key.key_value,
+            iv=key.iv
         )
 
         if associated_to == "username":

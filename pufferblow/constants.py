@@ -1,5 +1,7 @@
 import os
 
+import platform
+
 from rich import print
 
 # Package info
@@ -24,5 +26,9 @@ BANNER = f"""
 def banner() -> None: print(BANNER)
 
 # The $HOME path
-HOME = os.environ["HOME"]
-
+if platform.system() == "Windows":
+    HOME = os.environ["USERPROFILE"]
+    SLASH = "\\"
+else:
+    HOME = os.environ["HOME"]
+    SLASH = "/"

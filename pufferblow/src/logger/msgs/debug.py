@@ -7,8 +7,8 @@ def DEBUG_NEW_AUTH_TOKEN_GENERATED(auth_token) -> str:
     msg =  f"Generated new authentication token: '{auth_token}'."
     return msg
 
-def DEBUG_NEW_AUTH_TOKEN_HASHED(auth_token, hashed_auth_token, salt) -> str:
-    msg =  f"Hashed new authentication token. Auth token: '{auth_token}', Hashed token: '{hashed_auth_token}', Salt: '{salt.salt_value}'."
+def DEBUG_NEW_AUTH_TOKEN_HASHED(auth_token, hashed_auth_token, key) -> str:
+    msg =  f"Ciphered new authentication token. Auth token: '{auth_token}', Hashed token: '{hashed_auth_token}', key: '{key.key_value}'."
     return msg
 
 def DEBUG_NEW_AUTH_TOKEN_SAVED(auth_token) -> str:
@@ -53,10 +53,6 @@ def DEBUG_USERNAME_DECRYPTED(encrypted_username, decrypted_username) -> str:
     
 def DEBUG_VALIDATE_AUTH_TOKEN(hashed_auth_token, is_valid) -> str:
     msg = f"Validated authentication token. Hashed token: '{hashed_auth_token}', Valid: '{is_valid}'."
-    return msg
-    
-def DEBUG_REQUEST_SALT_VALUE(user_id, salt_value, associated_to) -> str:
-    msg = f"Requested salt value for hashing data. User ID: '{user_id}', Salt: '{salt_value}', Associated to: '{associated_to}'."
     return msg
     
 def DEBUG_FETCH_USERS_ID(users_id) -> str:

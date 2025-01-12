@@ -91,8 +91,7 @@ class APIInitializer(object):
         # Init the hasher (Responsible for encrypting and decrypting data)
         self.hasher = Hasher(
             derived_key_bytes       =       self.config.DERIVED_KEY_BYTES,
-            derived_key_rounds      =       self.config.DERIVED_KEY_ROUNDS,
-            salt_rounds             =       self.config.SALT_ROUNDS
+            derived_key_rounds      =       self.config.DERIVED_KEY_ROUNDS
         )
 
         # Init Database
@@ -177,7 +176,7 @@ class APIInitializer(object):
         
         if not self.config_handler.check_config():
             logger.error(errors.ERROR_NO_CONFIG_FILE_FOUND(self.config_handler.config_file_path))
-            sys.exit(1)
+            # sys.exit(1)
         
         config = self.config_handler.load_config()
         if len(config) == 0:

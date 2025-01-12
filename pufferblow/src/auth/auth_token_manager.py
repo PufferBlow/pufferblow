@@ -6,6 +6,9 @@ import datetime
 
 from loguru import logger
 
+# Models
+from pufferblow.src.models.keys_model import EncryptionKey
+
 # Hasher
 from pufferblow.src.hasher.hasher import Hasher
 
@@ -140,14 +143,21 @@ class AuthTokenManager (object):
         Returns:
             `None`.
         """
-        hashed_auth_token = self._encrypt_auth_token(
+        key = self.database_handler.get_keys(
             user_id=user_id,
-            auth_token=auth_token
+            associated_to="auth_token"
         )
+        _key = EncryptionKey()
+        _key.load_table_metadata(key)
 
+        ciphered_auth_token = self.hasher.encrypt(
+            data=auth_token,
+            key=_key
+        )
+        
         self.database_handler.delete_auth_token(
             user_id=user_id,
-            auth_token=hashed_auth_token
+            auth_token=ciphered_auth_token
         )
     
     def create_auth_token_expire_time(self):
@@ -191,47 +201,16 @@ class AuthTokenManager (object):
             user_id=user_id
         )
 
-        hashed_auth_token = base64.b64decode(user_data.auth_token)
-        
-        # When hashing some data using `bcrypt` with a `salt`
-        # it's not possible to just take the `data` that we think
-        # is the one we hashed and use the same `salt` and expect it
-        # to yield the same hashed version of the `data` in order to compare
-        # what the data that the user gave and what is already hashed and saved
-        # in the database. To overcome that, we use the builtin function `checkpw`
-        # that `bcrypt` provide to compare these data in order to know if they are
-        # same, and in this context check the user's `auth_token`
-        return bcrypt.checkpw(
-            raw_auth_token.encode("utf-8"),
-            hashed_auth_token
-        )   
+        ciphered_auth_token = base64.b64decode(user_data.auth_token)
 
-    def _encrypt_auth_token(self, user_id: str, auth_token: str) -> str:
-        """ 
-        Returns the hashed version of the auth_token using the same salt that
-        is soted in the database
-        
-        Args:
-            `user_id` (str): The user's `user_id`.
-            `auth_token` (str): The raw `auth_token` that is given to the user when signing up.
-        
-        Returns:
-            str: hashed version of the `auth_token``
-        """
-        # NOTE: This function will not be used, as there is a fix
-        # for not being able to get the right hashed `auth_token`
-        # the function `auth_token_manager.check_users_auth_token`
-        # is it's replacement
-        salt = self.database_handler.get_salt(
+        key = self.database_handler.get_keys(
             user_id=user_id,
             associated_to="auth_token"
         )
-
-        auth_token_hash = self.hasher.encrypt_with_bcrypt(
-            data=auth_token,
-            salt=salt,
-            is_to_check=True
+        auth_token = self.hasher.decrypt(
+            ciphertext=ciphered_auth_token,
+            key=key.key_value,
+            iv=key.iv
         )
-        auth_token_hash = base64.b64encode(auth_token_hash).decode("ascii")
         
-        return auth_token_hash
+        return auth_token == raw_auth_token

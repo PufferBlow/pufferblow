@@ -5,7 +5,7 @@ class User:
     """ User model """
     user_id                  :       str
     username                 :       str
-    password_hash            :       str                    =       ""
+    password                 :       str                    =       ""
     status                   :       str
     last_seen                :       str
     conversations            :       list                   =       []
@@ -36,7 +36,7 @@ class User:
         user = Users(
             user_id                =   self.user_id,
             username               =   self.username,
-            password_hash          =   self.password_hash,
+            password               =   self.password,
             status                 =   self.status,
             last_seen              =   self.last_seen,
             conversations          =   self.conversations,
@@ -65,7 +65,7 @@ class User:
         """
         self.user_id                 =   table_metadata.user_id
         self.username                =   table_metadata.username
-        self.password_hash           =   table_metadata.password_hash
+        self.password                =   table_metadata.password
         self.status                  =   table_metadata.status
         self.last_seen               =   table_metadata.last_seen
         self.conversations           =   table_metadata.conversations
@@ -85,7 +85,7 @@ class User:
         USER_DATA = {
             "user_id"                   :       self.user_id,
             "username"                  :       self.username,
-            "password_hash"             :       self.password_hash,
+            "password"                  :       self.password,
             "status"                    :       self.status,
             "last_seen"                 :       self.last_seen,
             "conversations"             :       self.conversations,
@@ -106,7 +106,7 @@ class User:
         USER_DATA = (
             self.user_id,
             self.username,
-            self.password_hash,
+            self.password,
             self.status,
             self.last_seen,
             self.conversations,
