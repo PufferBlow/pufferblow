@@ -33,8 +33,6 @@ def test_signup(client: TestClient):
     response = response.json()
 
     ValueStorage.auth_token = response["auth_token"]
-    
-    print(ValueStorage.auth_token)
 
 def test_signup_username_duplicate_exception(client: TestClient):
     """ Test the exception that will get raised if the username
