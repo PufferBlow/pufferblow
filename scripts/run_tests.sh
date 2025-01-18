@@ -3,4 +3,3 @@
 set -rx
 
 pytest ./pufferblow/tests/ -x
-
