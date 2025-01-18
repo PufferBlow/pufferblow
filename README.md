@@ -1,4 +1,7 @@
 > **NOTE**: The project is still in development.
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)
+<!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 
 # Introduction
@@ -13,6 +16,20 @@ you get started on using pufferblow by following the instructions in the [docume
 ## Contributors
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="http://ramsy0dev.github.io"><img src="https://avatars.githubusercontent.com/u/86024158?v=4?s=100" width="100px;" alt="ramsy0dev"/><br /><sub><b>ramsy0dev</b></sub></a><br /><a href="https://github.com/PufferBlow/pufferblow/commits?author=ramsy0dev" title="Code">💻</a> <a href="#maintenance-ramsy0dev" title="Maintenance">🚧</a> <a href="https://github.com/PufferBlow/pufferblow/commits?author=ramsy0dev" title="Documentation">📖</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
 
