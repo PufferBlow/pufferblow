@@ -41,7 +41,7 @@ class Channel(object):
             `table_metadata` (User): The `Channels` table object containing the metadata to load.
         
         Returns:
-            dict: The metadata formated in dict.
+            dict: The metadata in dict format.
         """
         self.channel_id      =   table_metadata.channel_id
         self.channel_name    =   table_metadata.channel_name
@@ -50,11 +50,11 @@ class Channel(object):
         self.allowed_users   =   table_metadata.allowed_users
         self.created_at      =   table_metadata.created_at
 
-        return self.to_json()
+        return self.to_dict()
 
-    def to_json(self) -> dict:
-        """ Returns the channel data in json format """
-        channel_data = {
+    def to_dict(self) -> dict:
+        """ Returns the channel data in dict format """
+        return {
             "channel_id"         :   self.channel_id,
             "channel_name"       :   self.channel_name,
             "messages_ids"       :   self.messages_ids,
@@ -62,8 +62,6 @@ class Channel(object):
             "allowed_users"      :   self.allowed_users,
             "created_at"         :   self.created_at
         }
-
-        return channel_data
 
     def to_tuple(self) -> tuple:
         """ Reutns the channel data in tuple format """

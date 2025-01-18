@@ -1,10 +1,10 @@
 #!/usr/bin/python
 
-import os
 import sys
 import typer
 import subprocess
 
+from pathlib import Path
 from rich.console import Console
 
 # Init cli
@@ -14,8 +14,11 @@ cli = typer.Typer()
 console = Console()
 console._log_render.omit_repeated_times = False
 
-script_dir = os.path.dirname(__file__)
-docs_path = '/'.join(script_dir.split("/")[:-1]) + "/docs"
+# Get the script directory
+script_dir = Path(__file__).parent
+
+# Construct the docs path
+docs_path = script_dir.parent / "docs"
 
 def install_libs_packages() -> None:
     """ Installs the sphinx-build package """

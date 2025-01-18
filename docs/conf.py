@@ -6,8 +6,8 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'pufferblow-api'
-copyright = '2024, ramsy0dev'
+project = 'pufferblow'
+copyright = '2025, ramsy0dev'
 author = 'ramsy0dev'
 release = '0.0.1-beta'
 
@@ -30,20 +30,20 @@ html_css_files = [
 ]
 html_static_path = ['_static']
 
-html_title = "pufferblow-api"
+html_title = "pufferblow"
 html_favicon = "_static/favicon.ico"
 html_theme_options = {
     "use_download_button": True, # Allow users to download the current page in different formats
     "icon_links": [
         {
             "name": "GitHub",
-            "url": "https://github.com/PufferBlow/pufferblow-api",
+            "url": "https://github.com/PufferBlow/pufferblow",
             "icon": "fa-brands fa-square-github",
             "type": "fontawesome",
         }
     ],
     "icon_links_label": "Quick Links",
-    "repository_url": "https://github.com/PufferBlow/pufferblow-api",
+    "repository_url": "https://github.com/PufferBlow/pufferblow",
     "repository_branch": "docs",
     "path_to_docs": "./docs",
     "use_repository_button": True,

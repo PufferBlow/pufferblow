@@ -1,5 +1,6 @@
 import sys
 import asyncio
+import base64
 
 from fastapi import (
     FastAPI,
@@ -9,7 +10,6 @@ from fastapi import (
     exceptions
 )
 from loguru import logger
-from datetime import timedelta
 from contextlib import asynccontextmanager
 
 from pufferblow import constants
@@ -30,22 +30,12 @@ from pufferblow.src.logger.msgs import (
     info
 )
 
-# TODO: Switch from using regular dict to return 
-# into using ORJSONResponse as it is much faster.
-# References:
-#    * https://fastapi.tiangolo.com/advanced/custom-response/#use-orjsonresponse
-#    * https://medium.com/@jesum/optimizing-rest-api-performance-2f554d5bfef
-
 @asynccontextmanager
 async def lifespan(api: FastAPI):
     """ API startup handler """
-    # Setup the rate limit middleware     
-    RateLimitingMiddleware.RATE_LIMIT_DURATION = timedelta(
-        minutes=api_initializer.pufferblow_api_config.RATE_LIMIT_DURATION
-    )
-    RateLimitingMiddleware.MAX_RATE_LIMIT_REQUESTS = api_initializer.pufferblow_api_config.MAX_RATE_LIMIT_REQUESTS
-    RateLimitingMiddleware.MAX_REQUEST_LIMIT_WARNINGS = api_initializer.pufferblow_api_config.MAX_RATE_LIMIT_WARNINGS
-
+    if not api_initializer.is_loaded:
+        api_initializer.load_objects()
+    
     yield
 
 # Init the API
@@ -76,12 +66,6 @@ async def server_info_route():
     """ Server info route """
     return {
         "status_code": 200,
-        "server_sha256": api_initializer.pufferblow_api_config.SERVER_SHA256,
-        "server_name": api_initializer.pufferblow_api_config.SERVER_NAME,
-        "server_description": api_initializer.pufferblow_api_config.SERVER_DESCRIPTION,
-        "server_avatar_url": api_initializer.pufferblow_api_config.SERVER_AVATAR_URL,
-        "server_maintainer_name": api_initializer.pufferblow_api_config.SERVER_MAINTAINER_NAME,
-        "number_of_users": api_initializer.database_handler.count_users()
     }
 
 # Users routes
@@ -163,10 +147,10 @@ async def users_profile_route(
 @api.put("/api/v1/users/profile", status_code=200)
 async def edit_users_profile_route(
     auth_token: str,
-    new_username: str = None,
-    status: str = None,
-    new_password: str = None,
-    old_password: str = None
+    new_username: str | None = None,
+    status: str | None = None,
+    new_password: str | None = None,
+    old_password: str | None = None
 ):
     """
     Update a user's profile metadata such us status,
@@ -290,28 +274,43 @@ async def reset_users_auth_token_route(
 
     new_auth_token = f"{user_id}.{api_initializer.auth_token_manager.create_token()}"
 
-    # Hashing the new auth_token and updating the existing salt value
-    # with the new one
-    salt = api_initializer.hasher.encrypt_with_bcrypt(
-        user_id=user_id,
+    ciphered_auth_token, key = api_initializer.hasher.encrypt(
         data=new_auth_token
     )
+    ciphered_auth_token = base64.b64encode(ciphered_auth_token).decode("ascii")
 
-    hashed_auth_token = salt.hashed_data
+    key.user_id = user_id
+    key.associated_to = "auth_token"
+    
+    api_initializer.database_handler.update_key(key)
     new_auth_token_expire_time = api_initializer.auth_token_manager.create_auth_token_expire_time()
-
-    api_initializer.database_handler.update_salt(
-        user_id=user_id,
-        associated_to="auth_token",
-        new_salt_value=salt.salt_value,
-        new_hashed_data=hashed_auth_token
-    )
 
     api_initializer.database_handler.update_auth_token(
         user_id=user_id,
-        new_auth_token=hashed_auth_token,
+        new_auth_token=ciphered_auth_token,
         new_auth_token_expire_time=new_auth_token_expire_time
     )
+
+    # salt = api_initializer.hasher.encrypt_with_bcrypt(
+    #     user_id=user_id,
+    #     data=new_auth_token
+    # )
+
+    # hashed_auth_token = salt.hashed_data
+    # new_auth_token_expire_time = api_initializer.auth_token_manager.create_auth_token_expire_time()
+
+    # api_initializer.database_handler.update_salt(
+    #     user_id=user_id,
+    #     associated_to="auth_token",
+    #     new_salt_value=salt.salt_value,
+    #     new_hashed_data=hashed_auth_token
+    # )
+
+    # api_initializer.database_handler.update_auth_token(
+    #     user_id=user_id,
+    #     new_auth_token=hashed_auth_token,
+    #     new_auth_token_expire_time=new_auth_token_expire_time
+    # )
 
     return {
         "status_code": 200,
@@ -437,7 +436,7 @@ async def create_new_channel_route(
     return {
         "status_code": 200,
         "message": "Channel created successfully",
-        "channel_data": channel_data.to_json()
+        "channel_data": channel_data.to_dict()
     }
 
 @api.delete("/api/v1/channel/{channel_id}/delete")
@@ -698,9 +697,9 @@ async def channel_load_messages(
         404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists.
     """
     # Check if the value of `messages_per_page` exceeded the allowed maximal value
-    if messages_per_page > api_initializer.pufferblow_api_config.MAX_MESSAGES_PER_PAGE:
+    if messages_per_page > api_initializer.config.MAX_MESSAGES_PER_PAGE:
         raise exceptions.HTTPException(
-            detail=f"`messages_per_page` number exceeded the maximal number which is '{api_initializer.pufferblow_api_config.MAX_MESSAGES_PER_PAGE}'",
+            detail=f"`messages_per_page` number exceeded the maximal number which is '{api_initializer.config.MAX_MESSAGES_PER_PAGE}'",
             status_code=400
         )
     
@@ -750,7 +749,7 @@ async def channel_send_message(
         404 NOT FOUND: The `auth_token` is unvalid, or the `channel_id` of the channel doesn't exists.
     """
     # Check if the size of the `message` exceeded the allowed size
-    if sys.getsizeof(message) > api_initializer.pufferblow_api_config.MAX_MESSAGE_SIZE:
+    if sys.getsizeof(message) > api_initializer.config.MAX_MESSAGE_SIZE:
         raise exceptions.HTTPException(
             detail="the message is too long.",
             status_code=400
@@ -923,7 +922,7 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
     ) and not api_initializer.user_manager.is_server_owner(
         user_id=user_id
     ):
-        raise exceptions.HTTPException(
+        raise exceptions.WebSocketException(
             code=1001,
             reason="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
         )
@@ -965,13 +964,13 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
                 if message["message_id"] in sent_messages_ids:
                     continue
                 
-                api_initializer.websockets_manager.send_message(
+                await api_initializer.websockets_manager.send_message(
                     websocket=websocket,
                     message=str(message)
                 )
 
                 sent_messages_ids.append(message["message_id"])
 
-                asyncio.sleep(DELAY)
+                await asyncio.sleep(DELAY)
     except WebSocketDisconnect:
-        api_initializer.websockets_manager.disconnect(websocket)
+        await api_initializer.websockets_manager.disconnect(websocket)

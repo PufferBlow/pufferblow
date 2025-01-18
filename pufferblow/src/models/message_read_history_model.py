@@ -38,16 +38,16 @@ class MessageReadHistoryModel(object):
             `table_metadata` (User): The `MessageReadHistory` table object containing the metadata to load.
         
         Returns:
-            tuple: The metadata formated in tuple.
+            tuple: The metadata in dict format.
         """
         self.user_id                =   table_metadata.user_id
         self.viewed_messages_ids    =   table_metadata.viewed_messages_ids
         self.created_at             =   table_metadata.created_at
         self.updated_at             =   table_metadata.updated_at
 
-        return self.to_json()
+        return self.to_dict()
     
-    def to_json(self) -> dict:
+    def to_dict(self) -> dict:
         """ 
         Returns the MessageReadHistory metadata in dict format
         """
@@ -68,6 +68,4 @@ class MessageReadHistoryModel(object):
             self.created_at,
             self.updated_at
         )
-
-
-    
+ 

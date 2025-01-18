@@ -1,7 +1,10 @@
 import re
 
 from loguru import logger
-from datetime import datetime
+from datetime import (
+    datetime,
+    timedelta
+)
 
 from fastapi.responses import ORJSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -24,14 +27,18 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
     """
     Basic rate limiting middleware
     """
-    RATE_LIMIT_DURATION: datetime = None
-    MAX_RATE_LIMIT_REQUESTS: int = None
-    MAX_REQUEST_LIMIT_WARNINGS: int = None
-    REQUEST_COUNT_PER_IP: dict = {}
+    RATE_LIMIT_DURATION: datetime
+    MAX_RATE_LIMIT_REQUESTS: int
+    MAX_REQUEST_LIMIT_WARNINGS: int
+    REQUEST_COUNT_PER_IP: dict = dict()
 
     def __init__(self, app):
         super().__init__(app)
 
+        self.RATE_LIMIT_DURATION = timedelta(minutes=api_initializer.config.RATE_LIMIT_DURATION)
+        self.MAX_RATE_LIMIT_REQUESTS = api_initializer.config.MAX_RATE_LIMIT_REQUESTS
+        self.MAX_REQUEST_LIMIT_WARNINGS = api_initializer.config.MAX_RATE_LIMIT_WARNINGS
+    
     async def dispatch(self, request, call_next):
         # This statements will get triggered when running
         # tests, beside that, it will just continue.
