@@ -17,26 +17,25 @@ from sqlalchemy import (
 from pufferblow.src.hasher.hasher import Hasher
 
 # Models
-from pufferblow.src.models.salt_model import Salt
 from pufferblow.src.models.user_model import User
 from pufferblow.src.models.channel_model import Channel
 from pufferblow.src.models.blocked_ip_model import BlockedIP
-from pufferblow.src.models.encryption_key_model import EncryptionKey
-from pufferblow.src.models.pufferblow_api_config_model import PufferBlowAPIconfig
+from pufferblow.src.models.keys_model import EncryptionKey
+from pufferblow.src.models.config_model import Config 
 
 # Utils
 from pufferblow.src.utils.current_date import date_in_gmt
 
 # Tables
+from pufferblow.src.database.tables.declarative_base import Base
 from pufferblow.src.database.tables.keys import Keys
 from pufferblow.src.database.tables.users import Users
-from pufferblow.src.database.tables.salts import Salts
+from pufferblow.src.database.tables.server import Server
 from pufferblow.src.database.tables.channels import Channels
 from pufferblow.src.database.tables.messages import Messages
 from pufferblow.src.database.tables.blocked_ips import BlockedIPS
 from pufferblow.src.database.tables.auth_tokens import AuthTokens
 from pufferblow.src.database.tables.message_read_history import MessageReadHistory
-
 # Log messages
 from pufferblow.src.logger.msgs import (
     info,
@@ -45,12 +44,14 @@ from pufferblow.src.logger.msgs import (
 
 class DatabaseHandler (object):
     """ Database handler for PufferBlow's API """
-    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher, pufferblow_config_model: PufferBlowAPIconfig) -> None:
-        self.database_engine            =    database_engine
-        self.database_session           =    sessionmaker(bind=self.database_engine)
-        self.hasher                     =    hasher
-        self.pufferblow_config_model    =    pufferblow_config_model
+    def __init__(self, database_engine: sqlalchemy.create_engine, hasher: Hasher, config: Config) -> None:
+        self.database_engine        =    database_engine
+        self.database_session       =    sessionmaker(bind=self.database_engine)
+        self.hasher                 =    hasher
+        self.config                 =    config 
     
+        self.setup_tables(base=Base)
+
     def setup_tables(self, base: DeclarativeBase) -> None:
         """
         Setup the needed database tables
@@ -150,7 +151,7 @@ class DatabaseHandler (object):
         Returns:
             list(str): A list of `message_id`s read by this user.
         """
-        messages_ids: list(str) = None
+        messages_ids: list[str] = None
 
         with self.database_session() as session:
             stmt = select(MessageReadHistory.viewed_messages_ids).where(
@@ -184,28 +185,6 @@ class DatabaseHandler (object):
             session.execute(stmt)
             session.commit()
     
-    def save_salt(self, salt: Salt) -> None:
-        """
-        Save the salt data in the `salt` table
-        in the database
-        
-        Args:
-            `salt` (Salt): A `Salt` object.
-        
-        Returns:
-            `None`.
-        """
-        with self.database_session() as session:
-            session.add(salt.create_table_metadata())
-            
-            session.commit()
-        
-        logger.info(
-            debug.DEBUG_NEW_HASH_SALT_SAVED(
-                salt=salt
-            )
-        )
-
     def save_auth_token(self, auth_token: AuthTokens) -> None:
         """
         Save the `auth_token` to the `auth_tokens` table
@@ -315,20 +294,21 @@ class DatabaseHandler (object):
         with self.database_session() as session:
             stmt = select(Users.user_id, Users.username)
 
-            reponse = session.execute(stmt).fetchall()
+            response = session.execute(stmt).fetchall()
             
-            for i in range(len(reponse)):
-                user_id = reponse[i][0]
-                encrypted_username = base64.b64decode(reponse[i][1])
+            for i in range(len(response)):
+                user_id = response[i][0]
+                encrypted_username = base64.b64decode(response[i][1])
 
-                encryption_key = self.get_decryption_key(
+                key = self.get_keys(
                     user_id=user_id,
                     associated_to="username"
                 )
 
-                decrypted_username = self.hasher.decrypt_with_blowfish(
-                    encrypted_data=encrypted_username,
-                    key=encryption_key
+                decrypted_username = self.hasher.decrypt(
+                    ciphertext=encrypted_username,
+                    key=key.key_value,
+                    iv=key.iv
                 )
 
                 usernames.append(decrypted_username)
@@ -425,7 +405,7 @@ class DatabaseHandler (object):
 
             session.commit()
     
-    def update_user_password(self, user_id: str, hashed_new_password: str) -> None:
+    def update_user_password(self, user_id: str, ciphered_new_password: str) -> None:
         """Updates the user's password
         
         Args:
@@ -439,7 +419,7 @@ class DatabaseHandler (object):
 
         with self.database_session() as session:
             stmt = update(Users).values(
-                password_hash=hashed_new_password,
+                password=ciphered_new_password,
                 updated_at=updated_at
             ).where(
                 Users.user_id == user_id
@@ -449,9 +429,9 @@ class DatabaseHandler (object):
 
             session.commit()
         
-    def update_encryption_key(self, key: EncryptionKey) -> None:
+    def update_key(self, key: EncryptionKey) -> None:
         """
-        Update the given encryption `key` in the database
+        Update the given `key` in the database
         
         Args:
             `key` (EncryptionKey): An `EncryptionKey` object.
@@ -464,6 +444,7 @@ class DatabaseHandler (object):
         with self.database_session() as session:
             stmt = update(Keys).values(
                 key_value=key.key_value,
+                iv=key.iv,
                 associated_to=key.associated_to,
                 updated_at=updated_at
             ).where(
@@ -504,7 +485,7 @@ class DatabaseHandler (object):
             )
         )
     
-    def save_encryption_key(self, key: EncryptionKey) -> None:
+    def save_keys(self, key: EncryptionKey) -> None:
         """
         Save the encryption `key` in the `keys` table
         in the database
@@ -526,9 +507,9 @@ class DatabaseHandler (object):
             )
         )
         
-    def get_decryption_key(self, associated_to: str, user_id: str | None = None, message_id: str | None = None, conversation_id: str | None = None) -> str:
+    def get_keys(self, associated_to: str, user_id: str | None = None, message_id: str | None = None, conversation_id: str | None = None) -> Keys:
         """
-        Fetch an decryption `key` from the `keys` table
+        Fetch a key from the keys table
         in the database
         
         Args:
@@ -538,7 +519,7 @@ class DatabaseHandler (object):
             conversation_id (str, optional, default: None): The conversation's `conversation_id`.
         
         Returns:
-            str: The encryption `key` value.
+            Keys: A Keys table row.
         """
         key = None
 
@@ -557,104 +538,15 @@ class DatabaseHandler (object):
             if condition is not None:
                 conditions.append(condition)
 
-            stmt = select(Keys.key_value).where(
+            stmt = select(Keys).where(
                 and_(
                     *conditions
                 )
             )
 
-            key = session.execute(stmt).fetchone()[0]
-        
-        return key
+            key = session.execute(stmt).fetchone()
 
-    def get_salt(self, user_id: str, associated_to: str) -> bytes:
-        """
-        Returns the salt used to hash a `password`,
-        or an `auth_token`
-        
-        Args:
-            `user_id` (str): The user's id
-            `associated_to` (str): What `data` was this `salt` used to hash ['password'. 'auth_token'].
-
-        Returns:
-            bytes: The `salt` value in bytes.
-        """
-        salt = None
-
-        with self.database_session() as session:
-            stmt = select(Salts.salt_value).where(
-                and_(
-                    Salts.user_id == user_id,
-                    Salts.associated_to == associated_to
-                )
-            )
-
-            salt = session.execute(stmt).fetchone()[0]
-            salt = base64.b64decode(salt)
-        
-        logger.debug(
-            debug.DEBUG_REQUEST_SALT_VALUE(
-                user_id=user_id,
-                salt_value=salt,
-                associated_to=associated_to
-            )
-        )
-
-        return salt
-
-    def update_salt(self, user_id: str, associated_to: str, new_salt_value: str, new_hashed_data: str) -> None:
-        """ 
-        Update the `salt` value
-        
-        Args:
-            `user_id` (str): The user's `user_id`.
-            `associated_to` (str): What `data` was this `salt` used to hash ['password'. 'auth_token'].
-            `new_salt_value` (str): The new `salt` value
-            `new_hashed_data` (str): The new hashed `data` with the new `salt` value.
-        
-        Returns:
-            `None`.
-        """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-        with self.database_session() as session:
-            stmt = update(Salts).values(
-                salt_value=new_salt_value,
-                hashed_data=new_hashed_data,
-                updated_at=updated_at
-            ).where(
-                and_(
-                    Salts.user_id == user_id,
-                    Salts.associated_to == associated_to
-                )
-            )
-
-            session.execute(stmt)
-            session.commit()
-
-    def delete_salt(self, user_id: str, associated_to: str) -> None:
-        """
-        Delete the `salt` from the `salts` table
-        in the database
-        
-        Args:
-            `user_id` (str): The user's `user_id`.
-            `associated_to` (str): What `data` was this `salt` used to hash ['password'. 'auth_token'].
-        
-        Returns:
-            `None`.
-        """
-        with self.database_session() as session:
-            stmt = delete(Salts).where(
-                and_(
-                    Salts.user_id == user_id,
-                    Salts.associated_to == associated_to
-                )
-            )
-
-            session.execute(stmt)
-            
-            session.commit()
+        return key[0]
 
     def get_auth_token_expire_time(self, user_id: str, auth_token: str) -> str:
         """
@@ -1120,3 +1012,101 @@ class DatabaseHandler (object):
                 session.execute(stmt)
             
             session.commit()
+    
+    def create_server_row(self, server: Server) -> None:
+        """
+        Creates a row in the server table.
+        
+        Args:
+            server (Server): The server object to create.
+
+        Returns:
+            None.
+        """
+        with self.database_session() as session:
+            session.add(server)
+            session.commit()
+    
+    def update_server_values(self, server_name: str, server_welcome_message: str, description: str | None = None,) -> None:
+        """
+        Updates the server's info.
+        """
+        updated_at = date_in_gmt()
+
+        with self.database_session() as session:
+            stmt = update(Server).values(
+                server_name = server_name,
+                server_welcome_message=server_welcome_message,
+                description=description,
+                updated_at=updated_at
+            )
+
+            session.execute(stmt)
+            session.commit()
+
+    def get_server(self) -> Server:
+        """
+        Fetches the server row from the server table.
+
+        Args:
+            None.
+
+        Returns:
+            Server: A server table row object.
+        """
+        server: Server
+
+        with self.database_session() as session:
+            stmt = select(Server)
+            server = session.execute(stmt).fetchone()
+            
+        return server if server is None else server[0]
+
+    def get_server_id(self) -> str:
+        """
+        Fetches the server id.
+
+        Args:
+            None.
+
+        Returns:
+            str: The server's id.
+        """
+        server = self.get_server()
+
+        return str(server.server_id)
+    
+    def get_server_members_count(self) -> int:
+        """
+        Fetches the members_count row from the server table.
+
+        Args:
+            None.
+
+        Returns:
+            int: members_count value.
+        """
+        server = self.get_server()
+
+        return server.members_count
+
+    def update_server_members_count(self, n: int) -> None:
+        """
+        Update the members_count column in the server table.
+
+        Args:
+            n (int): By how much should members_count be increased (can be negative in case of decrease).
+
+        Returns:
+            None.
+        """
+        current_members_count = self.get_server_members_count()
+
+        with self.database_session() as session:
+            stmt = update(Server).values(
+                members_count = current_members_count + n
+            )
+
+            session.execute(stmt)
+            session.commit()
+

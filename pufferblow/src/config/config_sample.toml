@@ -5,7 +5,7 @@
 [api]
 host = "0.0.0.0"
 port = 7575
-logs_path = "{HOME}/logs/pufferblow_api.log"
+logs_path = "{HOME}\\logs\\pufferblow_api.log"
 workers = 7 # number of workers for guvicorn, the higher the better
 rate_limit_duration = 5 # the duration of a rate limit of an IP address (in minutes)
 max_rate_limit_requests = 6000 # number of request before a rate limit warning
@@ -31,11 +31,3 @@ salt_rounds = 18 # This represents the number of iterations for the salt generat
 max_message_size = 1024 # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
 max_messages_per_page = 50 # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
 min_messages_per_page = 20 # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
-
-[server_info]
-server_sha256 = "<your server's sha256>" # Unique identifier for this server. Auto generated, do not change it!
-server_name = "<your server name>"
-server_description = "<your server description>"
-server_avatar_url = "<url to your server avatar/photo>"
-server_maintainer_name = "<the name of the server maintainer, it can be the name of the server owner>"
-server_welcome_message = "<your server's welcome message, will be returned when a GET requests goes to http://<host>:<port>/api/v1>"

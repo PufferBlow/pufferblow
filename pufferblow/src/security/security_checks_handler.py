@@ -69,7 +69,6 @@ class SecurityChecksHandler(object):
                 content={"error": f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"}
             )
 
-
     def check_auth_token_format(self, auth_token: str, check_user_existence: bool | None = True) -> None:
         """
         Checks if the auth_token's format is valid, if not it will raise
@@ -134,7 +133,7 @@ class SecurityChecksHandler(object):
             # )
 
             return ORJSONResponse(
-                content={"error": f"status value status='{status}' not found. Accepted values {supported_status_values = }"},
+                content={"error": f"status value status='{status}' not found. Accepted values {supported_status_values}"},
                 status_code=404
             )
     

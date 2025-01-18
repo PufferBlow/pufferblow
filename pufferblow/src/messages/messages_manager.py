@@ -72,7 +72,7 @@ class MessagesManager(object):
                 encrypted_message=base64.b64decode(message_metadata.hashed_message)
             )
 
-            json_metadata_format = message_metadata.to_json()
+            json_metadata_format = message_metadata.to_dict()
 
             # injecting in the `username` of the sender
             sender_user_metadata = self.user_manager.user_profile(
@@ -201,16 +201,16 @@ class MessagesManager(object):
         Returns:
             str: base64 encoded version of the message
         """
-        encrypted_message, encryption_key = self.hasher.encrypt_with_blowfish(
+        encrypted_message, key = self.hasher.encrypt(
             data=message
         )
 
-        encryption_key.user_id          =   user_id 
-        encryption_key.message_id       =   message_id
-        encryption_key.associated_to    =   "message"
+        key.user_id          =   user_id 
+        key.message_id       =   message_id
+        key.associated_to    =   "message"
 
-        self.database_handler.save_encryption_key(
-            key=encryption_key
+        self.database_handler.save(
+            key=key
         )
 
         encrypted_message = base64.b64encode(encrypted_message).decode("ascii")
@@ -228,15 +228,16 @@ class MessagesManager(object):
         Returns:
             str: The decrypted message.
         """
-        encryption_key = self.database_handler.get_decryption_key(
+        key = self.database_handler.get_keys(
             user_id=user_id,
             associated_to="message",
             message_id=message_id
         )
 
-        decrypted_message = self.hasher.decrypt_with_blowfish(
-            encrypted_data=encrypted_message,
-            key=encryption_key
+        decrypted_message = self.hasher.decrypt(
+            ciphertext=encrypted_message,
+            key=key.key_value,
+            iv=key.iv
         )
 
         return decrypted_message
@@ -275,4 +276,3 @@ class MessagesManager(object):
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_data_salt)
 
         return str(generated_uuid)
-    

@@ -1,5 +1,7 @@
 import os
 
+import platform
+
 from rich import print
 
 # Package info
@@ -24,17 +26,9 @@ BANNER = f"""
 def banner() -> None: print(BANNER)
 
 # The $HOME path
-HOME = os.environ["HOME"]
-
-# Log levels
-INFO        =   0
-DEBUG       =   1
-ERROR       =   2
-CRITICAL    =   3
-
-log_level_map = {
-    INFO: "INFO",
-    DEBUG: "DEBUG",
-    ERROR: "ERROR",
-    CRITICAL: "CRITICAL"
-}
+if platform.system() == "Windows":
+    HOME = os.environ["USERPROFILE"]
+    SLASH = "\\"
+else:
+    HOME = os.environ["HOME"]
+    SLASH = "/"

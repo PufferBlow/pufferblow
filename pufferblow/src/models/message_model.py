@@ -35,7 +35,7 @@ class Message (object):
 
         return message
 
-    def load_table_metadata(self, table_metadata: Messages) -> tuple:
+    def load_table_metadata(self, table_metadata: Messages) -> dict:
         """
         Load metadata from a `Messages` table object into
         the `self`'s attributes
@@ -44,7 +44,7 @@ class Message (object):
             `table_metadata` (User): The `Messages` table object containing the metadata to load.
         
         Returns:
-            tuple: The metadata formated in tuple.
+            tuple: The metadata in dict format.
         """
         self.message_id         =   table_metadata.message_id   
         self.hashed_message     =   table_metadata.hashed_message   
@@ -53,10 +53,10 @@ class Message (object):
         self.conversation_id    =   table_metadata.conversation_id  
         self.sent_at            =   table_metadata.sent_at    
 
-        return self.to_tuple()
+        return self.to_dict()
 
-    def to_json(self) -> dict:
-        """ Returns the message data in json format """
+    def to_dict(self) -> dict:
+        """ Returns the message data in dict format """
         message_data = {
             "message_id"            :   self.message_id,
             "message"               :   self.raw_message,
@@ -80,3 +80,4 @@ class Message (object):
         )
 
         return message_data
+

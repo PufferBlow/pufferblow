@@ -1,0 +1,28 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributors": [
+    {
+      "login": "ramsy0dev",
+      "name": "ramsy0dev",
+      "avatar_url": "https://avatars.githubusercontent.com/u/86024158?v=4",
+      "profile": "http://ramsy0dev.github.io",
+      "contributions": [
+        "code",
+        "maintenance",
+        "doc"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "skipCi": true,
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "projectName": "pufferblow",
+  "projectOwner": "PufferBlow"
+}

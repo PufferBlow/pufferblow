@@ -7,8 +7,8 @@ def DEBUG_NEW_AUTH_TOKEN_GENERATED(auth_token) -> str:
     msg =  f"Generated new authentication token: '{auth_token}'."
     return msg
 
-def DEBUG_NEW_AUTH_TOKEN_HASHED(auth_token, hashed_auth_token, salt) -> str:
-    msg =  f"Hashed new authentication token. Auth token: '{auth_token}', Hashed token: '{hashed_auth_token}', Salt: '{salt.salt_value}'."
+def DEBUG_NEW_AUTH_TOKEN_HASHED(auth_token, hashed_auth_token, key) -> str:
+    msg =  f"Ciphered new authentication token. Auth token: '{auth_token}', Hashed token: '{hashed_auth_token}', key: '{key.key_value}'."
     return msg
 
 def DEBUG_NEW_AUTH_TOKEN_SAVED(auth_token) -> str:
@@ -20,7 +20,7 @@ def DEBUG_NEW_DERIVED_KEY_CREATED(user, key) -> str:
     return msg
 
 def DEBUG_NEW_DERIVED_KEY_SAVED(key) -> str:
-    msg = f"Saved new derived key in 'keys': '{key.to_json()}'."
+    msg = f"Saved new derived key in 'keys': '{key.to_dict()}'."
     return msg
 
 def DEBUG_DERIVED_KEY_UPDATED(key) -> str:
@@ -28,7 +28,7 @@ def DEBUG_DERIVED_KEY_UPDATED(key) -> str:
     return msg
     
 def DEBUG_DERIVED_KEY_DELETED(key) -> str:
-    msg = f"Deleted derived key from 'keys': {key.to_json()}."
+    msg = f"Deleted derived key from 'keys': {key.to_dict()}."
     return msg
     
 def DEBUG_NEW_HASH_SALT_CREATED(salt) -> str:
@@ -36,7 +36,7 @@ def DEBUG_NEW_HASH_SALT_CREATED(salt) -> str:
     return msg
     
 def DEBUG_NEW_HASH_SALT_SAVED(salt) -> str:
-    msg = f"Saved new hash salt in 'salts': {salt.to_json()}."
+    msg = f"Saved new hash salt in 'salts': {salt.to_dict()}."
     return msg
     
 def DEBUG_NEW_PASSWORD_HASHED(password, hashed_password) -> str:
@@ -53,10 +53,6 @@ def DEBUG_USERNAME_DECRYPTED(encrypted_username, decrypted_username) -> str:
     
 def DEBUG_VALIDATE_AUTH_TOKEN(hashed_auth_token, is_valid) -> str:
     msg = f"Validated authentication token. Hashed token: '{hashed_auth_token}', Valid: '{is_valid}'."
-    return msg
-    
-def DEBUG_REQUEST_SALT_VALUE(user_id, salt_value, associated_to) -> str:
-    msg = f"Requested salt value for hashing data. User ID: '{user_id}', Salt: '{salt_value}', Associated to: '{associated_to}'."
     return msg
     
 def DEBUG_FETCH_USERS_ID(users_id) -> str:

@@ -1,5 +1,5 @@
 
-Welcome to pufferblow-api docs's documentation!
+Welcome to **pufferblow**'s documentation!
 ===============================================
 
 .. toctree::
