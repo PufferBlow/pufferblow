@@ -65,21 +65,6 @@ else:
         config=config_handler.load_config()
     )
 
-def setup_supabase() -> tuple:
-    """
-    Setup supabase.
-
-    Args:
-        None.
-
-    Returns:
-        tuple: Supabase project's info.
-    """
-    supabase_url = ask_prompt(prompt="Enter your supabase url", name="supabase url")
-    supabase_key = ask_prompt(prompt="Enter your supabase key", name="supabase key")
-
-    return (supabase_url, supabase_key)
-
 def setup_database() -> tuple:
     """
     Setups the database.
@@ -198,12 +183,6 @@ def setup(
             exit(0)
     
     config = Config()
-    
-    # Supabase 
-    supabase_url, supabase_key = setup_supabase()
-
-    config.SUPABASE_URL = supabase_url
-    config.SUPABASE_KEY = supabase_key
 
     # Database related questions
     database_uri, database_name, username, password, host, port = setup_database() 
@@ -286,6 +265,10 @@ def serve(
     logger.configure(handlers=[{"sink": sys.stdout}])
     logger.add(config.LOGS_PATH, rotation="10 MB")
     
+    INTERCEPT_HANDLER = InterceptHandler()
+    logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
+    logging.root.handlers = [INTERCEPT_HANDLER]
+
     if platform.system() == "Windows":
         logger.info("Starting server with uvicorn (Windows-compatible).")
 
@@ -300,10 +283,6 @@ def serve(
         asyncio.run(run())
     else:
         logger.info("Starting server with guvicorn (Unix-compatible).")
-
-        INTERCEPT_HANDLER = InterceptHandler()
-        logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
-        logging.root.handlers = [INTERCEPT_HANDLER]
         
         StubbedGunicornLogger.log_level = log_level_str
 
