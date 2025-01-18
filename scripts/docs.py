@@ -1,9 +1,7 @@
 #!/usr/bin/python
 
-import os
 import sys
 import typer
-import platform
 import subprocess
 
 from pathlib import Path
