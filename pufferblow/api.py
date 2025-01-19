@@ -291,27 +291,6 @@ async def reset_users_auth_token_route(
         new_auth_token_expire_time=new_auth_token_expire_time
     )
 
-    # salt = api_initializer.hasher.encrypt_with_bcrypt(
-    #     user_id=user_id,
-    #     data=new_auth_token
-    # )
-
-    # hashed_auth_token = salt.hashed_data
-    # new_auth_token_expire_time = api_initializer.auth_token_manager.create_auth_token_expire_time()
-
-    # api_initializer.database_handler.update_salt(
-    #     user_id=user_id,
-    #     associated_to="auth_token",
-    #     new_salt_value=salt.salt_value,
-    #     new_hashed_data=hashed_auth_token
-    # )
-
-    # api_initializer.database_handler.update_auth_token(
-    #     user_id=user_id,
-    #     new_auth_token=hashed_auth_token,
-    #     new_auth_token_expire_time=new_auth_token_expire_time
-    # )
-
     return {
         "status_code": 200,
         "message": "auth_token rested successfully",
