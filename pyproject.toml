@@ -31,7 +31,7 @@ sphinx-favicon = "^1.0.1"
 myst-parser = "^4.0.0"
 sqlalchemy-utils = "^0.41.2"
 orjson = "^3.10.15"
-basedpyright = "^1.24.0"
+basedpyright = "^1.26.0"
 pymemcache = "^4.0.0"
 cryptography = "^44.0.0"
 
