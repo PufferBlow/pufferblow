@@ -20,7 +20,7 @@ from pufferblow.src.logger.msgs import (
     warnings
 )
 
-# TODO: add a mecanisame to detect hand crafted parametars that are associated with a SQL injection attack,
+# TODO: add a mecanisame to detect hand crafted parameters that are associated with a SQL injection attack,
 # and block the client ip
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
