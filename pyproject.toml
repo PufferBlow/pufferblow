@@ -34,19 +34,20 @@ orjson = "^3.10.13"
 basedpyright = "^1.23.2"
 pymemcache = "^4.0.0"
 cryptography = "^44.0.0"
+textual = "^2.1.1"
+textual-dev = "^1.7.0"
+bcrypt = "^4.3.0"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.3"
 gunicorn = "^23.0.0"
 
 [tool.poetry.plugins."console_scripts"]
-pufferblow = "pufferblow:cli.run"
+pufferblow = "pufferblow:run"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-include = ["*.toml"]
 
 [tool.pyprojectx]
 main = ["pdm==2.12.4"]  # installs pdm to your project instead of globally
