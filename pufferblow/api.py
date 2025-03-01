@@ -111,6 +111,48 @@ async def signup_new_user(
         "auth_token_expire_time": user_data.auth_token_expire_time
     }
 
+@api.get("/api/v1/users/signin", status_code=200)
+async def signin_user(
+    username: str,
+    password: str
+    ):
+    """
+    Signin to an account route.
+    
+    Args:
+        username (str): The account's username.
+        password (str): The account's password.
+    
+    Returns:
+        200 OK: If the `username` and `password` are correct, and the user got signed in.
+        401 UNAUTHORIZED: If the `password` is unvalid.
+        404 NOT FOUND: If the `username` is unvalid.
+    """
+    if not api_initializer.user_manager.check_username(
+        username=username
+    ):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail="The provided username does not exist or could not be found. Please make sure you have entered a valid username and try again."
+        )
+    
+    user, is_signin_successed = api_initializer.user_manager.sign_in(
+        username=username,
+        password=password
+    )
+    
+    if not is_signin_successed:
+        raise exceptions.HTTPException(
+            status_code=401,
+            detail="The provided password is incorrect. Please try again."
+        )
+    
+    return {
+        "status_code": 200,
+        "message": "Signin successfully",
+        "auth_token": user.auth_token
+    }
+
 @api.get("/api/v1/users/profile", status_code=200)
 async def users_profile_route(
     user_id: str,
@@ -290,27 +332,6 @@ async def reset_users_auth_token_route(
         new_auth_token=ciphered_auth_token,
         new_auth_token_expire_time=new_auth_token_expire_time
     )
-
-    # salt = api_initializer.hasher.encrypt_with_bcrypt(
-    #     user_id=user_id,
-    #     data=new_auth_token
-    # )
-
-    # hashed_auth_token = salt.hashed_data
-    # new_auth_token_expire_time = api_initializer.auth_token_manager.create_auth_token_expire_time()
-
-    # api_initializer.database_handler.update_salt(
-    #     user_id=user_id,
-    #     associated_to="auth_token",
-    #     new_salt_value=salt.salt_value,
-    #     new_hashed_data=hashed_auth_token
-    # )
-
-    # api_initializer.database_handler.update_auth_token(
-    #     user_id=user_id,
-    #     new_auth_token=hashed_auth_token,
-    #     new_auth_token_expire_time=new_auth_token_expire_time
-    # )
 
     return {
         "status_code": 200,

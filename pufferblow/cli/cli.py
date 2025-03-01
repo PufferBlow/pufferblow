@@ -1,6 +1,5 @@
 import sys
 import typer
-import platform
 
 from rich import print
 from loguru import logger
@@ -17,6 +16,8 @@ from pufferblow.src.logger.logger import (
     StubbedGunicornLogger,
     WORKERS
 )
+# Control panel
+from pufferblow.cli.control_panel import ControlPanel
 
 # Base
 from pufferblow.src.database.tables.declarative_base import Base
@@ -231,7 +232,9 @@ def serve(
         port=config.DATABASE_PORT,
         database_name=config.DATABASE_NAME,
     )
-
+    
+    logger.debug("Checking the database existence...")
+    
     if not Database.check_database_existense(
         database_uri=database_uri
     ):
@@ -239,13 +242,19 @@ def serve(
         exit(1)
 
     # Load shared objects
+    logger.debug("Loading objects...")
     api_initializer.load_objects()
 
     # Setup tables
+    logger.debug("Setting up the tables (if neccessary)...")
     api_initializer.database_handler.setup_tables(Base)
 
     log_level_str = LOG_LEVEL_MAP[log_level]
-
+     
+    INTERCEPT_HANDLER = InterceptHandler()
+    logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
+    logging.root.handlers = [INTERCEPT_HANDLER]
+    
     logging.root.setLevel(log_level_str)
 
     SEEN = set()
@@ -261,44 +270,37 @@ def serve(
     ]:
         if name not in SEEN:
             SEEN.add(name.split(".")[0])
+            logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
     logger.configure(handlers=[{"sink": sys.stdout}])
     logger.add(config.LOGS_PATH, rotation="10 MB")
     
-    INTERCEPT_HANDLER = InterceptHandler()
-    logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
-    logging.root.handlers = [INTERCEPT_HANDLER]
+    StubbedGunicornLogger.log_level = log_level_str
 
-    if platform.system() == "Windows":
-        logger.info("Starting server with uvicorn (Windows-compatible).")
+    OPTIONS = {
+        "bind": f"{config.API_HOST}:{config.API_PORT}",
+        "workers": WORKERS(config.WORKERS),
+        "timeout": 86400, # 24 hours
+        "keepalive": 86400, # 24 hours
+        "accesslog": "-",
+        "errorlog": "-",
+        "worker_class": "uvicorn.workers.UvicornWorker",
+        "logger_class": StubbedGunicornLogger
+    }
 
-        import uvicorn
-        import asyncio
-
-        async def run():
-            u_config = uvicorn.Config(api, host=config.API_HOST, port=config.API_PORT)
-            server = uvicorn.Server(u_config)
-            await server.serve()
+    StandaloneApplication(api, OPTIONS).run()
         
-        asyncio.run(run())
-    else:
-        logger.info("Starting server with guvicorn (Unix-compatible).")
-        
-        StubbedGunicornLogger.log_level = log_level_str
+@cli.command()
+def panel(
+    username: str | None = typer.Option(None, help="The server owner's or the admin's account username."),
+    password: str | None = typer.Option(None, help="The account's password.")
+):
+    """
+    Control panel for the server owner and admins.
+    """
+    control_panel = ControlPanel()
+    control_panel.run()
 
-        OPTIONS = {
-            "bind": f"{config.API_HOST}:{config.API_PORT}",
-            "workers": WORKERS(config.WORKERS),
-            "timeout": 86400, # 24 hours
-            "keepalive": 86400, # 24 hours
-            "accesslog": "-",
-            "errorlog": "-",
-            "worker_class": "uvicorn.workers.UvicornWorker",
-            "logger_class": StubbedGunicornLogger
-        }
-
-        StandaloneApplication(api, OPTIONS).run()
-        
 def run() -> None:
     constants.banner()
     

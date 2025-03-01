@@ -56,9 +56,9 @@ def DEBUG_VALIDATE_AUTH_TOKEN(hashed_auth_token, is_valid) -> str:
     return msg
     
 def DEBUG_FETCH_USERS_ID(users_id) -> str:
-    msg = f"Fetched user IDs. User IDs: '{users_id}'."
+    msg = f"Fetched user IDs. User IDs: {users_id}."
     return msg
     
 def DEBUG_FETCH_USERNAMES(usernames) -> str:
-    msg = f"Fetched usernames. Usernames: '{usernames}'."
+    msg = f"Fetched usernames. Usernames: {usernames}."
     return msg

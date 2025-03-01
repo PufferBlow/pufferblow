@@ -56,12 +56,7 @@ class UserManager (object):
         auth_token_expire_time  =   self.auth_token_manager.create_auth_token_expire_time()
 
         new_user.user_id                                =       user_id
-        new_user.username                               =       self._encrypt_data(
-            user_id=new_user.user_id,
-            data=username,
-            associated_to="username",
-            algo_type="AES"
-        )
+        new_user.username                               =       username
         new_user.password                               =       self._encrypt_data(
             user_id=new_user.user_id,
             data=password,
@@ -92,6 +87,38 @@ class UserManager (object):
         
         return new_user
 
+    def sign_in(self, username: str, password: str) -> User:
+        """
+        Sign in a user
+        
+        Args:
+            username (str): The account's username.
+            password (str): The account's password.
+        
+        Returns:
+            User: A User object.
+        """
+        user = self.database_handler.get_user(
+            username=username
+        )
+        
+        user.auth_token = self._decrypt_data(
+            user_id=user.user_id,
+            data=user.auth_token,
+            associated_to="auth_token"
+        )
+        
+        user_password = self._decrypt_data(
+            user_id=user.user_id,
+            data=user.password,
+            associated_to="password"
+        )
+        
+        if password == user_password:
+            return (user, True)
+        
+        return (None, False)
+    
     def list_users(self, viewer_user_id: str, auth_token: str) -> list:
         """
         Fetch a list of metadata about all the existing
@@ -141,18 +168,19 @@ class UserManager (object):
         Returns:
             dict: The user's profile metadata in a dict format.
         """
-        user_data = self.database_handler.fetch_user_data(
+        user_data = self.database_handler.get_user(
             user_id=user_id,
         )
 
         user = User()
 
         user.user_id = user_data.user_id
-        user.username = self._decrypt_data(
-            user_id=user.user_id,
-            data=user_data.username,
-            associated_to="username"
-        )
+        # user.username = self._decrypt_data(
+        #     user_id=user.user_id,
+        #     data=user_data.username,
+        #     associated_to="username"
+        # )
+        user.username = user_data.username
         user.status         =    user_data.status
         user.last_seen      =    user_data.last_seen
         user.created_at     =    user_data.created_at
@@ -183,9 +211,9 @@ class UserManager (object):
         
         return user_data
     
-    def check_user(self, user_id: str, auth_token: str | None=None) -> bool:
+    def check_user(self, user_id: str | None = None, username: str | None = None, auth_token: str | None=None) -> bool:
         """
-        Check if the user exists or not
+        Check if the user exists or not based on their user_id, username or auth_token
         
         Args:
             `user_id` (str): The user's `user_id`.
@@ -194,10 +222,15 @@ class UserManager (object):
         Returns:
             bool: True is the user exists, otherswise False.
         """
-        users_id = self.database_handler.get_users_id()
+        if user_id is not None:
+            users_id = self.database_handler.get_users_id()
 
-        if user_id not in users_id:
-            return False
+            return user_id in users_id
+        
+        if username is not None:
+            usernames = self.database_handler.get_usernames()
+            
+            return username in usernames
         
         if auth_token is not None:
             is_users_auth_token = self.auth_token_manager.check_users_auth_token(
@@ -219,7 +252,7 @@ class UserManager (object):
         Returns:
             bool: True if the user is the server owner, otherwise False
         """
-        user_data = self.database_handler.fetch_user_data(
+        user_data = self.database_handler.get_user(
             user_id=user_id
         )
 
@@ -235,7 +268,7 @@ class UserManager (object):
         Returns:
             bool: True if the user is an admin, otherwise False.
         """
-        user_data = self.database_handler.fetch_user_data(
+        user_data = self.database_handler.get_user(
             user_id=user_id
         )
 
@@ -269,7 +302,7 @@ class UserManager (object):
         Returns:
             bool: True if the given `password` matches the user's saved hashed `password`, otherwise False.
         """
-        user_data = self.database_handler.fetch_user_data(
+        user_data = self.database_handler.get_user(
             user_id=user_id
         )
         ciphered_user_password = user_data.password
@@ -296,44 +329,26 @@ class UserManager (object):
         Returns:
             `None`.
         """
-        user_data = self.database_handler.fetch_user_data(
+        user_data = self.database_handler.get_user(
             user_id=user_id,
         )
-        ciphered_old_username = user_data.username
-
-        raw_old_username = self._decrypt_data(
-            user_id=user_id,
-            associated_to="username",
-            data=ciphered_old_username
-        )
+        old_username = user_data.username
+        if new_username == old_username:
+            return
         
-        encrypted_new_username, key =  self.hasher.encrypt(
-            data=new_username
-        )
-
-        encrypted_new_username = base64.b64encode(encrypted_new_username).decode("ascii")
-
-        key.user_id = user_id
-        key.associated_to = "username"
-
         # Update the username
         self.database_handler.update_username(
             user_id=user_id,
-            new_username=encrypted_new_username
+            new_username=new_username
         )
-
-        # Update the encryption key info in the database
-        self.database_handler.update_key(
-            key=key
-        )
-
         logger.info(
             info.INFO_UPDATE_USERNAME(
                 user_id=user_id,
-                old_username=raw_old_username,
+                old_username=old_username,
                 new_username=new_username
             )
         )
+    
     def update_user_status(self, user_id: str, status: str) -> None:
         """
         Update the user's `status`
@@ -344,7 +359,7 @@ class UserManager (object):
         Returns:
             `None`.
         """
-        user_data = self.database_handler.fetch_user_data(
+        user_data = self.database_handler.get_user(
             user_id=user_id
         )
         # users_status = user_data.status
