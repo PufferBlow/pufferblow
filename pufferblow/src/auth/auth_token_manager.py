@@ -197,7 +197,7 @@ class AuthTokenManager (object):
         Returns:
             bool: True if the `auth_token` belongs to this `user_id`, otherwise False.
         """
-        user_data = self.database_handler.fetch_user_data(
+        user_data = self.database_handler.get_user(
             user_id=user_id
         )
 

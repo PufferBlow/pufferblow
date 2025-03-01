@@ -95,13 +95,14 @@ class DatabaseHandler (object):
             auth_token=auth_token
         )
 
-    def fetch_user_data(self, user_id: str) -> Users:
+    def get_user(self, user_id: str | None = None, username: str | None = None) -> Users:
         """ 
-        Fetch metadata about the given `user_id`
-        from the database
+        Fetch metadata about a user based on
+        the user_id or the username from the database
 
         Args:
-            `user_id` (str): The user's `user_id`.
+            user_id (str, optional): The user's `user_id`.
+            username (str, optional): The user's username.
         
         Returns:
             Users: A `Users` table object.
@@ -110,14 +111,8 @@ class DatabaseHandler (object):
 
         with self.database_session() as session:
             stmt = select(Users).where(
-                Users.user_id == user_id
+                Users.user_id == user_id if user_id is not None else Users.username == username
             )
-
-            # NOTE: The returned data is a tuple containing a `Users` table object.
-            # To access the `user` object correctly, we specify its position as `0`,
-            # ensuring that we can access all the columns without errors.
-            # If we don't specify the position, an error will be raised when trying
-            # to access the `auth_token` column.
 
             user = session.execute(stmt).fetchone()[0]
 
@@ -287,31 +282,16 @@ class DatabaseHandler (object):
             `None`.
         
         Returns:
-            list[str]: A list containing all the decrypted `username`s in the database.
+            list[str]: A list containing all the usernames in the database.
         """
         usernames = list()
 
         with self.database_session() as session:
-            stmt = select(Users.user_id, Users.username)
+            stmt = select(Users.username)
 
             response = session.execute(stmt).fetchall()
             
-            for i in range(len(response)):
-                user_id = response[i][0]
-                encrypted_username = base64.b64decode(response[i][1])
-
-                key = self.get_keys(
-                    user_id=user_id,
-                    associated_to="username"
-                )
-
-                decrypted_username = self.hasher.decrypt(
-                    ciphertext=encrypted_username,
-                    key=key.key_value,
-                    iv=key.iv
-                )
-
-                usernames.append(decrypted_username)
+            usernames = [response[i][0] for i in range(len(response))]
 
         logger.debug(
             debug.DEBUG_FETCH_USERNAMES(
