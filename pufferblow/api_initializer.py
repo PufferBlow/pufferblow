@@ -1,7 +1,4 @@
-import sys
-
 from loguru import logger
-from sqlalchemy_utils import database_exists
 
 # Encryption/Decryption manager
 from pufferblow.src.hasher.hasher import Hasher
@@ -88,11 +85,8 @@ class APIInitializer(object):
         # Init config
         self.load_config()
 
-        # Init the hasher (Responsible for encrypting and decrypting data)
-        self.hasher = Hasher(
-            derived_key_bytes       =       self.config.DERIVED_KEY_BYTES,
-            derived_key_rounds      =       self.config.DERIVED_KEY_ROUNDS
-        )
+        # Init the hasher
+        self.hasher = Hasher()
 
         # Init Database
         self.load_database(database_uri=database_uri) 

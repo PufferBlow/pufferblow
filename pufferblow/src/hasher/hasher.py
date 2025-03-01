@@ -23,9 +23,8 @@ class Hasher(object):
     """
     PADDING: int = 128
 
-    def __init__(self, derived_key_bytes: int, derived_key_rounds: int) -> None:
-        self.derived_key_bytes      =     derived_key_bytes
-        self.derived_key_rounds     =     derived_key_rounds
+    def __init__(self) -> None:
+        pass
     
     def encrypt(self, data: str, is_to_check: bool | None = False, key: bytes | None=None) -> tuple[str, EncryptionKey] | str:
         """
