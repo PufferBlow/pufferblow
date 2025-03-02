@@ -7,42 +7,43 @@ from rich.prompt import Prompt, Confirm
 from rich.console import Console
 
 from pufferblow import constants
-from pufferblow.api import api
+from pufferblow.api.api import api
 
-from pufferblow.src.logger.logger import (
+from pufferblow.api.logger.logger import (
     InterceptHandler,
     logging,
     StandaloneApplication,
     StubbedGunicornLogger,
     WORKERS
 )
+
 # Control panel
 from pufferblow.cli.control_panel import ControlPanel
 
 # Base
-from pufferblow.src.database.tables.declarative_base import Base
+from pufferblow.api.database.tables.declarative_base import Base
 
 from pufferblow.api_initializer import api_initializer
 
 # Log messages
-from pufferblow.src.logger.msgs import (
+from pufferblow.api.logger.msgs import (
     errors
 )
-from pufferblow.src.logger.levels import (
+from pufferblow.api.logger.levels import (
     LOG_LEVEL_MAP
 )
 
 # Utils
-from pufferblow.src.utils.prompt import ask_prompt
+from pufferblow.api.utils.prompt import ask_prompt
 
 # Config handler
-from pufferblow.src.config.config_handler import ConfigHandler
+from pufferblow.api.config.config_handler import ConfigHandler
 
 # Models
-from pufferblow.src.models.config_model import Config 
+from pufferblow.api.models.config_model import Config 
 
 # Database
-from pufferblow.src.database.database import Database
+from pufferblow.api.database.database import Database
 
 # Init cli
 cli = typer.Typer()
@@ -289,15 +290,21 @@ def serve(
     }
 
     StandaloneApplication(api, OPTIONS).run()
-        
+
 @cli.command()
 def panel(
     username: str | None = typer.Option(None, help="The server owner's or the admin's account username."),
-    password: str | None = typer.Option(None, help="The account's password.")
+    password: str | None = typer.Option(None, help="The account's password."),
+    host: str | None = typer.Option(config.API_HOST, help="The server's host."),
+    port: str | None = typer.Option(config.API_PORT, help="The server's port.")
 ):
     """
     Control panel for the server owner and admins.
     """
+    logger.info("Checking if the account is the server owner's account...")
+    
+    # NOTE: We need to make a lib that can talk with the API.
+    
     control_panel = ControlPanel()
     control_panel.run()
 

@@ -24,8 +24,10 @@ BANNER = f"""
 
 def banner() -> None: print(BANNER)
 
+CURRENT_PLATFORM = platform.system()
+
 # The $HOME path
-if platform.system() == "Windows":
+if CURRENT_PLATFORM == "Windows":
     HOME = os.environ["USERPROFILE"]
     SLASH = "\\"
 else:

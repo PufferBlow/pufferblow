@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from pufferblow.api import api
+from pufferblow.api.api import api
 from pufferblow.tests.conftest import ValueStorage
 
 route =  "/api/v1/users/profile"

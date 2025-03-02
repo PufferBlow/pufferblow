@@ -1,41 +1,41 @@
 from loguru import logger
 
 # Encryption/Decryption manager
-from pufferblow.src.hasher.hasher import Hasher
+from pufferblow.api.hasher.hasher import Hasher
 
 # Config handler
-from pufferblow.src.config.config_handler import ConfigHandler
+from pufferblow.api.config.config_handler import ConfigHandler
 
 # Users manager
-from pufferblow.src.user.user_manager import UserManager
+from pufferblow.api.user.user_manager import UserManager
 
 # Authentification token manager
-from pufferblow.src.auth.auth_token_manager import AuthTokenManager
+from pufferblow.api.auth.auth_token_manager import AuthTokenManager
 
 # Database
-from pufferblow.src.database.database import Database
-from pufferblow.src.database.database_handler import DatabaseHandler
+from pufferblow.api.database.database import Database
+from pufferblow.api.database.database_handler import DatabaseHandler
 
 # Server manager
-from pufferblow.src.server.server_manager import ServerManager
+from pufferblow.api.server.server_manager import ServerManager
 
 # Channels manager
-from pufferblow.src.channels.channels_manager import ChannelsManager
+from pufferblow.api.channels.channels_manager import ChannelsManager
 
 # Messages manager
-from pufferblow.src.messages.messages_manager import MessagesManager
+from pufferblow.api.messages.messages_manager import MessagesManager
 
 # WebSockets manager
-from pufferblow.src.websocket.websocket_manager import WebSocketsManager
+from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
 # SecurityChecks handler
-from pufferblow.src.security.security_checks_handler import SecurityChecksHandler
+from pufferblow.api.security.security_checks_handler import SecurityChecksHandler
 
 # Models
-from pufferblow.src.models.config_model import Config 
+from pufferblow.api.models.config_model import Config 
 
 # Log messages
-from pufferblow.src.logger.msgs import (
+from pufferblow.api.logger.msgs import (
     errors    
 )
 

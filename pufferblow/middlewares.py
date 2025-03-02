@@ -12,10 +12,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from pufferblow.api_initializer import api_initializer
 
 # Models
-from pufferblow.src.models.blocked_ip_model import BlockedIP
+from pufferblow.api.models.blocked_ip_model import BlockedIP
 
 # Log messages
-from pufferblow.src.logger.msgs import (
+from pufferblow.api.logger.msgs import (
     info,
     warnings
 )
