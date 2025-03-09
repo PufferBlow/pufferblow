@@ -11,11 +11,7 @@ rate_limit_duration = 5 # the duration of a rate limit of an IP address (in minu
 max_rate_limit_requests = 6000 # number of request before a rate limit warning
 max_rate_limit_warnings = 15 # number of rate limit warnings before blocking the IP address
 
-[supabase]
-supabase_url = "<your supabase url>"
-supabase_key = "<your supabase key>"
-
-[supabase.postregsql]
+[postregsql]
 database_name = "<your database name>"
 username = "<your username>"
 password = "<your password>"

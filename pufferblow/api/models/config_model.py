@@ -51,11 +51,11 @@ class Config:
         self.MAX_RATE_LIMIT_WARNINGS    =   config["api"]["max_rate_limit_warnings"]
     
         # PostgeSQL Database
-        self.DATABASE_NAME        =   config["supabase"]["postregsql"]["database_name"]
-        self.USERNAME             =   config["supabase"]["postregsql"]["username"]
-        self.DATABASE_PASSWORD    =   config["supabase"]["postregsql"]["password"]
-        self.DATABASE_HOST        =   config["supabase"]["postregsql"]["host"]
-        self.DATABASE_PORT        =   config["supabase"]["postregsql"]["port"]   
+        self.DATABASE_NAME        =   config["postregsql"]["database_name"]
+        self.USERNAME             =   config["postregsql"]["username"]
+        self.DATABASE_PASSWORD    =   config["postregsql"]["password"]
+        self.DATABASE_HOST        =   config["postregsql"]["host"]
+        self.DATABASE_PORT        =   config["postregsql"]["port"]   
 
         # Encryption
         self.DERIVED_KEY_BYTES     =   config["encryption"]["derived_key_bytes"]
@@ -89,7 +89,7 @@ rate_limit_duration = {self.RATE_LIMIT_DURATION} # the duration of a rate limit 
 max_rate_limit_requests = {self.MAX_RATE_LIMIT_REQUESTS} # number of request before a rate limit warning
 max_rate_limit_warnings = {self.MAX_RATE_LIMIT_WARNINGS} # number of rate limit warnings before blocking the IP address
 
-[supabase.postregsql]
+[postregsql]
 database_name = "{self.DATABASE_NAME}"
 username = "{self.USERNAME}"
 password = "{self.DATABASE_PASSWORD}"
