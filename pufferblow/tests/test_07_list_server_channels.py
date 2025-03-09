@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from pufferblow.api.api import api
 from pufferblow.tests.conftest import ValueStorage
 
-route = "/api/v1/channel/list/"
+route = "/api/v1/channels/list/"
 
 def test_list_server_channels(client: TestClient):
     """ Test the list channels route """

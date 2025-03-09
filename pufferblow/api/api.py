@@ -368,7 +368,7 @@ async def list_users_route(
     }
 
 # Server's Channels routes
-@api.get("/api/v1/channel", status_code=200)
+@api.get("/api/v1/channels", status_code=200)
 def channels_route():
     """ Channels routes """
     return {
@@ -376,7 +376,7 @@ def channels_route():
         "message": "Channels route"
     }
 
-@api.get("/api/v1/channel/list/", status_code=200)
+@api.get("/api/v1/channels/list/", status_code=200)
 async def list_channels_route(
     auth_token: str
     ):
@@ -405,7 +405,7 @@ async def list_channels_route(
         "channels": channels_list
     }
 
-@api.post("/api/v1/channel/create/", status_code=200)
+@api.post("/api/v1/channels/create/", status_code=200)
 async def create_new_channel_route(
     auth_token: str,
     channel_name: str,
@@ -460,7 +460,7 @@ async def create_new_channel_route(
         "channel_data": channel_data.to_dict()
     }
 
-@api.delete("/api/v1/channel/{channel_id}/delete")
+@api.delete("/api/v1/channels/{channel_id}/delete")
 async def delete_channel_route(
     auth_token: str,
     channel_id: str
@@ -506,7 +506,7 @@ async def delete_channel_route(
         "message": f"Channel: '{channel_id}' deleted successfully"
     }
 
-@api.put("/api/v1/channel/{channel_id}/addUser", status_code=200)
+@api.put("/api/v1/channels/{channel_id}/add_user", status_code=200)
 async def add_user_to_private_channel_route(
     auth_token: str,
     channel_id: str,
@@ -595,7 +595,7 @@ async def add_user_to_private_channel_route(
         "message": f"User ID: '{to_add_user_id}' added to Channel ID: '{channel_id}'"
     }
 
-@api.delete("/api/v1/channel/{channel_id}/removeUser", status_code=200)
+@api.delete("/api/v1/channels/{channel_id}/remove_user", status_code=200)
 async def remove_user_from_channel_route(
     auth_token: str,
     channel_id: str,
@@ -693,7 +693,7 @@ async def remove_user_from_channel_route(
         "message": f"User ID: '{to_remove_user_id}' was successfully removed from Channel ID: '{channel_id}'"
     }
 
-@api.get("/api/v1/channel/{channel_id}/load_messages", status_code=200)
+@api.get("/api/v1/channels/{channel_id}/load_messages", status_code=200)
 async def channel_load_messages(
     auth_token: str,
     channel_id: str,
@@ -749,7 +749,7 @@ async def channel_load_messages(
         "data": messages
     }
 
-@api.post("/api/v1/channel/{channel_id}/send_message")
+@api.post("/api/v1/channels/{channel_id}/send_message")
 async def channel_send_message(
     auth_token: str,
     channel_id: str,
@@ -801,7 +801,7 @@ async def channel_send_message(
         "message": "message sent succesfully"
     }
 
-@api.put("/api/v1/channel/{channel_id}/mark_message_as_read")
+@api.put("/api/v1/channels/{channel_id}/mark_message_as_read")
 async def channel_mark_message_as_read(
     auth_token: str,
     channel_id: str,
@@ -833,7 +833,7 @@ async def channel_mark_message_as_read(
         "message": "The `message_id` was successfully mark as read"
     }
 
-@api.delete("/api/v1/channel/{channel_id}/delete_message")
+@api.delete("/api/v1/channels/{channel_id}/delete_message")
 async def channel_delete_message(
     auth_token: str,
     channel_id: str,
@@ -889,7 +889,7 @@ async def channel_delete_message(
     }
 
 # Websockets used for real-time messaging server's channels
-@api.websocket("/ws/channel/{channel_id}")
+@api.websocket("/ws/channels/{channel_id}")
 async def channels_messages_websocket(websocket: WebSocket, auth_token: str, channel_id: str):
     """
     WebSocket endpoint handles the exchange of messages within channels.
