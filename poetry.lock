@@ -263,14 +263,14 @@ dev = ["backports.zoneinfo ; python_version < \"3.9\"", "freezegun (>=1.0,<2.0)"
 
 [[package]]
 name = "basedpyright"
-version = "1.28.5"
+version = "1.29.1"
 description = "static type checking for Python (but based)"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "basedpyright-1.28.5-py3-none-any.whl", hash = "sha256:33dab5a88832c17dbce6207e2c9df244c227ad0bf71d7e38d8728a227244e980"},
-    {file = "basedpyright-1.28.5.tar.gz", hash = "sha256:f2f13d1158c77edffe827b0a8366a8d6ec8c3a69aa9f4c938ec8fe6026d1e309"},
+    {file = "basedpyright-1.29.1-py3-none-any.whl", hash = "sha256:b7eb65b9d4aaeeea29a349ac494252032a75a364942d0ac466d7f07ddeacc786"},
+    {file = "basedpyright-1.29.1.tar.gz", hash = "sha256:06bbe6c3b50ab4af20f80e154049477a50d8b81d2522eadbc9f472f2f92cd44b"},
 ]
 
 [package.dependencies]
@@ -2964,4 +2964,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "5e2a1e17d5e432e37d84a370fa0a95401651d5b3f91685238aa1c822e767c0b0"
+content-hash = "5eb5de2c41f3a8c4b8e97f6e399f42ae51159ba775f579ebc03c8f8e86971994"
