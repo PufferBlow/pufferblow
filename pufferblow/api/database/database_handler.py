@@ -29,13 +29,16 @@ from pufferblow.api.utils.current_date import date_in_gmt
 # Tables
 from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.database.tables.keys import Keys
+from pufferblow.api.database.tables.roles import Roles
 from pufferblow.api.database.tables.users import Users
 from pufferblow.api.database.tables.server import Server
 from pufferblow.api.database.tables.channels import Channels
 from pufferblow.api.database.tables.messages import Messages
+from pufferblow.api.database.tables.privileges import Privileges
 from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 from pufferblow.api.database.tables.auth_tokens import AuthTokens
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
+
 # Log messages
 from pufferblow.api.logger.msgs import (
     info,
@@ -956,14 +959,14 @@ class DatabaseHandler (object):
             bool: True if the ip address is already blocked, otherwise False.
         """
         is_blocked: bool = False
-
+        """
         with self.database_session() as session:
             stmt = select(BlockedIPS).where(BlockedIPS.ip == ip)
             response = session.execute(stmt).fetchall()
 
             if len(response) != 0:
                 is_blocked = True
-        
+        """
         return is_blocked
 
     def delete_blocked_ip(self, blocked_ip: BlockedIP | None = None, ip: str | None = None) -> None:

@@ -70,16 +70,12 @@ class UserManager (object):
             associated_to="auth_token",
             algo_type="AES"
         )
+        new_user.origin_server                          =       f"{self.config.API_HOST}:{self.config.API_PORT}"
         new_user.auth_token_expire_time                 =       auth_token_expire_time
         new_user.status                                 =       "online"
-        new_user.contacts                               =       []
-        new_user.conversations                          =       []
         new_user.joined_servers_ids                     =       [self.database_handler.get_server_id(), ]
-        new_user.is_admin                               =       is_admin
-        new_user.is_owner                               =       is_owner
-        new_user.created_at                             =       datetime.date.today().strftime("%Y-%m-%d")
+        new_user.created_at                             =       datetime.date.today().strftime("%Y-%m-%d %H:%M:%S")
         new_user.last_seen                              =       datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
-        new_user.updated_at                             =       None
         
         self.database_handler.sign_up(
             user_data=new_user
@@ -174,24 +170,21 @@ class UserManager (object):
 
         user = User()
 
-        user.user_id = user_data.user_id
-        # user.username = self._decrypt_data(
-        #     user_id=user.user_id,
-        #     data=user_data.username,
-        #     associated_to="username"
-        # )
-        user.username = user_data.username
+        user.user_id        =    user_data.user_id
+        user.username       =    user_data.username
         user.status         =    user_data.status
+        user.avatar_url     =    user_data.avatar_url
+        user.banner_url     =    user_data.banner_url
         user.last_seen      =    user_data.last_seen
         user.created_at     =    user_data.created_at
-        user.is_admin       =    user_data.is_admin
-        user.is_owner       =    user_data.is_owner
-        
+        user.about          =    user_data.about
+        user.origin_server  =    user_data.origin_server
+        user.roles_ids      =    user_data.roles_ids
+
         # Check if the user owns the account
         if is_account_owner:
+            user.inbox_id                   =       user_data.inbox_id
             user.auth_token_expire_time     =       user_data.auth_token_expire_time
-            user.conversations              =       user_data.conversations
-            user.contacts                   =       user_data.contacts
             user.updated_at                 =       user_data.updated_at
         
         user_data = user.to_dict()
@@ -259,8 +252,8 @@ class UserManager (object):
             username=username
         )
 
-        return user_data.is_owner
-    
+        return True    
+
     def is_admin(self, user_id: str) -> bool:
         """
         Check if the user is an admin of the server or not
@@ -275,8 +268,7 @@ class UserManager (object):
             user_id=user_id
         )
 
-        return user_data.is_admin
-    
+        return True    
     def check_username(self, username: str) -> bool:
         """
         Check if the `username` already exists or not
@@ -365,7 +357,6 @@ class UserManager (object):
         user_data = self.database_handler.get_user(
             user_id=user_id
         )
-        # users_status = user_data.status
 
         if user_data.status == status:
             logger.info(
@@ -387,6 +378,10 @@ class UserManager (object):
                 to_status=status
             )
         )
+
+    def update_user_about(self, user_id: str, new_about: str) -> None:
+        pass
+
 
     def update_user_password(self, user_id: str, new_password: str) -> None:
         """ 
@@ -515,7 +510,7 @@ class UserManager (object):
         Returns:
             str: The generated `user_id`.
         """
-        username = f"{username}{''.join([char for char in random.choices(string.ascii_letters)])}" # Adding random charachters to the username
+        username = f"{username}{''.join([char for char in random.choices(string.ascii_letters, k=10)])}" # Adding random charachters to the username
 
         hashed_username_salt = hashlib.md5(username.encode()).hexdigest()
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_username_salt)

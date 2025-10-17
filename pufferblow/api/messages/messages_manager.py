@@ -209,7 +209,7 @@ class MessagesManager(object):
         key.message_id       =   message_id
         key.associated_to    =   "message"
 
-        self.database_handler.save(
+        self.database_handler.save_keys(
             key=key
         )
 

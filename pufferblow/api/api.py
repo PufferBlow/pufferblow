@@ -9,6 +9,8 @@ from fastapi import (
     responses,
     exceptions
 )
+from fastapi.middleware.cors import CORSMiddleware
+
 from loguru import logger
 from contextlib import asynccontextmanager
 
@@ -30,6 +32,9 @@ from pufferblow.api.logger.msgs import (
     info
 )
 
+
+# NOTE: Background tasks. https://fastapi.tiangolo.com/tutorial/background-tasks/
+
 @asynccontextmanager
 async def lifespan(api: FastAPI):
     """ API startup handler """
@@ -49,8 +54,22 @@ api = FastAPI(
 # to protect the instace from DDOS attacks and blocked IPs, after that the SecutiryMiddleware,
 # which is related to auth_token checks..., will be the second. With this order we can be assured
 # that blocked IPs can't access the protected api routes. 
+
+allowed_origins = [
+    "http://localhost:5173",  # or whatever port your frontend runs on
+    "http://localhost:3000",    # alternative common ports
+    "http://127.0.0.1:5173",  # if accessing via 127.0.0.1
+    "http://172.19.224.1:5173"  # if accessing via IP with frontend port
+]
 api.add_middleware(SecurityMiddleware)
 api.add_middleware(RateLimitingMiddleware)
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @api.get("/")
 async def redirect_route():
@@ -192,7 +211,8 @@ async def edit_users_profile_route(
     new_username: str | None = None,
     status: str | None = None,
     new_password: str | None = None,
-    old_password: str | None = None
+    old_password: str | None = None,
+    about: str | None = None
 ):
     """
     Update a user's profile metadata such us status,
@@ -256,6 +276,17 @@ async def edit_users_profile_route(
         return {
             "status_code": 200,
             "message": "Password updated successfully"
+        } 
+
+    # Update about
+    if about is not None:
+        api_initializer.user_manager.update_user_about(
+            user_id=user_id,
+            new_about=about
+        )
+        return {
+            "status_code": 200,
+            "message": "About updated successfully"
         }
 
 @api.put("/api/v1/users/profile/reset-auth-token", status_code=200)
@@ -278,7 +309,7 @@ async def reset_users_auth_token_route(
         404 NOT FOUND: The `auth_token` is unvalid, or the `user_id` of the targeted user doesn't exists, or in case the `status` is unvalid.
     """
     user_id = extract_user_id(auth_token=auth_token)
-
+    
     if not api_initializer.user_manager.check_user_password(
         user_id=user_id,
         password=password
@@ -631,7 +662,7 @@ async def remove_user_from_channel_route(
         )
 
         raise exceptions.HTTPException(
-            detail=f"Error removing Admin User ID: '{to_remove_user_id}'. Only the server owner can remove admins from channels",
+            detail=f"Error removing Admin User ID: '{to_remove_user_id}'. The user is an admin",
             status_code=403
         )
 
@@ -746,7 +777,7 @@ async def channel_load_messages(
 
     return {
         "status_code": 200,
-        "data": messages
+        "messages": messages
     }
 
 @api.post("/api/v1/channels/{channel_id}/send_message")

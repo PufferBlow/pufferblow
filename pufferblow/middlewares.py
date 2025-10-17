@@ -194,6 +194,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 case "password":
                     if "/signup" in request_url:
                         continue
+                    exception = api_initializer.security_checks_handler.check_auth_token_format(auth_token=query_params.get("auth_token"))
+                    
+                    if exception is not None:
+                        return exception
+
                     exception = api_initializer.security_checks_handler.check_user_password(
                         auth_token=query_params.get("auth_token"),
                         password=query_params.get("password")

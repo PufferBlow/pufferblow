@@ -17,9 +17,6 @@ from pufferblow.api.logger.logger import (
     WORKERS
 )
 
-# Control panel
-from pufferblow.cli.control_panel import ControlPanel
-
 # Base
 from pufferblow.api.database.tables.declarative_base import Base
 
@@ -290,23 +287,6 @@ def serve(
     }
 
     StandaloneApplication(api, OPTIONS).run()
-
-@cli.command()
-def panel(
-    username: str | None = typer.Option(None, help="The server owner's or the admin's account username."),
-    password: str | None = typer.Option(None, help="The account's password."),
-    host: str | None = typer.Option(config.API_HOST, help="The server's host."),
-    port: str | None = typer.Option(config.API_PORT, help="The server's port.")
-):
-    """
-    Control panel for the server owner and admins.
-    """
-    logger.info("Checking if the account is the server owner's account...")
-    
-    # NOTE: We need to make a lib that can talk with the API.
-    
-    control_panel = ControlPanel()
-    control_panel.run()
 
 def run() -> None:
     constants.banner()

@@ -58,7 +58,7 @@ class AuthTokenManager (object):
         # as for the second half wich the actual auth_token it's length is 41
         if "." not in auth_token:
             return False
-
+        
         user_id = auth_token.split(".")[0]
         auth_token = auth_token.split(".")[1]
 

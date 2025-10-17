@@ -37,7 +37,8 @@ class Database(object):
             pool_size=20,
             max_overflow=10,
             pool_recycle=3600*3, # recycled every three hours
-            pool_timeout=27
+            pool_timeout=27,
+            pool_pre_ping=True   # prevents stale connections
         )
 
         return database_engine
