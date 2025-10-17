@@ -67,3 +67,39 @@ class WebSocketsManager:
         """
         for connection in self.active_connections:
             await connection.send_text(message)
+
+    async def broadcast_to_channel(self, channel_id: str, message: dict) -> None:
+        """
+        Broadcast a message to all connected clients in a specific channel.
+
+        Args:
+            channel_id (str): The channel ID to broadcast to.
+            message (dict): The message dict to send as JSON.
+
+        Returns:
+            None.
+        """
+        for websocket, (auth_token, ws_channel_id) in self.active_connections.items():
+            if ws_channel_id == channel_id:
+                try:
+                    await websocket.send_json(message)
+                except Exception as e:
+                    # Handle disconnected websockets
+                    await self.disconnect(websocket)
+
+    async def send_personal_message(self, websocket: WebSocket, message: dict) -> None:
+        """
+        Send a message to a specific websocket client.
+
+        Args:
+            websocket (WebSocket): The target websocket.
+            message (dict): The message dict to send as JSON.
+
+        Returns:
+            None.
+        """
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            # Handle disconnected websockets
+            await self.disconnect(websocket)

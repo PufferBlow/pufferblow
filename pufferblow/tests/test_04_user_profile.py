@@ -60,3 +60,25 @@ def test_targeted_user_not_found(client: TestClient):
     assert response.json() == {
         "error": f"The target user's user_id='{ValueStorage.moke_user_id}' not found. Please make sure to pass the correct one"
     }
+
+def test_empty_auth_token(client: TestClient):
+    """ Tests pydantic validation for empty auth_token """
+    data = {
+        "user_id": ValueStorage.auth_token.split(".")[0],
+        "auth_token": ""
+    }
+
+    response = client.get(route, params=data)
+
+    assert response.status_code == 422  # Pydantic validation error
+
+def test_empty_user_id(client: TestClient):
+    """ Tests pydantic validation for empty user_id """
+    data = {
+        "user_id": "",
+        "auth_token": ValueStorage.auth_token
+    }
+
+    response = client.get(route, params=data)
+
+    assert response.status_code == 422  # Pydantic validation error

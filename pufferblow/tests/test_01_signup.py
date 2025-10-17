@@ -21,13 +21,12 @@ def test_signup(client: TestClient):
         "password": ValueStorage.password
     }
 
-    response = client.post(route, params=data)
+    response = client.post(route, json=data)
+    response_data = response.json()
 
     assert response.status_code == 201
-    
-    response = response.json()
 
-    ValueStorage.auth_token = response["auth_token"]
+    ValueStorage.auth_token = response_data["auth_token"]
 
 def test_signup_username_duplicate_exception(client: TestClient):
     """ Test the exception that will get raised if the username
@@ -38,9 +37,9 @@ def test_signup_username_duplicate_exception(client: TestClient):
         "password": ValueStorage.password
     }
 
-    response = client.post(route, params=data)
+    response = client.post(route, json=data)
 
     assert response.status_code ==  409
     assert response.json() == {
-        "error": "username already exists. Please change it and try again later",
+        "detail": "username already exists. Please change it and try again later",
     }

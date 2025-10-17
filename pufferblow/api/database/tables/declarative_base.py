@@ -1,8 +1,3 @@
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import declarative_base
 
-class Base(DeclarativeBase):
-    """
-    Global `DeclarativeBase` class which will be used
-    to define tables metadata
-    """
-    pass
+Base = declarative_base()

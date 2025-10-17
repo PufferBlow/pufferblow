@@ -81,4 +81,3 @@ class Database(object):
         database_uri = f"postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}"
 
         return database_uri
-    

@@ -11,8 +11,6 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 # Tables
 from pufferblow.api.database.tables.messages import Messages
 
-# Models
-from pufferblow.api.models.message_model import Message
 from pufferblow.api.user.user_manager import UserManager
 
 class MessagesManager(object):
@@ -55,24 +53,20 @@ class MessagesManager(object):
         messages_metadata: list[tuple] = list()
 
         for message in messages:
-            message_metadata = Message()
-
-            table_metadata: str = None
             if websocket:
-                table_metadata = message[0]
+                message_metadata = message[0]
             else:
-                table_metadata = message
+                message_metadata = message
 
-            message_metadata.load_table_metadata(table_metadata=table_metadata)
-            
             # Decrypt the message
-            message_metadata.raw_message = self.decrypt_message(
+            raw_message = self.decrypt_message(
                 user_id=message_metadata.sender_user_id,
                 message_id=message_metadata.message_id,
                 encrypted_message=base64.b64decode(message_metadata.hashed_message)
             )
 
             json_metadata_format = message_metadata.to_dict()
+            json_metadata_format['raw_message'] = raw_message
 
             # injecting in the `username` of the sender
             sender_user_metadata = self.user_manager.user_profile(
@@ -102,7 +96,7 @@ class MessagesManager(object):
 
         return messages_metadata
 
-    def send_message(self, channel_id: str, user_id: str, message: str) -> None:
+    def send_message(self, channel_id: str, user_id: str, message: str, attachments: list[str] | None = None) -> Messages:
         """
         Send a message to a channel
 
@@ -110,15 +104,16 @@ class MessagesManager(object):
             channel_id (str): The channel's `channel_id`.
             user_id (str): The sender user's `user_id`.
             message (str): The message to send.
+            attachments (list[str], optional): List of attachment URLs.
 
         Returns:
-            None.
+            Messages: The message metadata object.
         """
         message_metadata = Messages()
 
         message_metadata.message_id     =   self._generate_message_id(
             user_id=user_id,
-            message=message[:random.choice([i for i in range(len(message))])]
+            message=message[:random.choice([i for i in range(len(message))])] if message else "attachment"
         )
         message_metadata.channel_id     = channel_id
         message_metadata.sender_user_id = user_id
@@ -127,10 +122,13 @@ class MessagesManager(object):
             user_id=user_id,
             message_id=message_metadata.message_id
         )
+        message_metadata.attachments    = attachments or []
 
         self.database_handler.save_message(
             message=message_metadata
         )
+
+        return message_metadata
     
     def delete_message(self, message_id: str, channel_id: str) -> None:
         """

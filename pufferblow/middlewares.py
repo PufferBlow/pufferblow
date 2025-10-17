@@ -1,4 +1,6 @@
 import re
+import uuid
+import asyncio
 
 from loguru import logger
 from datetime import (
@@ -9,10 +11,12 @@ from datetime import (
 from fastapi.responses import ORJSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from pydantic import BaseModel, Field, ValidationError
+
 from pufferblow.api_initializer import api_initializer
 
-# Models
-from pufferblow.api.models.blocked_ip_model import BlockedIP
+# Tables
+from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 
 # Log messages
 from pufferblow.api.logger.msgs import (
@@ -20,106 +24,155 @@ from pufferblow.api.logger.msgs import (
     warnings
 )
 
+# Pydantic models for query parameters validation in middleware
+class AuthTokenQuery(BaseModel):
+    auth_token: str = Field(min_length=1)
+
+class SigninQuery(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+class UserProfileQuery(BaseModel):
+    user_id: str = Field(min_length=1)
+    auth_token: str = Field(min_length=1)
+
+class EditProfileQuery(BaseModel):
+    auth_token: str = Field(min_length=1)
+    new_username: str | None = None
+    status: str | None = None
+    new_password: str | None = None
+    old_password: str | None = None
+    about: str | None = None
+
+class ChannelOperationsQuery(BaseModel):
+    auth_token: str = Field(min_length=1)
+    target_user_id: str = Field(min_length=1)
+
+class CreateChannelQuery(BaseModel):
+    auth_token: str = Field(min_length=1)
+    channel_name: str = Field(min_length=1)
+    is_private: bool = False
+
+class LoadMessagesQuery(BaseModel):
+    auth_token: str = Field(min_length=1)
+    page: int = Field(default=1, ge=1)
+    messages_per_page: int = Field(default=20, ge=1, le=50)
+
+class SendMessageQuery(BaseModel):
+    auth_token: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+
+class MessageOperationsQuery(BaseModel):
+    auth_token: str = Field(min_length=1)
+    message_id: str = Field(min_length=1)
+
 # TODO: add a mecanisame to detect hand crafted parameters that are associated with a SQL injection attack,
 # and block the client ip
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
     """
-    Basic rate limiting middleware
+    Basic rate limiting middleware with thread-safe operations
     """
-    RATE_LIMIT_DURATION: datetime
-    MAX_RATE_LIMIT_REQUESTS: int
-    MAX_REQUEST_LIMIT_WARNINGS: int
-    REQUEST_COUNT_PER_IP: dict = dict()
 
     def __init__(self, app):
         super().__init__(app)
+        self.request_count_per_ip = {}
+        self.rate_limit_lock = asyncio.Lock()
 
-        self.RATE_LIMIT_DURATION = timedelta(minutes=api_initializer.config.RATE_LIMIT_DURATION)
-        self.MAX_RATE_LIMIT_REQUESTS = api_initializer.config.MAX_RATE_LIMIT_REQUESTS
-        self.MAX_REQUEST_LIMIT_WARNINGS = api_initializer.config.MAX_RATE_LIMIT_WARNINGS
-    
     async def dispatch(self, request, call_next):
-        # This statements will get triggered when running
-        # tests, beside that, it will just continue.
+        # Skip rate limiting for test environments
         if request.client is None:
             response = await call_next(request)
-
             return response
 
         # Get the client's IP address
         client_ip = request.client.host
-        
+
         # Check if IP is already blocked
-        if api_initializer.database_handler.check_is_ip_blocked(
-            ip=client_ip
-        ):
+        if api_initializer.database_handler.check_is_ip_blocked(ip=client_ip):
             return ORJSONResponse(
                 status_code=403,
                 content={
-                    "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the serve owner to manually unblock you."
+                    "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
                 }
             )
-        
-        # Check if IP is already present in request_counts
-        request_count, rate_limit_request_warnings, last_request = self.REQUEST_COUNT_PER_IP.get(client_ip, (0, 0,datetime.min))
 
-        # Calculate the time elapsed since the last request
-        elapsed_time = datetime.now() - last_request
-
-        if elapsed_time > self.RATE_LIMIT_DURATION:
-            # If the elapsed time is greater than the rate limit duration, reset the count
-            request_count = 1
-        elif request_count >= self.MAX_RATE_LIMIT_REQUESTS:
-            # If the request count exceeds the rate limit, return a JSON response with an error message
-            logger.warning(
-                warnings.IP_REACHED_RATE_LIMIT(
-                    ip=client_ip,
-                    request_count=request_count,
-                    rate_limit_warnings=rate_limit_request_warnings
-                )
-            )
-            self.REQUEST_COUNT_PER_IP[client_ip] = (request_count, rate_limit_request_warnings + 1, datetime.now())
-
-            return ORJSONResponse(
-                status_code=429,
-                content={"message": "Rate limit exceeded. Please try again later."}
-            )
+        # Get current server settings
+        server_settings = api_initializer.database_handler.get_server_settings()
+        if server_settings is None:
+            # Fallback to config if settings not found
+            rate_limit_duration = timedelta(minutes=api_initializer.config.RATE_LIMIT_DURATION)
+            max_rate_limit_requests = api_initializer.config.MAX_RATE_LIMIT_REQUESTS
+            max_rate_limit_warnings = api_initializer.config.MAX_RATE_LIMIT_WARNINGS
         else:
-            request_count += 1
+            rate_limit_duration = timedelta(minutes=server_settings.rate_limit_duration)
+            max_rate_limit_requests = server_settings.max_rate_limit_requests
+            max_rate_limit_warnings = server_settings.max_rate_limit_warnings
 
-        # Update the request count, request warning cout and last request timestamp for the IP
-        self.REQUEST_COUNT_PER_IP[client_ip] = (request_count, rate_limit_request_warnings, datetime.now())
-        
-        # Block the IP address in case it exceeds the MAX_REQUEST_LIMIT_WARNINGS
-        if rate_limit_request_warnings > self.MAX_REQUEST_LIMIT_WARNINGS:
-            logger.info(
-                info.CLIENT_IP_BLOCKED(
-                    client_ip=client_ip,
-                    requests_count=request_count,
-                    rate_limit_warnings=rate_limit_request_warnings
+        # Thread-safe rate limiting logic
+        async with self.rate_limit_lock:
+            # Get current IP stats
+            request_count, warnings_count, last_request = self.request_count_per_ip.get(client_ip, (0, 0, datetime.min))
+
+            # Calculate elapsed time since last request
+            elapsed_time = datetime.now() - last_request
+
+            # Reset counts if time window has expired
+            if elapsed_time > rate_limit_duration:
+                request_count = 0  # Will be incremented to 1
+                warnings_count = 0  # Reset warnings
+
+            # Check if request limit exceeded
+            if request_count >= max_rate_limit_requests:
+                # Increment warnings and log the violation
+                warnings_count += 1
+                logger.warning(
+                    warnings.IP_REACHED_RATE_LIMIT(
+                        ip=client_ip,
+                        request_count=request_count,
+                        rate_limit_warnings=warnings_count
+                    )
                 )
-            )
+                self.request_count_per_ip[client_ip] = (request_count, warnings_count, datetime.now())
 
-            blocked_ip = BlockedIP()
+                return ORJSONResponse(
+                    status_code=429,
+                    content={"message": "Rate limit exceeded. Please try again later."}
+                )
+            else:
+                # Increment request count
+                request_count += 1
 
-            blocked_ip.ip               =   client_ip
-            blocked_ip.block_reason     =   "The IP has exceeded the rate limit request warnings for over 100 times, which indicates a probability of a DDOS attack."
-            blocked_ip.ip_id            =   blocked_ip._generate_message_id(data=blocked_ip.block_reason)
+            # Update IP stats
+            self.request_count_per_ip[client_ip] = (request_count, warnings_count, datetime.now())
 
-            api_initializer.database_handler.save_blocked_ip_to_blocked_ips(
-                blocked_ip=blocked_ip
-            )
-            
-            return ORJSONResponse(
-                status_code=403,
-                content={
-                    "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the serve owner to manually unblock you."
-                }
-            )
-        
+            # Check if warnings exceed threshold (block permanently)
+            if warnings_count > max_rate_limit_warnings:
+                logger.info(
+                    info.CLIENT_IP_BLOCKED(
+                        client_ip=client_ip,
+                        requests_count=request_count,
+                        rate_limit_warnings=warnings_count
+                    )
+                )
+
+                blocked_ip = BlockedIPS(
+                    ip=client_ip,
+                    block_reason="The IP has exceeded the rate limit warnings threshold, indicating potential DDOS attack.",
+                    ip_id=str(uuid.uuid4())
+                )
+
+                api_initializer.database_handler.save_blocked_ip_to_blocked_ips(blocked_ip=blocked_ip)
+
+                return ORJSONResponse(
+                    status_code=403,
+                    content={
+                        "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
+                    }
+                )
+
+        # Process the request
         response = await call_next(request)
-
         return response
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -134,17 +187,24 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         "/api/v1/users/profile",
         "/api/v1/users/profile",
         "/api/v1/users/profile/reset-auth-token",
-        "/api/v1/users/list",                          
+        "/api/v1/users/list",
         "/api/v1/channel/list/",
-        "/api/v1/channel/create/",                     
-        "/api/v1/channel/*/delete",                    
-        "/api/v1/channel/*/addUser",                   
-        "/api/v1/channel/*/removeUser",                
-        "/api/v1/channel/*/load_messages",             
-        "/api/v1/channel/*/send_message",              
-        "/api/v1/channel/*/mark_message_as_read",      
-        "/api/v1/channel/*/delete_message",            
+        "/api/v1/channel/create/",
+        "/api/v1/channel/*/delete",
+        "/api/v1/channel/*/addUser",
+        "/api/v1/channel/*/removeUser",
+        "/api/v1/channel/*/load_messages",
+        "/api/v1/channel/*/send_message",
+        "/api/v1/channel/*/mark_message_as_read",
+        "/api/v1/channel/*/delete_message",
     ]
+
+    route_to_model = {
+        "/api/v1/users/signin": SigninQuery,
+        "/api/v1/users/list": AuthTokenQuery,
+        "/api/v1/channels/list/": AuthTokenQuery,
+        "/api/v1/channels/create/": CreateChannelQuery,
+    }
 
     def __init__(self, app) -> None:
         super().__init__(app)
@@ -166,6 +226,17 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         query_params = request.query_params
+
+        # Validate query params with pydantic if a model is defined for the route
+        if request_url in self.route_to_model:
+            model = self.route_to_model[request_url]
+            try:
+                model(**dict(query_params))
+            except ValidationError as e:
+                return ORJSONResponse(
+                    status_code=422,
+                    content={"message": f"Validation error: {e}"}
+                )
 
         for param in query_params:
             exception = None

@@ -47,10 +47,26 @@ def DEBUG_USERNAME_ENCRYPTED(username, encrypted_username) -> str:
     msg = f"Encrypted username. Username: '{username}', Encrypted username: '{encrypted_username}'."
     return msg
     
+def DEBUG_SIGN_UP_USER_START(user_id, username) -> str:
+    msg = f"Starting user sign up process. User ID: '{user_id}', Username: '{username}'."
+    return msg
+
+def DEBUG_GET_USER_START(user_id, username) -> str:
+    msg = f"Starting user retrieval process. User ID: '{user_id}', Username: '{username}'."
+    return msg
+
+def DEBUG_USER_FOUND(user_id, username) -> str:
+    msg = f"User found in database. User ID: '{user_id}', Username: '{username}'."
+    return msg
+
+def DEBUG_USER_NOT_FOUND(user_id, username) -> str:
+    msg = f"User not found in database. User ID: '{user_id}', Username: '{username}'."
+    return msg
+
 def DEBUG_USERNAME_DECRYPTED(encrypted_username, decrypted_username) -> str:
     msg = f"Decrypted username. Encrypted username: '{encrypted_username}', Decrypted username: '{decrypted_username}'."
     return msg
-    
+
 def DEBUG_VALIDATE_AUTH_TOKEN(hashed_auth_token, is_valid) -> str:
     msg = f"Validated authentication token. Hashed token: '{hashed_auth_token}', Valid: '{is_valid}'."
     return msg

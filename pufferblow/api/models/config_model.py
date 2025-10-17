@@ -26,6 +26,11 @@ class Config:
     MAX_MESSAGE_SIZE        :       int     =       1024
     MAX_MESSAGES_PER_PAGE   :       int     =       50
     MIN_MESSAGES_PER_PAGE   :       int     =       20
+
+    # CDN related parameters
+    CDN_STORAGE_PATH        :       str     =       f"{constants.HOME}/cdn"
+    CDN_BASE_URL            :       str     =       "/cdn"
+    CDN_CACHE_MAX_AGE       :       int     =       86400  # 24 hours in seconds
    
     def __init__(self, config: dict | None = None) -> None:
         if config is not None:    
@@ -65,6 +70,12 @@ class Config:
         self.MAX_MESSAGE_SIZE        =   config["messages"]["max_message_size"]
         self.MAX_MESSAGES_PER_PAGE   =   config["messages"]["max_messages_per_page"]
         self.MIN_MESSAGES_PER_PAGE   =   config["messages"]["min_messages_per_page"]
+
+        # CDN related parameters
+        if "cdn" in config:
+            self.CDN_STORAGE_PATH        =   config["cdn"]["storage_path"]
+            self.CDN_BASE_URL            =   config["cdn"]["base_url"]
+            self.CDN_CACHE_MAX_AGE       =   config["cdn"]["cache_max_age"]
    
     def export_toml(self) -> str:
         """
@@ -104,6 +115,11 @@ derived_key_rounds = {self.DERIVED_KEY_ROUNDS} # This represents the number of i
 max_message_size = {self.MAX_MESSAGE_SIZE} # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
 max_messages_per_page = {self.MAX_MESSAGES_PER_PAGE} # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
 min_messages_per_page = {self.MIN_MESSAGES_PER_PAGE} # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
+
+[cdn]
+storage_path = "{self.CDN_STORAGE_PATH}" # This defines the directory where uploaded files will be stored on the server.
+base_url = "{self.CDN_BASE_URL}" # This defines the base URL path for serving files (e.g., /cdn).
+cache_max_age = {self.CDN_CACHE_MAX_AGE} # This defines the maximum age (in seconds) for caching file responses. A value of 86400 (24 hours) is recommended for good performance.
 """
         return config
     

@@ -13,8 +13,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.backends import default_backend
 
-# Models
-from pufferblow.api.models.keys_model import EncryptionKey
+# Tables
+from pufferblow.api.database.tables.keys import Keys
 
 class Hasher(object):
     """
@@ -26,7 +26,7 @@ class Hasher(object):
     def __init__(self) -> None:
         pass
     
-    def encrypt(self, data: str, is_to_check: bool | None = False, key: bytes | None=None) -> tuple[str, EncryptionKey] | str:
+    def encrypt(self, data: str, is_to_check: bool | None = False, key: bytes | None=None) -> tuple[str, Keys] | str:
         """
         Encrypt the data using AES.
 
@@ -34,7 +34,7 @@ class Hasher(object):
             `data` (str): The `data` to encrypt.
             `is_to_check` (bool, optional, default: False): If set to `True` then no encryption key object will get created to save in the database.
             `key` (bytes, optional, default: None): A `key` to encrypt the data (only get passed in when `is_to_check` is set to `True`).
-        
+
         Returns:
             tuple[str, str]: Containing the encrypted data and the encryption key.
             str: The encrypted data.
@@ -54,7 +54,7 @@ class Hasher(object):
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
 
         if is_to_check is not True:
-            _key = EncryptionKey()
+            _key = Keys()
             _key.key_value = base64.b64encode(key).decode("ascii")
             _key.iv = base64.b64encode(iv).decode("ascii")
 

@@ -1,0 +1,276 @@
+import os
+import uuid
+import mimetypes
+import hashlib
+from pathlib import Path
+from typing import List, Optional, Tuple
+import magic  # python-magic for MIME detection
+from PIL import Image
+from fastapi import UploadFile, HTTPException
+
+from pufferblow.api.database.database_handler import DatabaseHandler
+from pufferblow.api.models.config_model import Config
+
+
+class CDNManager:
+    """CDN Manager for handling file uploads and serving"""
+
+    def __init__(self, database_handler: DatabaseHandler, config: Config):
+        self.database_handler = database_handler
+        self.config = config
+
+        # Create storage directory if it doesn't exist
+        Path(self.config.CDN_STORAGE_PATH).mkdir(parents=True, exist_ok=True)
+
+        # Initialize MIME detector
+        self.mime_detector = magic.Magic(mime=True)
+
+        # File type validation - defaults, will be updated from server settings
+        self.IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp']
+        self.STICKER_EXTENSIONS = ['png', 'gif']
+        self.GIF_EXTENSIONS = ['gif']
+        self.VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi']
+        self.DOCUMENT_EXTENSIONS = ['pdf', 'doc', 'docx', 'txt', 'zip']
+        self.MAX_IMAGE_SIZE_MB = 5  # Default, will be updated from server settings
+        self.MAX_VIDEO_SIZE_MB = 50
+        self.MAX_STICKER_SIZE_MB = 5
+        self.MAX_GIF_SIZE_MB = 10
+        self.MAX_DOCUMENT_SIZE_MB = 10
+
+    def compute_file_hash(self, content: bytes) -> str:
+        """
+        Compute SHA-256 hash of file content
+
+        Args:
+            content: File content bytes
+
+        Returns:
+            Hexadecimal string of the hash
+        """
+        return hashlib.sha256(content).hexdigest()
+
+    def find_duplicate_by_hash(self, file_hash: str, subdirectory: str) -> Optional[str]:
+        """
+        Check if a file with the same hash already exists in the subdirectory
+
+        Args:
+            file_hash: SHA-256 hash of the file
+            subdirectory: Subdirectory to search in
+
+        Returns:
+            URL path if duplicate found, None otherwise
+        """
+        sub_dir = Path(self.config.CDN_STORAGE_PATH) / subdirectory
+        if not sub_dir.exists():
+            return None
+
+        # Check existing files for hash match
+        for existing_file in sub_dir.glob("*"):
+            if existing_file.is_file():
+                try:
+                    with open(existing_file, "rb") as f:
+                        existing_content = f.read()
+                    existing_hash = self.compute_file_hash(existing_content)
+                    if existing_hash == file_hash:
+                        # Found duplicate, return URL
+                        return f"{self.config.CDN_BASE_URL}/{subdirectory}/{existing_file.name}"
+                except Exception:
+                    # Skip files that can't be read
+                    continue
+
+        return None
+
+    def validate_and_save_file(
+        self,
+        file: UploadFile,
+        user_id: str,
+        max_size_mb: int,
+        allowed_extensions: List[str],
+        subdirectory: str = "files",
+        check_duplicates: bool = True
+    ) -> Tuple[str, bool]:
+        """
+        Validate and save an uploaded file, with optional duplicate checking
+
+        Args:
+            file: FastAPI UploadFile object
+            user_id: Owner user ID
+            max_size_mb: Maximum file size in MB
+            allowed_extensions: List of allowed file extensions
+            subdirectory: Subdirectory within CDN storage (e.g., "avatars")
+            check_duplicates: Whether to check for duplicate files using hash
+
+        Returns:
+            Tuple of (File URL path relative to base URL, is_duplicate)
+
+        Raises:
+            HTTPException: If validation fails
+        """
+        # Check file size
+        content = file.file.read()
+        if len(content) > max_size_mb * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds maximum of {max_size_mb}MB"
+            )
+
+        # Detect MIME type from content
+        mime_type = self.mime_detector.from_buffer(content)
+        if not mime_type:
+            raise HTTPException(status_code=400, detail="Cannot determine file type")
+
+        # Validate extension
+        filename = file.filename or "unknown"
+        extension = filename.split('.')[-1].lower() if '.' in filename else ""
+        if extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File extension '{extension}' not allowed. Allowed: {', '.join(allowed_extensions)}"
+            )
+
+        # Additional validation for documents (PDFs, Office docs)
+        if extension in self.DOCUMENT_EXTENSIONS:
+            # For documents, just check basic MIME type matching
+            expected_mime = {
+                'pdf': 'application/pdf',
+                'doc': 'application/msword',
+                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'txt': 'text/plain',
+                'zip': 'application/zip'
+            }.get(extension)
+
+            if expected_mime and not mime_type.startswith(expected_mime.split('/')[0]):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File content doesn't match extension. Expected {expected_mime}, got {mime_type}"
+                )
+
+        # For image files, validate dimensions and format
+        if extension in self.IMAGE_EXTENSIONS and mime_type.startswith('image/'):
+            try:
+                image = Image.open(file.file)
+                image.verify()  # Verify it's a valid image
+                max_dimension = 2048  # Max width/height
+                if image.size[0] > max_dimension or image.size[1] > max_dimension:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Image dimensions too large. Max allowed: {max_dimension}x{max_dimension}"
+                    )
+                # Reset file pointer
+                file.file.seek(0)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid image file")
+
+        # Check for duplicate files using hash (if enabled)
+        is_duplicate = False
+        if check_duplicates and len(content) > 0:  # Skip for empty files
+            file_hash = self.compute_file_hash(content)
+            existing_url = self.find_duplicate_by_hash(file_hash, subdirectory)
+
+            if existing_url:
+                # Return existing file URL as duplicate
+                return existing_url, True
+
+        # Generate unique filename
+        file_id = str(uuid.uuid4())
+        new_filename = f"{file_id}.{extension}"
+
+        # Create subdirectory path
+        sub_dir = Path(self.config.CDN_STORAGE_PATH) / subdirectory
+        sub_dir.mkdir(exist_ok=True)
+
+        # Full file path
+        file_path = sub_dir / new_filename
+
+        # Save file
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        # Generate URL path
+        url_path = f"{self.config.CDN_BASE_URL}/{subdirectory}/{new_filename}"
+
+        return url_path, False
+
+    def delete_file(self, file_url: str) -> bool:
+        """
+        Delete a file by its URL
+
+        Args:
+            file_url: Full URL path
+
+        Returns:
+            True if deleted, False if not found
+        """
+        # Convert URL to file path
+        relative_path = file_url[len(self.config.CDN_BASE_URL):].lstrip('/')
+        file_path = Path(self.config.CDN_STORAGE_PATH) / relative_path
+
+        if file_path.exists():
+            file_path.unlink()
+            return True
+        return False
+
+    def get_file_info(self, file_url: str) -> Optional[dict]:
+        """
+        Get file information by URL
+
+        Args:
+            file_url: File URL
+
+        Returns:
+            Dict with file info or None if not found
+        """
+        relative_path = file_url[len(self.config.CDN_BASE_URL):].lstrip('/')
+        file_path = Path(self.config.CDN_STORAGE_PATH) / relative_path
+
+        if not file_path.exists():
+            return None
+
+        stat = file_path.stat()
+        mime_type, _ = mimetypes.guess_type(file_path)
+
+        return {
+            "path": file_path,
+            "size": stat.st_size,
+            "mime_type": mime_type,
+            "created": stat.st_ctime,
+            "modified": stat.st_mtime
+        }
+
+    def cleanup_orphaned_files(self, db_files: List[str], subdirectory: str = "files"):
+        """
+        Remove files that are no longer referenced in database
+
+        Args:
+            db_files: List of file URLs that should exist
+            subdirectory: Subdirectory to clean
+        """
+        sub_dir = Path(self.config.CDN_STORAGE_PATH) / subdirectory
+        if not sub_dir.exists():
+            return
+
+        url_prefix = f"{self.config.CDN_BASE_URL}/{subdirectory}/"
+
+        for file_path in sub_dir.glob("*"):
+            file_url = f"{url_prefix}{file_path.name}"
+            if file_url not in db_files:
+                file_path.unlink()
+
+    def update_server_limits(self):
+        """Update file size limits and allowed extensions from server settings (called periodically or on startup)"""
+        try:
+            server_settings = self.database_handler.get_server_settings()
+            if server_settings:
+                self.MAX_IMAGE_SIZE_MB = server_settings.max_image_size or 5
+                self.MAX_VIDEO_SIZE_MB = server_settings.max_video_size or 50
+                self.MAX_STICKER_SIZE_MB = server_settings.max_sticker_size or 5
+                self.MAX_GIF_SIZE_MB = server_settings.max_gif_size or 10
+                self.MAX_DOCUMENT_SIZE_MB = server_settings.max_message_length // 1000 or 10  # Rough estimate
+                self.IMAGE_EXTENSIONS = server_settings.allowed_images_extensions or ['png', 'jpg', 'jpeg', 'gif', 'webp']
+                self.STICKER_EXTENSIONS = server_settings.allowed_stickers_extensions or ['png', 'gif']
+                self.GIF_EXTENSIONS = server_settings.allowed_gif_extensions or ['gif']
+                self.VIDEO_EXTENSIONS = server_settings.allowed_videos_extensions or ['mp4', 'webm']
+                self.DOCUMENT_EXTENSIONS = server_settings.allowed_doc_extensions or ['pdf', 'doc', 'docx', 'txt', 'zip']
+        except Exception:
+            # Use defaults if DB not available
+            pass

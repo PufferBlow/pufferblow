@@ -3,8 +3,8 @@ import hashlib
 
 from loguru import logger
 
-# Models
-from pufferblow.api.models.channel_model import Channel
+# Tables
+from pufferblow.api.database.tables.channels import Channels
 
 # Hasher
 from pufferblow.api.hasher.hasher import Hasher
@@ -48,30 +48,26 @@ class ChannelsManager (object):
 
         for channel_data in channels_data:
             channel_data = channel_data[0]
-            
-            channel = Channel()
 
-            channel_metadata_json = channel.load_table_metadata(
-                table_metadata=channel_data
-            ) # dict formated channel's metadata
+            channel_metadata_json = channel_data.to_dict()
 
             channels.append(channel_metadata_json)
         
         return channels
 
-    def create_channel(self, user_id: str, channel_name: str, is_private: bool) -> Channel:
+    def create_channel(self, user_id: str, channel_name: str, is_private: bool) -> Channels:
         """
         Create a new channel
-        
+
         Args:
             `user_id` (str): The user's `user_id`.
-            `channel_name` (str): The channel's `channel_name` (which is unique for each channel). 
+            `channel_name` (str): The channel's `channel_name` (which is unique for each channel).
             `is_private` (bool): If it set to True then the channel is going to be private (only viewable by the server owner, admins and the users who gets added/invited to it), otherwise it will be public.
-        
+
         Returns:
-            `Channel`.
+            `Channels`.
         """
-        channel = Channel()
+        channel = Channels()
         
         channel.channel_id = self._generate_channel_id(
             channel_name=channel_name

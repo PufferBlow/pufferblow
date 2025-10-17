@@ -133,3 +133,13 @@ def test_user_not_found(client: TestClient):
     assert response.json() == {
         "error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
     }
+
+def test_empty_auth_token(client: TestClient):
+    """ Tests pydantic validation for empty auth_token """
+    data = {
+        "auth_token": ""
+    }
+
+    response = client.put(route, params=data)
+
+    assert response.status_code == 422  # Pydantic validation error

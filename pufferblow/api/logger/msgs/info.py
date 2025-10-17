@@ -1,6 +1,6 @@
 
 # Models
-from pufferblow.api.models.user_model import User
+from pufferblow.api.database.tables.users import Users as User
 
 def INFO_NEW_USER_SIGNUP_SUCCESSFULLY(user: User) -> str:
     msg = f"New user signed up successfully. User ID: '{user.user_id}'"
