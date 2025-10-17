@@ -289,6 +289,6 @@ def serve(
     StandaloneApplication(api, OPTIONS).run()
 
 def run() -> None:
-   constants.banner()
-
+    constants.banner()
     cli()
+
