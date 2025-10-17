@@ -191,10 +191,10 @@ def setup(
     config.DATABASE_PASSWORD = password
     config.DATABASE_HOST = host
     config.DATABASE_PORT = port
-    
+
     # Load the objects
     api_initializer.load_objects(database_uri)
-    
+
     # Create the server
     if api_initializer.server_manager.check_server_exists():
         logger.warning("The server was already created, if you want to update the server info then please run the setup command with the --update-server flag")
@@ -206,11 +206,11 @@ def setup(
     auth_token = setup_owner_account() 
 
     logger.info(f"Your auth-token is '{auth_token}'. DO NOT GIVE IT TO ANYONE")
-    
+
     # Save the config
     config_toml = config.export_toml()
     config_handler.write_config(config=config_toml)
-     
+
     logger.info(f"Config saved at '{config_handler.config_file_path}'")
 
 @cli.command()
@@ -230,9 +230,9 @@ def serve(
         port=config.DATABASE_PORT,
         database_name=config.DATABASE_NAME,
     )
-    
+
     logger.debug("Checking the database existence...")
-    
+
     if not Database.check_database_existense(
         database_uri=database_uri
     ):
@@ -248,11 +248,11 @@ def serve(
     api_initializer.database_handler.setup_tables(Base)
 
     log_level_str = LOG_LEVEL_MAP[log_level]
-     
+
     INTERCEPT_HANDLER = InterceptHandler()
     logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
     logging.root.handlers = [INTERCEPT_HANDLER]
-    
+
     logging.root.setLevel(log_level_str)
 
     SEEN = set()
@@ -272,7 +272,7 @@ def serve(
 
     logger.configure(handlers=[{"sink": sys.stdout}])
     logger.add(config.LOGS_PATH, rotation="10 MB")
-    
+
     StubbedGunicornLogger.log_level = log_level_str
 
     OPTIONS = {
@@ -289,6 +289,6 @@ def serve(
     StandaloneApplication(api, OPTIONS).run()
 
 def run() -> None:
-    constants.banner()
-    
+   constants.banner()
+
     cli()
