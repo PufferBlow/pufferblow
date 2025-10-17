@@ -15,7 +15,7 @@ python = "^3.10"
 fastapi = "^0.115.12"
 typer = "^0.16.0"
 rich = "^14.0.0"
-uvicorn = "^0.34.2"
+uvicorn = "^0.37.0"
 pycryptodome = "^3.23.0"
 loguru = "^0.7.3"
 pytz = "^2025.2"
@@ -29,14 +29,13 @@ sphinx-book-theme = "^1.1.2"
 sphinx-autobuild = "^2024.10.3"
 sphinx-favicon = "^1.0.1"
 myst-parser = "^4.0.0"
-sqlalchemy-utils = "^0.41.2"
-orjson = "^3.10.18"
+sqlalchemy-utils = "^0.42.0"
+orjson = "^3.11.3"
 basedpyright = "^1.29.2"
 pymemcache = "^4.0.0"
-cryptography = "^45.0.7"
-textual = "^3.2.0"
-textual-dev = "^1.7.0"
+cryptography = "^46.0.2"
 bcrypt = "^4.3.0"
+watchdog = "^6.0.0"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.3"
@@ -61,4 +60,3 @@ dev = [
 # many settings are not enabled even in strict mode, which is why basedpyright includes an "all" option
 # you can then decide which rules you want to disable
 typeCheckingMode = "standard"
-reportMissingSuperCall = false
