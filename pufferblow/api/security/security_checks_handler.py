@@ -121,7 +121,9 @@ class SecurityChecksHandler(object):
         """
         supported_status_values = [
             "online",
-            "offline"
+            "offline",
+            "idle",
+            "dnd"
         ]
 
         if status not in supported_status_values:
