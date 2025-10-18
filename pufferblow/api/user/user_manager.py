@@ -80,6 +80,14 @@ class UserManager (object):
         new_user.status                                 =       "online"
         new_user.joined_servers_ids                     =       [self.database_handler.get_server_id(), ]
 
+        # Set user roles based on parameters
+        if is_owner:
+            new_user.roles_ids = ['owner']
+        elif is_admin:
+            new_user.roles_ids = ['admin']
+        else:
+            new_user.roles_ids = ['user']
+
         # Use appropriate datetime objects for database compatibility
         database_uri = str(self.database_handler.database_engine.url)
         if database_uri.startswith('sqlite://'):
@@ -200,7 +208,7 @@ class UserManager (object):
     def check_user(self, user_id: str | None = None, username: str | None = None, auth_token: str | None=None) -> bool:
         """
         Check if the user exists or not based on their user_id, username or auth_token
-        
+
         Args:
             `user_id` (str): The user's `user_id`.
             `auth_token` (str, optional, default: None): The user's `auth_token`, in case it is None, then we are expecting to check only if the `user_id` exists without the check of the user's `auth_token`.
@@ -211,13 +219,19 @@ class UserManager (object):
         if user_id is not None:
             users_id = self.database_handler.get_users_id()
 
-            return user_id in users_id
-        
+            # Convert string user_id to UUID for comparison with UUID objects in the list
+            try:
+                user_uuid = uuid.UUID(user_id)
+                return user_uuid in users_id
+            except ValueError:
+                logger.warning(f"Invalid user_id format: {user_id}")
+                return False
+
         if username is not None:
             usernames = self.database_handler.get_usernames()
-            
+
             return username in usernames
-        
+
         if auth_token is not None:
             is_users_auth_token = self.auth_token_manager.check_users_auth_token(
                 user_id=user_id,
@@ -225,17 +239,17 @@ class UserManager (object):
             )
 
             return is_users_auth_token
-         
+
         return True
     
     def is_server_owner(self, user_id: str | None = None, username: str | None = None) -> bool:
         """
         Check if the user is the owner of the server or not
-        
+
         Args:
             user_id (str): The user's user_id.
             username (str, optional): The user's username.
-        
+
         Returns:
             bool: True if the user is the server owner, otherwise False
         """
@@ -245,15 +259,16 @@ class UserManager (object):
             username=username
         )
 
-        return True    
+        # Check if 'owner' role is in the user's roles_ids
+        return 'owner' in user_data.roles_ids if user_data.roles_ids else False
 
     def is_admin(self, user_id: str) -> bool:
         """
         Check if the user is an admin of the server or not
-        
+
         Args:
             `user_id` (str): The user's `user_id`.
-        
+
         Returns:
             bool: True if the user is an admin, otherwise False.
         """
@@ -261,7 +276,8 @@ class UserManager (object):
             user_id=user_id
         )
 
-        return True    
+        # Check if 'admin' role is in the user's roles_ids
+        return 'admin' in user_data.roles_ids if user_data.roles_ids else False
     def check_username(self, username: str) -> bool:
         """
         Check if the `username` already exists or not
@@ -272,17 +288,14 @@ class UserManager (object):
         Returns:
             bool: True is the username exists, otherwise False.
         """
-        try:
-            usernames = self.database_handler.get_usernames()
-
-            if username in usernames:
-                return True
-
+        # For SQLite tests where users table may not exist, return False
+        database_uri = str(self.database_handler.database_engine.url)
+        if database_uri.startswith('sqlite://'):
             return False
-        except Exception:
-            # For SQLite tests where users table may not exist, always return False
-            # since we're using a fresh database per test
-            return False
+
+        usernames = self.database_handler.get_usernames()
+
+        return username in usernames
 
     def check_user_password(self, user_id: str, password: str) -> bool:
         """

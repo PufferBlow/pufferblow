@@ -423,7 +423,8 @@ def setup(
 @cli.command()
 def serve(
     log_level: int = typer.Option(0, "--log-level", help="The log level, ranges from 0 to 3. [INFO: 0, DEBUG: 1, ERROR: 2, CRITICAL: 3]"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug logging")
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
+    dev: bool = typer.Option(False, "--dev", help="Enable development mode with auto-reload")
 ):
     """ Serve the API """
     if debug:
@@ -489,23 +490,43 @@ def serve(
             SEEN.add(name.split(".")[0])
             logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
-    logger.configure(handlers=[{"sink": sys.stdout}])
-    logger.add(config.LOGS_PATH, rotation="10 MB")
+    # Check if in development mode (hot reload)
+    if dev:
+        logger.info("Starting server in development mode with auto-reload...")
+        try:
+            import uvicorn
+            uvicorn.run(
+                "pufferblow.api.api:api",
+                host=config.API_HOST,
+                port=config.API_PORT,
+                reload=True,
+                log_level=log_level_str.lower(),
+                access_log=False,
+                server_header=False,
+                date_header=False
+            )
+        except ImportError:
+            logger.warning("uvicorn not installed. Falling back to production server without hot reload.")
+            dev = False
 
-    StubbedGunicornLogger.log_level = log_level_str
+    if not dev:
+        logger.configure(handlers=[{"sink": sys.stdout}])
+        logger.add(config.LOGS_PATH, rotation="10 MB")
 
-    OPTIONS = {
-        "bind": f"{config.API_HOST}:{config.API_PORT}",
-        "workers": WORKERS(config.WORKERS),
-        "timeout": 86400, # 24 hours
-        "keepalive": 86400, # 24 hours
-        "accesslog": "-",
-        "errorlog": "-",
-        "worker_class": "uvicorn.workers.UvicornWorker",
-        "logger_class": StubbedGunicornLogger
-    }
+        StubbedGunicornLogger.log_level = log_level_str
 
-    StandaloneApplication(api, OPTIONS).run()
+        OPTIONS = {
+            "bind": f"{config.API_HOST}:{config.API_PORT}",
+            "workers": WORKERS(config.WORKERS),
+            "timeout": 86400, # 24 hours
+            "keepalive": 86400, # 24 hours
+            "accesslog": "-",
+            "errorlog": "-",
+            "worker_class": "uvicorn.workers.UvicornWorker",
+            "logger_class": StubbedGunicornLogger
+        }
+
+        StandaloneApplication(api, OPTIONS).run()
 
 def run() -> None:
     constants.banner()

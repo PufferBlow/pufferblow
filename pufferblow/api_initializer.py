@@ -57,7 +57,7 @@ class APIInitializer(object):
         database_handler      (DatabaseHandler)     : A `DatabaseHandler` object.
         auth_token_manager    (AuthTokenManager)    : A `AuthTokenManager` object.
         user_manager          (UserManager)         : A `UserManger` object.
-        Channels_manager      (ChannelsManager)     : A `ChannelsManager` object.
+        channels_manager      (ChannelsManager)     : A `ChannelsManager` object.
     """
     config                  :       Config                  =   None
     hasher                  :       Hasher                  =   None

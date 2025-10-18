@@ -28,6 +28,19 @@ class Messages(Base):
 
     attachments: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
 
+    def to_dict(self) -> dict:
+        """Convert message object to dictionary format"""
+        return {
+            "message_id": self.message_id,
+            "hashed_message": self.hashed_message,
+            "raw_message": self.raw_message,
+            "sender_user_id": str(self.sender_id),
+            "channel_id": self.channel_id,
+            "conversation_id": self.conversation_id,
+            "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+            "attachments": self.attachments or []
+        }
+
     def __repr__(self) -> str:
         return (
             f"Messages(message_id={self.message_id!r}, "

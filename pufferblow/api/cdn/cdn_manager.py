@@ -49,6 +49,53 @@ class CDNManager:
         """
         return hashlib.sha256(content).hexdigest()
 
+    def categorize_file(self, filename: str, mime_type: str) -> str:
+        """
+        Automatically categorize a file based on its type and return the appropriate subdirectory
+
+        Args:
+            filename: Name of the uploaded file
+            mime_type: MIME type detected from file content
+
+        Returns:
+            Appropriate subdirectory name for the file type
+        """
+        extension = filename.split('.')[-1].lower() if '.' in filename else ""
+
+        # Categorize based on MIME type and extension priority
+        if mime_type.startswith('image/'):
+            # Special handling for GIFs
+            if extension in self.GIF_EXTENSIONS:
+                return "gifs"
+            # Special handling for stickers (typically smaller PNG/GIF files)
+            elif extension in self.STICKER_EXTENSIONS and "_sticker" in filename.lower():
+                return "stickers"
+            # Avatar and banner images
+            elif "_avatar" in filename.lower():
+                return "avatars"
+            elif "_banner" in filename.lower():
+                return "banners"
+            else:
+                # General images
+                return "images"
+
+        elif mime_type.startswith('video/'):
+            return "videos"
+
+        elif mime_type.startswith('audio/'):
+            return "audio"
+
+        elif mime_type in ['application/pdf', 'application/msword',
+                          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                          'text/plain', 'application/zip']:
+            return "documents"
+
+        elif extension in ['json', 'xml', 'yaml', 'yml']:
+            return "config"
+
+        else:
+            return "files"
+
     def find_duplicate_by_hash(self, file_hash: str, subdirectory: str) -> Optional[str]:
         """
         Check if a file with the same hash already exists in the subdirectory
@@ -80,6 +127,80 @@ class CDNManager:
 
         return None
 
+    def validate_and_save_categorized_file(
+        self,
+        file: UploadFile,
+        user_id: str,
+        check_duplicates: bool = True,
+        force_category: Optional[str] = None
+    ) -> Tuple[str, bool]:
+        """
+        Validate and save an uploaded file with automatic categorization based on file type
+
+        Args:
+            file: FastAPI UploadFile object
+            user_id: Owner user ID
+            check_duplicates: Whether to check for duplicate files using hash
+            force_category: Force a specific category (optional)
+
+        Returns:
+            Tuple of (File URL path relative to base URL, is_duplicate)
+
+        Raises:
+            HTTPException: If validation fails
+        """
+        # Check file size first (use content to determine limits)
+        content = file.file.read()
+        filename = file.filename or "unknown"
+        extension = filename.split('.')[-1].lower() if '.' in filename else ""
+
+        # Detect MIME type
+        mime_type = self.mime_detector.from_buffer(content)
+        if not mime_type:
+            raise HTTPException(status_code=400, detail="Cannot determine file type")
+
+        # Determine category and limits
+        category = force_category if force_category else self.categorize_file(filename, mime_type)
+
+        # Set appropriate limits based on category
+        if category == "images":
+            max_size_mb = self.MAX_IMAGE_SIZE_MB
+            allowed_extensions = self.IMAGE_EXTENSIONS
+        elif category == "avatars":
+            max_size_mb = self.MAX_IMAGE_SIZE_MB
+            allowed_extensions = self.IMAGE_EXTENSIONS
+        elif category == "banners":
+            max_size_mb = self.MAX_IMAGE_SIZE_MB
+            allowed_extensions = self.IMAGE_EXTENSIONS
+        elif category == "gifs":
+            max_size_mb = self.MAX_GIF_SIZE_MB
+            allowed_extensions = self.GIF_EXTENSIONS
+        elif category == "stickers":
+            max_size_mb = self.MAX_STICKER_SIZE_MB
+            allowed_extensions = self.STICKER_EXTENSIONS
+        elif category == "videos":
+            max_size_mb = self.MAX_VIDEO_SIZE_MB
+            allowed_extensions = self.VIDEO_EXTENSIONS
+        elif category == "documents":
+            max_size_mb = self.MAX_DOCUMENT_SIZE_MB
+            allowed_extensions = self.DOCUMENT_EXTENSIONS
+        else:
+            max_size_mb = 10  # Default 10MB for unknown types
+            allowed_extensions = [extension] if extension else ['*']
+
+        # Reset file pointer for validation
+        file.file.seek(0)
+
+        # Use the standard validation method with determined category
+        return self.validate_and_save_file(
+            file=file,
+            user_id=user_id,
+            max_size_mb=max_size_mb,
+            allowed_extensions=allowed_extensions,
+            subdirectory=category,
+            check_duplicates=check_duplicates
+        )
+
     def validate_and_save_file(
         self,
         file: UploadFile,
@@ -106,6 +227,9 @@ class CDNManager:
         Raises:
             HTTPException: If validation fails
         """
+        import hashlib
+        from pathlib import Path
+
         # Check file size
         content = file.file.read()
         if len(content) > max_size_mb * 1024 * 1024:
@@ -163,6 +287,7 @@ class CDNManager:
 
         # Check for duplicate files using hash (if enabled)
         is_duplicate = False
+        file_hash = ""
         if check_duplicates and len(content) > 0:  # Skip for empty files
             file_hash = self.compute_file_hash(content)
             existing_url = self.find_duplicate_by_hash(file_hash, subdirectory)
@@ -188,6 +313,37 @@ class CDNManager:
 
         # Generate URL path
         url_path = f"{self.config.CDN_BASE_URL}/{subdirectory}/{new_filename}"
+
+        # Register file in database (only in production, not SQLite tests)
+        # We'll use a reference type of 'cdn_upload' for CDN management
+        try:
+            from pufferblow.api_initializer import api_initializer
+            if file_hash == "":
+                file_hash = self.compute_file_hash(content)
+
+            # Create file object in database
+            api_initializer.database_handler.create_file_object(
+                file_hash=file_hash,
+                ref_count=1,  # Initial reference count
+                file_path=f"{subdirectory}/{new_filename}",
+                file_size=len(content),
+                mime_type=mime_type,
+                verification_status="verified"
+            )
+
+            # Create file reference for this upload
+            reference_id = f"cdn_upload_{file_id}"
+            api_initializer.database_handler.create_file_reference(
+                reference_id=reference_id,
+                file_hash=file_hash,
+                reference_type="cdn_upload",
+                reference_entity_id=user_id  # Owner of the upload
+            )
+
+        except Exception as e:
+            # Log error but don't fail the upload (file is saved, just not tracked)
+            # TODO: Add proper logging
+            pass
 
         return url_path, False
 

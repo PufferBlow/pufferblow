@@ -1,8 +1,10 @@
 import uuid
 import base64
 import datetime
+import hashlib
 import sqlalchemy
 
+from typing import List
 from loguru import logger
 
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
@@ -40,6 +42,8 @@ from pufferblow.api.database.tables.message_read_history import MessageReadHisto
 from pufferblow.api.database.tables.sticker_catalog import ServerStickers, ServerGIFs
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
 from pufferblow.api.database.tables.chart_data import ChartData
+from pufferblow.api.database.tables.activity_metrics import ActivityMetrics
+from pufferblow.api.database.tables.activity_audit import ActivityAudit
 
 # Log messages
 from pufferblow.api.logger.msgs import (
@@ -101,6 +105,8 @@ class DatabaseHandler (object):
                 'file_references',
                 # Chart data table uses advanced date functions that SQLite doesn't handle well
                 'chart_data',
+                # Activity audit table uses UUID columns which SQLite doesn't support well for tests
+                'activity_audit',
                 # Note: 'users' table is now included for basic user operations with datetime compatibility
                 # Note: 'blocked_ips' table is included for basic functionality
             }
@@ -436,15 +442,17 @@ class DatabaseHandler (object):
         Returns:
             list(str): A list of `message_id`s read by this user.
         """
-        messages_ids: list[str] = None
+        messages_ids: list[str] = []
 
         with self.database_session() as session:
             stmt = select(MessageReadHistory.viewed_messages_ids).where(
                 MessageReadHistory.user_id == user_id
             )
 
-            messages_ids = session.execute(stmt).fetchone()[0]
-        
+            result = session.execute(stmt).fetchone()
+            if result is not None:
+                messages_ids = result[0]
+
         return messages_ids
     
     def delete_auth_token(self, user_id: str, auth_token: str) -> None:
@@ -582,7 +590,7 @@ class DatabaseHandler (object):
         usernames = list()
 
         # For SQLite tests where users table may not exist, return empty list
-        database_uri = str(self.database_session.bind.url)
+        database_uri = str(self.database_engine.url)
         if database_uri.startswith('sqlite://'):
             return usernames
 
@@ -775,6 +783,30 @@ class DatabaseHandler (object):
                 updated_at=updated_at
             ).where(
                 Users.user_id == user_id
+            )
+
+            session.execute(stmt)
+
+            session.commit()
+
+    def update_message_hash(self, message_id: str, hashed_message: str) -> None:
+        """Updates the message's hashed content
+
+        Args:
+            `message_id` (str): The message's `message_id`.
+            `hashed_message` (str): The encrypted hashed message content.
+
+        Returns:
+            `None`.
+        """
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+
+        with self.database_session() as session:
+            stmt = update(Messages).values(
+                hashed_message=hashed_message,
+                updated_at=updated_at
+            ).where(
+                Messages.message_id == message_id
             )
 
             session.execute(stmt)
@@ -1468,7 +1500,7 @@ class DatabaseHandler (object):
             session.execute(stmt)
             session.commit()
 
-    def get_server_settings(self) -> ServerSettings:
+    def get_server_settings(self) -> ServerSettings | None:
         """
         Fetches the server settings row from the server_settings table.
 
@@ -1477,19 +1509,56 @@ class DatabaseHandler (object):
 
         Returns:
             ServerSettings: A server settings table row object.
+            None: If table doesn't exist or there's an error.
         """
         # For SQLite tests where server_settings table is not created
         database_uri = str(self.database_engine.url)
         if database_uri.startswith('sqlite://'):
             return None
 
-        server_settings: ServerSettings
+        try:
+            server_settings: ServerSettings
+
+            with self.database_session() as session:
+                stmt = select(ServerSettings)
+                server_settings = session.execute(stmt).fetchone()
+
+            return server_settings[0] if server_settings else None
+        except Exception as e:
+            logger.warning(f"Could not retrieve server settings, returning None: {e}")
+            return None
+
+    def update_server_settings(self, settings_updates: dict) -> None:
+        """
+        Update specific server settings in the server_settings table.
+
+        Args:
+            settings_updates (dict): Dictionary of field names to new values.
+                                   Keys should match ServerSettings column names.
+
+        Returns:
+            None.
+        """
+        # For SQLite tests where server_settings table is not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        if not settings_updates:
+            return
+
+        updated_at = date_in_gmt()
 
         with self.database_session() as session:
-            stmt = select(ServerSettings)
-            server_settings = session.execute(stmt).fetchone()
+            stmt = update(ServerSettings).values(
+                updated_at=updated_at,
+                **settings_updates
+            )
 
-        return server_settings if server_settings is None else server_settings[0]
+            session.execute(stmt)
+            session.commit()
+
+        logger.info(f"Server settings updated: {list(settings_updates.keys())}")
 
     def initialize_default_data(self) -> None:
         """
@@ -1927,3 +1996,516 @@ class DatabaseHandler (object):
                 'away': away_count,
                 'other': other_count
             }
+
+    # Activity Metrics Methods
+
+    def save_activity_metrics(self, metrics: ActivityMetrics) -> None:
+        """Save activity metrics to the database"""
+        with self.database_session() as session:
+            # Check if metrics for this period already exist
+            existing = session.query(ActivityMetrics).filter(
+                ActivityMetrics.period == metrics.period,
+                ActivityMetrics.date == metrics.date
+            ).first()
+
+            if existing:
+                # Update existing metrics
+                for attr, value in metrics.__dict__.items():
+                    if not attr.startswith('_') and attr != 'id':
+                        setattr(existing, attr, value)
+                existing.server_uptime_hours = metrics.server_uptime_hours
+            else:
+                # Save new metrics
+                session.add(metrics)
+
+            session.commit()
+
+    def get_latest_activity_metrics(self) -> dict:
+        """Get the latest activity metrics for dashboard display"""
+        with self.database_session() as session:
+            # Get total users and channels
+            total_users = self.count_users()
+
+            # Get total channels
+            database_uri = str(self.database_engine.url)
+            if database_uri.startswith('sqlite://'):
+                # For SQLite, we don't have channels table, use mock data
+                total_channels = 0
+            else:
+                total_channels = session.query(func.count(Channels.channel_id)).scalar() or 0
+
+            # Calculate current activity metrics
+
+            # Messages per hour (current active period)
+            one_hour_ago = datetime.datetime.now() - datetime.timedelta(hours=1)
+            messages_last_hour = session.query(
+                func.count(Messages.message_id)
+            ).filter(
+                Messages.sent_at >= one_hour_ago
+            ).scalar() or 0
+
+            # Active users (users who sent messages in last 24 hours)
+            twenty_four_hours_ago = datetime.datetime.now() - datetime.timedelta(hours=24)
+            active_users_24h = session.query(
+                func.count(func.distinct(Messages.sender_id))
+            ).filter(
+                Messages.sent_at >= twenty_four_hours_ago
+            ).scalar() or 0
+
+            # Current online users
+            user_status_counts = self.get_user_status_counts()
+            current_online = user_status_counts.get('online', 0)
+
+            # Calculate engagement rate (active users / total users)
+            engagement_rate = (active_users_24h / total_users * 100) if total_users > 0 else 0
+
+            # Get latest activity metrics record for trends
+            latest_metrics = session.query(ActivityMetrics).order_by(
+                ActivityMetrics.created_at.desc()
+            ).first()
+
+            return {
+                'total_users': total_users,
+                'total_channels': total_channels,
+                'messages_per_hour': messages_last_hour,
+                'active_users_24h': active_users_24h,
+                'current_online': current_online,
+                'engagement_rate': round(engagement_rate, 1),
+                'messages_per_active_user': round(messages_last_hour / max(active_users_24h, 1), 1) if messages_last_hour > 0 else 0,
+                'channel_utilization': min(int((active_users_24h / max(total_channels, 1)) * 100), 100) if total_channels > 0 else 0,
+                'last_updated': latest_metrics.created_at.isoformat() if latest_metrics else None
+            }
+
+    def calculate_daily_activity_metrics(self) -> ActivityMetrics | None:
+        """Calculate and return daily activity metrics"""
+        # Get today's date (start of day)
+        today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = today + datetime.timedelta(days=1)
+
+        with self.database_session() as session:
+            # Count new users registered today
+            new_users_today = self.get_user_registration_count_by_period(today, tomorrow)
+
+            # Count messages sent today
+            messages_today = self.get_message_count_by_period(today, tomorrow)
+
+            # Get active users today (users who sent messages)
+            active_users_today = session.query(
+                func.count(func.distinct(Messages.sender_id))
+            ).filter(
+                Messages.sent_at >= today,
+                Messages.sent_at < tomorrow
+            ).scalar() or 0
+
+            # Get online user stats
+            online_avg = session.query(func.avg(ChartData.value)).filter(
+                ChartData.chart_type == 'online_users',
+                ChartData.time_start >= today,
+                ChartData.time_start < tomorrow
+            ).scalar() or 0
+
+            online_peak = session.query(func.max(ChartData.value)).filter(
+                ChartData.chart_type == 'online_users',
+                ChartData.time_start >= today,
+                ChartData.time_start < tomorrow
+            ).scalar() or 0
+
+            # Get total users at end of day
+            total_users = self.count_users()
+
+            # Get channels used today
+            channels_used_today = session.query(
+                func.count(func.distinct(Messages.channel_id))
+            ).filter(
+                Messages.sent_at >= today,
+                Messages.sent_at < tomorrow
+            ).scalar() or 0
+
+            # Calculate messages per hour average for today
+            messages_per_hour = messages_today / 24 if messages_today > 0 else 0
+
+            # Calculate engagement metrics
+            engagement_rate = (active_users_today / total_users * 100) if total_users > 0 else 0
+            messages_per_active_user = messages_today / max(active_users_today, 1) if messages_today > 0 else 0
+            channel_utilization_rate = (channels_used_today / max(total_channels, 1) * 100) if total_channels > 0 else 0
+
+            # Get total channels
+            total_channels = session.query(func.count(Channels.channel_id)).scalar() or 0
+
+            # Calculate server uptime (this would need to be tracked system-wide)
+            server_uptime_hours = 24.0  # Simplified - would need to track actual uptime
+
+            # Get file upload stats for today
+            files_uploaded_today = session.query(
+                func.count(FileReferences.id)
+            ).filter(
+                FileReferences.created_at >= today,
+                FileReferences.created_at < tomorrow
+            ).scalar() or 0
+
+            total_file_size_today = session.query(
+                func.sum(FileObjects.file_size)
+            ).join(
+                FileReferences, FileObjects.file_id == FileReferences.file_id
+            ).filter(
+                FileReferences.created_at >= today,
+                FileReferences.created_at < tomorrow
+            ).scalar() or 0
+
+            total_file_size_mb = total_file_size_today / (1024 * 1024) if total_file_size_today else 0
+
+            return ActivityMetrics(
+                period='daily',
+                date=today,
+                total_users=total_users,
+                new_users=new_users_today,
+                active_users=active_users_today,
+                online_users_avg=online_avg,
+                online_users_peak=online_peak,
+                total_messages=messages_today,
+                messages_this_period=messages_today,
+                messages_per_hour=messages_per_hour,
+                channels_used=channels_used_today,
+                user_engagement_rate=engagement_rate,
+                messages_per_active_user=messages_per_active_user,
+                channel_utilization_rate=channel_utilization_rate,
+                files_uploaded=files_uploaded_today,
+                total_file_size_mb=total_file_size_mb,
+                server_uptime_hours=server_uptime_hours
+            )
+
+    def count_channels(self) -> int:
+        """Count total channels in the server"""
+        with self.database_session() as session:
+            return session.query(func.count(Channels.channel_id)).scalar() or 0
+
+    def get_current_online_count(self) -> int:
+        """Get current online users count"""
+        status_counts = self.get_user_status_counts()
+        return status_counts.get('online', 0)
+
+    def update_server_avatar_url(self, avatar_url: str) -> None:
+        """Update the server's avatar URL
+
+        Args:
+            avatar_url (str): The new avatar URL.
+
+        Returns:
+            None.
+        """
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+
+        # For SQLite tests where server table is not created, skip
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        with self.database_session() as session:
+            stmt = update(Server).values(
+                avatar_url=avatar_url,
+                updated_at=updated_at
+            )
+
+            session.execute(stmt)
+
+            session.commit()
+
+    def update_server_banner_url(self, banner_url: str) -> None:
+        """Update the server's banner URL
+
+        Args:
+            banner_url (str): The new banner URL.
+
+        Returns:
+            None.
+        """
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+
+        # For SQLite tests where server table is not created, skip
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        with self.database_session() as session:
+            stmt = update(Server).values(
+                banner_url=banner_url,
+                updated_at=updated_at
+            )
+
+            session.execute(stmt)
+
+            session.commit()
+
+    def create_file_object(self, file_hash: str, ref_count: int, file_path: str, file_size: int, mime_type: str, verification_status: str = "unverified") -> None:
+        """
+        Create a file object entry in the database
+
+        Args:
+            file_hash (str): SHA-256 hash of the file
+            ref_count (int): Initial reference count
+            file_path (str): Relative path to the file
+            file_size (int): File size in bytes
+            mime_type (str): MIME type of the file
+            verification_status (str): Verification status
+
+        Returns:
+            None
+        """
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        file_obj = FileObjects(
+            file_hash=file_hash,
+            ref_count=ref_count,
+            file_path=file_path,
+            file_size=file_size,
+            mime_type=mime_type,
+            verification_status=verification_status
+        )
+
+        with self.database_session() as session:
+            session.add(file_obj)
+            session.commit()
+
+    def create_file_reference(self, reference_id: str, file_hash: str, reference_type: str, reference_entity_id: str) -> None:
+        """
+        Create a file reference entry in the database
+
+        Args:
+            reference_id (str): Unique reference identifier
+            file_hash (str): SHA-256 hash of the file
+            reference_type (str): Type of reference (e.g., 'cdn_upload')
+            reference_entity_id (str): ID of the entity being referenced
+
+        Returns:
+            None
+        """
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        file_ref = FileReferences(
+            reference_id=reference_id,
+            file_hash=file_hash,
+            reference_type=reference_type,
+            reference_entity_id=reference_entity_id
+        )
+
+        with self.database_session() as session:
+            session.add(file_ref)
+            session.commit()
+
+    def increment_file_reference_count(self, file_hash: str) -> None:
+        """
+        Increment the reference count for a file
+
+        Args:
+            file_hash (str): SHA-256 hash of the file
+
+        Returns:
+            None
+        """
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        with self.database_session() as session:
+            stmt = update(FileObjects).values(
+                ref_count=FileObjects.ref_count + 1
+            ).where(FileObjects.file_hash == file_hash)
+            session.execute(stmt)
+            session.commit()
+
+    def decrement_file_reference_count(self, file_hash: str) -> None:
+        """
+        Decrement the reference count for a file
+
+        Args:
+            file_hash (str): SHA-256 hash of the file
+
+        Returns:
+            None
+        """
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        with self.database_session() as session:
+            stmt = update(FileObjects).values(
+                ref_count=FileObjects.ref_count - 1
+            ).where(FileObjects.file_hash == file_hash)
+            session.execute(stmt)
+            session.commit()
+
+    def cleanup_orphaned_files(self, db_files: List[str] = None) -> None:
+        """
+        Remove files that are no longer referenced in the database.
+        This is used by the CDN cleanup feature to remove unreferenced files.
+
+        Args:
+            db_files (List[str]): Optional list of referenced file URLs.
+                                If None, uses database references.
+
+        Returns:
+            None
+        """
+        from pathlib import Path
+
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        with self.database_session() as session:
+            if db_files is None:
+                # Get all referenced file hashes from the database
+                file_hashes = session.query(FileReferences.file_hash).distinct().all()
+                file_hashes = [h[0] for h in file_hashes]
+            else:
+                # Convert URLs to hashes if URL list provided (legacy support)
+                file_hashes = []
+                for url in db_files:
+                    # Extract path from URL and try to find corresponding file
+                    base_url = self.config.CDN_BASE_URL.lstrip('/')
+                    if url.startswith(base_url):
+                        relative_path = url[len(base_url):].lstrip('/')
+                        file_path = Path(self.config.CDN_STORAGE_PATH) / relative_path
+                        if file_path.exists():
+                            try:
+                                with open(file_path, "rb") as f:
+                                    content = f.read()
+                                    file_hash = hashlib.sha256(content).hexdigest()
+                                    file_hashes.append(file_hash)
+                            except:
+                                continue
+
+            # Get files with zero references
+            orphaned_files = session.query(FileObjects).filter(
+                FileObjects.ref_count <= 0,
+                FileObjects.file_hash.not_in(file_hashes) if file_hashes else True
+            ).all()
+
+            # Delete orphaned files from disk and database
+            for file_obj in orphaned_files:
+                file_path = Path(self.config.CDN_STORAGE_PATH) / file_obj.file_path
+                try:
+                    if file_path.exists():
+                        file_path.unlink()
+                        logger.info(f"Deleted orphaned file: {file_obj.file_path}")
+
+                    # Remove from database
+                    session.delete(file_obj)
+
+                except Exception as e:
+                    logger.warning(f"Failed to delete orphaned file {file_obj.file_path}: {e}")
+
+            # Also find and remove files on disk that aren't in the database
+            cdn_dir = Path(self.config.CDN_STORAGE_PATH)
+            if cdn_dir.exists():
+                for sub_dir in cdn_dir.glob("*"):
+                    if sub_dir.is_dir():  # Only process subdirectories
+                        for file_path in sub_dir.glob("*"):
+                            if file_path.is_file():
+                                try:
+                                    with open(file_path, "rb") as f:
+                                        content = f.read()
+                                        file_hash = hashlib.sha256(content).hexdigest()
+
+                                    # Check if this file exists in database
+                                    existing = session.query(FileObjects).filter(
+                                        FileObjects.file_hash == file_hash
+                                    ).first()
+
+                                    if not existing:
+                                        # File not in database, check if it's referenced
+                                        is_referenced = session.query(FileReferences).filter(
+                                            FileReferences.file_hash == file_hash
+                                        ).count() > 0
+
+                                        if not is_referenced:
+                                            # Truly orphaned file - remove it
+                                            file_path.unlink()
+                                            logger.info(f"Deleted unreferenced file on disk: {file_path.name}")
+                                except:
+                                    continue
+
+            session.commit()
+
+    def get_referenced_files_list(self) -> List[str]:
+        """
+        Get a list of all referenced file URLs for cleanup operations
+
+        Args:
+            None
+
+        Returns:
+            List[str]: List of referenced file URLs
+        """
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return []
+
+        with self.database_session() as session:
+            # Get all referenced file hashes
+            results = session.query(FileReferences.file_hash, FileObjects.file_path).join(
+                FileObjects, FileReferences.file_hash == FileObjects.file_hash
+            ).all()
+
+            # Convert to URLs
+            referenced_files = []
+            for file_hash, file_path in results:
+                url = f"{self.config.CDN_BASE_URL}/{file_path}"
+                referenced_files.append(url)
+
+            return referenced_files
+
+    # Activity Audit Methods
+
+    def create_activity_audit_entry(self, activity_audit: ActivityAudit) -> None:
+        """
+        Create an activity audit entry in the database
+
+        Args:
+            activity_audit (ActivityAudit): The activity audit entry to create
+
+        Returns:
+            None
+        """
+        # Skip for SQLite tests where activity_audit table is not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        with self.database_session() as session:
+            session.add(activity_audit)
+            session.commit()
+
+    def get_recent_activities(self, limit: int = 10) -> list[ActivityAudit]:
+        """
+        Get recent activity audit entries, ordered by creation time (newest first)
+
+        Args:
+            limit (int): Maximum number of activity entries to return
+
+        Returns:
+            list[ActivityAudit]: List of recent activity entries
+        """
+        # Skip for SQLite tests where activity_audit table is not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            # Return empty list for testing
+            return []
+
+        with self.database_session() as session:
+            # Get recent activities, ordered by creation time descending
+            activities = session.query(ActivityAudit).order_by(
+                ActivityAudit.created_at.desc()
+            ).limit(limit).all()
+
+            return activities

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import json
 
@@ -105,10 +105,13 @@ class ChartData(Base):
             timestamp = datetime.now()
 
         hour_start = timestamp.replace(minute=0, second=0, microsecond=0)
-        hour_end = hour_start.replace(hour=hour_start.hour + 1)
 
-        if hour_end.hour == 0:  # Handle day rollovers
-            hour_end = hour_end.replace(hour=0, day=hour_end.day + 1)
+        # Calculate hour_end, handling day rollover for hour 23
+        if hour_start.hour == 23:
+            # Special case for hour 23 - goes to next day at 00:00
+            hour_end = hour_start.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        else:
+            hour_end = hour_start.replace(hour=hour_start.hour + 1)
 
         metrics = {metric_name: value}
         if additional_metrics:

@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Dict, Any, Callable, Optional, List
 import logging
 from datetime import datetime, timedelta
@@ -252,19 +253,23 @@ class BackgroundTasksManager:
             # Get all referenced file URLs from database
             referenced_urls = await self._get_referenced_file_urls()
 
-            # Clean up each subdirectory
-            subdirectories = ['files', 'avatars', 'banners', 'stickers']
+            # Get all file categories from CDN manager
+            all_categories = [
+                'files', 'images', 'avatars', 'banners', 'gifs', 'stickers',
+                'videos', 'audio', 'documents', 'config'
+            ]
+
             total_deleted = 0
 
-            for subdir in subdirectories:
+            for category in all_categories:
                 # Get all files in directory
-                directory_files = self._get_directory_files(subdir)
+                directory_files = self._get_directory_files(category)
 
                 # Filter to keep only referenced files
-                subdir_deleted = self.cdn_manager.cleanup_orphaned_files(directory_files, subdir)
+                subdir_deleted = self.cdn_manager.cleanup_orphaned_files(directory_files, category)
                 total_deleted += subdir_deleted or 0
 
-            logger.info(f"CDN cleanup completed. Deleted {total_deleted} orphaned files")
+            logger.info(f"CDN cleanup completed. Deleted {total_deleted} orphaned files from {len(all_categories)} categories")
 
         except Exception as e:
             logger.error(f"CDN cleanup failed: {str(e)}")
@@ -973,7 +978,7 @@ class BackgroundTasksManager:
             period: Time period (daily, weekly, monthly, etc.)
 
         Returns:
-            Chart data dictionary
+            Chart data dictionary with chart_data and raw_stats
         """
         try:
             with self.database_handler.database_session() as session:
@@ -990,11 +995,15 @@ class BackgroundTasksManager:
                 for entry in chart_entries:
                     data_list.append(entry.to_chart_format())
 
+                # Calculate raw statistics based on chart type
+                raw_stats = self._calculate_raw_stats_for_chart(chart_type, period, chart_entries)
+
                 if period:
                     return {
                         'chart_type': chart_type,
                         'period': period,
-                        'data': data_list,
+                        'chart_data': data_list,
+                        'raw_stats': raw_stats,
                         'last_updated': datetime.now().isoformat()
                     }
                 else:
@@ -1008,7 +1017,8 @@ class BackgroundTasksManager:
 
                     return {
                         'chart_type': chart_type,
-                        'data': grouped_data,
+                        'chart_data': grouped_data,
+                        'raw_stats': raw_stats,
                         'last_updated': datetime.now().isoformat()
                     }
 
@@ -1017,11 +1027,232 @@ class BackgroundTasksManager:
             return {
                 'chart_type': chart_type,
                 'error': f"Failed to retrieve data: {str(e)}",
-                'data': {},
+                'chart_data': {},
+                'raw_stats': {},
                 'last_updated': datetime.now().isoformat()
             }
 
+    def _calculate_raw_stats_for_chart(self, chart_type: str, period: str = None, chart_entries: List = None) -> Dict[str, Any]:
+        """
+        Calculate raw statistics for a given chart type
 
+        Args:
+            chart_type: Type of chart (user_registrations, message_activity, etc.)
+            period: Time period (daily, weekly, monthly, etc.)
+            chart_entries: List of chart data entries
+
+        Returns:
+            Raw statistics dictionary
+        """
+        try:
+            # Get current server stats
+            server_stats = getattr(self, 'server_stats', {})
+
+            # Extract stats that might be used in multiple chart types
+            users_stats = server_stats.get('users', {})
+
+            if chart_type == 'user_registrations':
+                users_stats = server_stats.get('users', {})
+
+                # Calculate growth metrics from chart entries
+                growth_stats = self._calculate_growth_stats(chart_entries)
+
+                return {
+                    'total_users': users_stats.get('total', 0),
+                    'new_this_week': users_stats.get('new_this_week', 0),
+                    'new_this_month': users_stats.get('new_this_month', 0),
+                    'online_now': users_stats.get('online', 0),
+                    'recently_active': users_stats.get('recently_active', 0),
+                    'growth_rate_week': growth_stats.get('weekly_growth', 0),
+                    'growth_rate_month': growth_stats.get('monthly_growth', 0),
+                    'peak_registrations': growth_stats.get('peak', 0),
+                    'avg_daily_registrations': growth_stats.get('avg_daily', 0)
+                }
+
+            elif chart_type == 'message_activity':
+                messages_stats = server_stats.get('messages', {})
+
+                # Calculate message growth metrics
+                growth_stats = self._calculate_growth_stats(chart_entries)
+
+                return {
+                    'total_messages': messages_stats.get('total', 0),
+                    'messages_today': messages_stats.get('past_24h', 0),
+                    'messages_this_week': messages_stats.get('past_week', 0),
+                    'messages_this_month': messages_stats.get('past_month', 0),
+                    'messages_this_quarter': messages_stats.get('past_quarter', 0),
+                    'messages_this_year': messages_stats.get('past_year', 0),
+                    'growth_rate_week': growth_stats.get('weekly_growth', 0),
+                    'growth_rate_month': growth_stats.get('monthly_growth', 0),
+                    'peak_activity': growth_stats.get('peak', 0),
+                    'avg_daily_messages': growth_stats.get('avg_daily', 0),
+                    'messages_per_user': messages_stats.get('total', 0) / max(users_stats.get('total', 1), 1)
+                }
+
+            elif chart_type == 'online_users':
+                users_stats = server_stats.get('users', {})
+
+                # Calculate online user metrics
+                online_metrics = self._calculate_online_user_stats(chart_entries)
+
+                return {
+                    'currently_online': users_stats.get('online', 0),
+                    'recently_active': users_stats.get('recently_active', 0),
+                    'peak_online_today': online_metrics.get('peak_today', 0),
+                    'avg_online_today': online_metrics.get('avg_today', 0),
+                    'peak_online_week': online_metrics.get('peak_week', 0),
+                    'avg_online_week': online_metrics.get('avg_week', 0),
+                    'total_users': users_stats.get('total', 0),
+                    'online_percentage': (users_stats.get('online', 0) / max(users_stats.get('total', 1), 1)) * 100
+                }
+
+            elif chart_type == 'channel_creation':
+                channels_stats = server_stats.get('channels', {})
+
+                # Calculate channel growth metrics
+                growth_stats = self._calculate_growth_stats(chart_entries)
+
+                return {
+                    'total_channels': channels_stats.get('total', 0),
+                    'public_channels': channels_stats.get('public', 0),
+                    'private_channels': channels_stats.get('private', 0),
+                    'new_this_week': channels_stats.get('new_this_week', 0),
+                    'new_this_month': channels_stats.get('new_this_month', 0),
+                    'growth_rate_week': growth_stats.get('weekly_growth', 0),
+                    'growth_rate_month': growth_stats.get('monthly_growth', 0),
+                    'peak_creations': growth_stats.get('peak', 0),
+                    'avg_daily_creations': growth_stats.get('avg_daily', 0)
+                }
+
+            elif chart_type == 'user_status':
+                # For pie chart, status counts are already in the chart_entries
+                status_counts = {}
+                if chart_entries and len(chart_entries) > 0:
+                    # Assume the pie chart data contains the counts
+                    status_counts = chart_entries[0] if isinstance(chart_entries[0], dict) else {}
+
+                return {
+                    'online_users': status_counts.get('online', 0),
+                    'offline_users': status_counts.get('offline', 0),
+                    'away_users': status_counts.get('away', 0),
+                    'total_users': sum(status_counts.values()) if status_counts else 0
+                }
+
+            return {}
+
+        except Exception as e:
+            logger.error(f"Failed to calculate raw stats for {chart_type}: {str(e)}")
+            return {}
+
+    def _calculate_growth_stats(self, chart_entries: List) -> Dict[str, Any]:
+        """Calculate growth statistics from chart entries"""
+        try:
+            if not chart_entries:
+                return {'weekly_growth': 0, 'monthly_growth': 0, 'peak': 0, 'avg_daily': 0}
+
+            # Extract primary values
+            values = []
+            for entry in chart_entries:
+                if hasattr(entry, 'primary_value'):
+                    values.append(entry.primary_value or 0)
+                elif isinstance(entry, dict) and 'y' in entry:
+                    values.append(entry['y'])
+                elif isinstance(entry, dict) and 'data' in entry:
+                    values.append(entry['data'])
+
+            if not values:
+                return {'weekly_growth': 0, 'monthly_growth': 0, 'peak': 0, 'avg_daily': 0}
+
+            # Calculate metrics
+            peak = max(values) if values else 0
+            avg_daily = sum(values) / len(values) if values else 0
+
+            # Calculate growth rates (simplified - comparing first half vs second half)
+            mid_point = len(values) // 2
+            if mid_point > 0:
+                first_half_avg = sum(values[:mid_point]) / mid_point
+                second_half_avg = sum(values[mid_point:]) / (len(values) - mid_point)
+
+                weekly_growth = ((second_half_avg - first_half_avg) / max(first_half_avg, 1)) * 100 if first_half_avg else 0
+                monthly_growth = weekly_growth * 4  # Rough estimate
+            else:
+                weekly_growth = 0
+                monthly_growth = 0
+
+            return {
+                'weekly_growth': round(weekly_growth, 2),
+                'monthly_growth': round(monthly_growth, 2),
+                'peak': peak,
+                'avg_daily': round(avg_daily, 2)
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to calculate growth stats: {str(e)}")
+            return {'weekly_growth': 0, 'monthly_growth': 0, 'peak': 0, 'avg_daily': 0}
+
+    def get_raw_stats(self, chart_type: str, period: str = None) -> Dict[str, Any]:
+        """
+        Get raw statistics for a chart type and period
+
+        Args:
+            chart_type: Type of chart (user_registrations, message_activity, etc.)
+            period: Time period (daily, weekly, monthly, etc.)
+
+        Returns:
+            Raw statistics dictionary
+        """
+        try:
+            # Get chart entries from database
+            with self.database_handler.database_session() as session:
+                from pufferblow.api.database.tables.chart_data import ChartData
+                query = session.query(ChartData).filter(ChartData.chart_type == chart_type)
+
+                if period:
+                    query = query.filter(ChartData.period_type == period)
+
+                chart_entries = query.order_by(ChartData.time_start).all()
+
+            # Calculate raw stats using the existing method
+            return self._calculate_raw_stats_for_chart(chart_type, period, chart_entries)
+
+        except Exception as e:
+            logger.error(f"Failed to get raw stats for {chart_type}: {str(e)}")
+            return {}
+
+    def _calculate_online_user_stats(self, chart_entries: List) -> Dict[str, Any]:
+        """Calculate online user statistics"""
+        try:
+            if not chart_entries:
+                return {'peak_today': 0, 'avg_today': 0, 'peak_week': 0, 'avg_week': 0}
+
+            # Separate hourly (24h) and daily (7d) data
+            hourly_data = []
+            daily_data = []
+
+            for entry in chart_entries:
+                if hasattr(entry, 'period_type'):
+                    if entry.period_type == '24h':
+                        hourly_data.append(entry.primary_value or 0)
+                    elif entry.period_type == '7d':
+                        daily_data.append(entry.primary_value or 0)
+
+            peak_today = max(hourly_data) if hourly_data else 0
+            avg_today = sum(hourly_data) / len(hourly_data) if hourly_data else 0
+            peak_week = max(daily_data) if daily_data else 0
+            avg_week = sum(daily_data) / len(daily_data) if daily_data else 0
+
+            return {
+                'peak_today': peak_today,
+                'avg_today': round(avg_today, 2),
+                'peak_week': peak_week,
+                'avg_week': round(avg_week, 2)
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to calculate online user stats: {str(e)}")
+            return {'peak_today': 0, 'avg_today': 0, 'peak_week': 0, 'avg_week': 0}
+
+@asynccontextmanager
 async def lifespan_background_tasks():
     """Lifespan function to start background tasks"""
     from pufferblow.api_initializer import api_initializer

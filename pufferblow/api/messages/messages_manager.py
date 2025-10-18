@@ -60,7 +60,7 @@ class MessagesManager(object):
 
             # Decrypt the message
             raw_message = self.decrypt_message(
-                user_id=message_metadata.sender_user_id,
+                user_id=str(message_metadata.sender_id),
                 message_id=message_metadata.message_id,
                 encrypted_message=base64.b64decode(message_metadata.hashed_message)
             )
@@ -70,7 +70,7 @@ class MessagesManager(object):
 
             # injecting in the `username` of the sender
             sender_user_metadata = self.user_manager.user_profile(
-                user_id=message_metadata.sender_user_id
+                user_id=str(message_metadata.sender_id)
             )
             json_metadata_format["username"] = sender_user_metadata["username"]
 
@@ -116,17 +116,23 @@ class MessagesManager(object):
             message=message[:random.choice([i for i in range(len(message))])] if message else "attachment"
         )
         message_metadata.channel_id     = channel_id
-        message_metadata.sender_user_id = user_id
-        message_metadata.hashed_message = self.encrypt_message(
+        message_metadata.sender_id      = user_id
+        message_metadata.attachments    = attachments or []
+
+        # Encrypt the message and get the encryption key
+        message_metadata.hashed_message, encryption_key = self.encrypt_message(
             message=message,
             user_id=user_id,
             message_id=message_metadata.message_id
         )
-        message_metadata.attachments    = attachments or []
 
+        # Save message to the database first (so message_id exists for foreign key)
         self.database_handler.save_message(
             message=message_metadata
         )
+
+        # Save the encryption key after we have the message record
+        self.database_handler.save_keys(key=encryption_key)
 
         return message_metadata
     
@@ -187,9 +193,9 @@ class MessagesManager(object):
 
         return message_metadata is not None
 
-    def encrypt_message(self, message: str, user_id: str, message_id: str) -> str:
+    def encrypt_message(self, message: str, user_id: str, message_id: str) -> tuple[str, object]:
         """
-        Encrypt a message and save the salt into the database
+        Encrypt a message and return the encrypted message and encryption key
         
         Args:
             message (str): The raw message.
@@ -197,23 +203,19 @@ class MessagesManager(object):
             message_id (str): The message's `message_id`.
         
         Returns:
-            str: base64 encoded version of the message
+            tuple[str, object]: (base64 encoded encrypted message, encryption key object)
         """
         encrypted_message, key = self.hasher.encrypt(
             data=message
         )
 
-        key.user_id          =   user_id 
+        key.user_id          =   user_id
         key.message_id       =   message_id
         key.associated_to    =   "message"
 
-        self.database_handler.save_keys(
-            key=key
-        )
-
         encrypted_message = base64.b64encode(encrypted_message).decode("ascii")
 
-        return encrypted_message
+        return encrypted_message, key
     
     def decrypt_message(self, user_id:str, message_id: str, encrypted_message: bytes) -> str:
         """
@@ -246,7 +248,7 @@ class MessagesManager(object):
 
         Args:
             message_id (str): The message's `message_id`.
-        
+
         Returns:
             str: The message sender's `user_id`.
         """
@@ -254,7 +256,7 @@ class MessagesManager(object):
             message_id=message_id
         )
 
-        return message_metadata.sender_user_id
+        return str(message_metadata.sender_id)
 
     def _generate_message_id(self, user_id: str, message: str) -> str:
         """

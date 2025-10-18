@@ -1,4 +1,5 @@
 from fastapi.responses import ORJSONResponse
+from loguru import logger
 
 # Utils
 from pufferblow.api.utils.extract_user_id import extract_user_id
@@ -45,29 +46,45 @@ class SecurityChecksHandler(object):
         Args:
             auth_token (str, optional, default: None): The user's auth_token.
             user_id (str, optional, default: None): The user's user_id, if None then it will be extracted from the auth_token.
-        
+
         Returns:
             None.
         """
+        logger.debug(f"Security check_user called with auth_token_provided={auth_token is not None}, user_id_provided={user_id is not None}")
+
         if user_id is None:
             user_id = extract_user_id(auth_token)
-        
-        if auth_token is not None and not self.user_manager.check_user(
-            user_id=user_id,
-            auth_token=auth_token
-        ):
-            return ORJSONResponse(
-                status_code=404,
-                content={"error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."}
+            logger.debug(f"Extracted user_id from auth_token: {user_id}")
+
+        # When both auth_token and user_id are provided, we need to validate both token ownership and user existence
+        if auth_token is not None:
+            # First validate the auth token belongs to this user
+            token_valid = self.auth_token_manager.check_users_auth_token(
+                user_id=user_id,
+                raw_auth_token=auth_token
             )
-        
-        if user_id is not None and not self.user_manager.check_user(
-            user_id=user_id
-        ):
-            return ORJSONResponse(
-                status_code=404,
-                content={"error": f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"}
-            )
+            logger.debug(f"Token ownership validation for user_id={user_id}: {'PASSED' if token_valid else 'FAILED'}")
+
+            if not token_valid:
+                logger.warning(f"Authentication failed: invalid token for user_id={user_id}")
+                return ORJSONResponse(
+                    status_code=404,
+                    content={"error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."}
+                )
+
+        # Then check if the user_id exists
+        if user_id is not None:
+            user_exists = self.user_manager.check_user(user_id=user_id)
+            logger.debug(f"User existence validation for user_id={user_id}: {'PASSED' if user_exists else 'FAILED'}")
+
+            if not user_exists:
+                logger.warning(f"Authentication failed: user_id does not exist: {user_id}")
+                return ORJSONResponse(
+                    status_code=404,
+                    content={"error": f"The target user's user_id='{user_id}' not found. Please make sure to pass the correct one"}
+                )
+
+        logger.debug(f"User authentication check passed for user_id={user_id}")
 
     def check_auth_token_format(self, auth_token: str, check_user_existence: bool | None = True) -> None:
         """
