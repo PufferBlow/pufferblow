@@ -3,6 +3,8 @@ import asyncio
 import base64
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 from fastapi import (
     FastAPI,
@@ -21,6 +23,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from loguru import logger
+
+# TODO: BLock known IPs https://www.ipdeny.com/ipblocks/
 
 # Pydantic models for request bodies and query parameters
 class SignupRequest(BaseModel):
@@ -50,13 +54,26 @@ class ResetTokenRequest(BaseModel):
 class ListUsersRequest(BaseModel):
     auth_token: str
 
+class ListUsersResponse(BaseModel):
+    status_code: int
+    users: list[dict]  # Keep as dict for now since complex nested user structure
+
 class ListChannelsRequest(BaseModel):
     auth_token: str
+
+class ListChannelsResponse(BaseModel):
+    status_code: int
+    channels: list = []  # Keep as list for now since complex nested channel structure
 
 class CreateChannelRequest(BaseModel):
     auth_token: str
     channel_name: str
     is_private: bool = False
+
+class CreateChannelResponse(BaseModel):
+    status_code: int
+    message: str
+    channel_data: dict  # Keep complex dict structure for channel data
 
 # Query parameter models
 class AuthTokenQuery(BaseModel):
@@ -91,6 +108,22 @@ class LoadMessagesQuery(BaseModel):
     auth_token: str = Field(min_length=1)
     page: int = Field(default=1, ge=1)
     messages_per_page: int = Field(default=20, ge=1, le=50)
+
+class MessageData(BaseModel):
+    """Pydantic model for individual message data"""
+    message_id: str
+    channel_id: str | None = None
+    conversation_id: str | None = None
+    sender_id: str
+    message: str
+    sent_at: str
+    attachments: list[str] = []
+    username: str
+
+class LoadMessagesResponse(BaseModel):
+    """Pydantic model for load messages API response"""
+    status_code: int
+    messages: list[MessageData]
 
 class SendMessageQuery(BaseModel):
     auth_token: str = Field(min_length=1)
@@ -170,6 +203,40 @@ from pufferblow.api.utils.is_able_to_update import is_able_to_update
 from pufferblow.api.logger.msgs import (
     info
 )
+
+
+async def check_if_file_is_protected(file_url: str) -> bool:
+    """
+    Check if a file URL is currently used as a user avatar/banner or server avatar/banner.
+
+    Args:
+        file_url (str): The file URL to check
+
+    Returns:
+        bool: True if the file is currently in use as an avatar/banner
+    """
+    try:
+        # For SQLite tests, skip protection check
+        database_uri = str(api_initializer.database.batch_engine.url) if hasattr(api_initializer.database, 'batch_engine') else str(api_initializer.database.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return False
+
+        # Get all users and check their avatars/banners
+        all_users = api_initializer.database_handler.get_all_users()
+        for user in all_users:
+            if user.avatar_url == file_url or user.banner_url == file_url:
+                return True
+
+        # Check server avatar/banner
+        server_data = api_initializer.database_handler.get_server()
+        if server_data.avatar_url == file_url or server_data.banner_url == file_url:
+            return True
+
+        return False
+    except Exception as e:
+        # Log error but don't block deletion for safety
+        logger.warning(f"Error checking if file is protected: {str(e)}")
+        return False
 
 
 # NOTE: Background tasks. https://fastapi.tiangolo.com/tutorial/background-tasks/
@@ -277,6 +344,22 @@ async def signup_new_user(
         )
     )
 
+    # Log user signup activity
+    api_initializer.database_handler.create_activity_audit_entry(
+        ActivityAudit(
+            activity_id=str(uuid.uuid4()),
+            activity_type="user_joined",
+            user_id=str(user_data.user_id),
+            title=f"User {request.username} joined the server",
+            description=f"New user {request.username} has successfully registered",
+            metadata_json=json.dumps({
+                "username": request.username,
+                "user_id": str(user_data.user_id),
+                "joined_at": user_data.created_at
+            })
+        )
+    )
+
     return {
         "status_code": 201,
         "message": "Account created successfully",
@@ -309,13 +392,29 @@ async def signin_user(query: SigninQuery = Depends()):
         username=query.username,
         password=query.password
     )
-    
+
     if not is_signin_successed:
         raise exceptions.HTTPException(
             status_code=401,
             detail="The provided password is incorrect. Please try again."
         )
-    
+
+    # Log user signin activity
+    api_initializer.database_handler.create_activity_audit_entry(
+        ActivityAudit(
+            activity_id=str(uuid.uuid4()),
+            activity_type="user_signed_in",
+            user_id=str(user.user_id),
+            title=f"User {query.username} signed in",
+            description=f"User {query.username} successfully signed in to their account",
+            metadata_json=json.dumps({
+                "username": query.username,
+                "user_id": str(user.user_id),
+                "signin_method": "password"
+            })
+        )
+    )
+
     return {
         "status_code": 200,
         "message": "Signin successfully",
@@ -357,12 +456,12 @@ async def users_profile_route(request: UserProfileRequest):
     }
 
 @api.put("/api/v1/users/profile", status_code=200)
-async def edit_users_profile_route(query: EditProfileQuery = Depends()):
+async def edit_users_profile_route(request: EditProfileRequest):
     """
     Update a user's profile metadata such as status, last_seen, username and password
 
     Args:
-        query (EditProfileQuery): Query parameters containing auth_token and optional update fields.
+        request (EditProfileRequest): Request body containing auth_token and optional update fields.
 
     Returns:
         200 OK: If all parameters are correct, and the data was updated successfully.
@@ -371,12 +470,12 @@ async def edit_users_profile_route(query: EditProfileQuery = Depends()):
         404 NOT FOUND: The `auth_token` is invalid, or the `user_id` does not exist.
         409 CONFLICT: If the `username` is not available.
     """
-    user_id = extract_user_id(auth_token=query.auth_token)
+    user_id = extract_user_id(auth_token=request.auth_token)
 
     # Update username
-    if query.new_username is not None:
+    if request.new_username is not None:
         if api_initializer.user_manager.check_username(
-            username=query.new_username
+            username=request.new_username
         ):
             raise exceptions.HTTPException(
                 detail="username already exists. Please change it and try again later",
@@ -385,7 +484,7 @@ async def edit_users_profile_route(query: EditProfileQuery = Depends()):
 
         api_initializer.user_manager.update_username(
             user_id=user_id,
-            new_username=query.new_username
+            new_username=request.new_username
         )
 
         return {
@@ -394,10 +493,10 @@ async def edit_users_profile_route(query: EditProfileQuery = Depends()):
         }
 
     # Update the user's status
-    if query.status is not None:
+    if request.status is not None:
         api_initializer.user_manager.update_user_status(
             user_id=user_id,
-            status=query.status
+            status=request.status
         )
 
         return {
@@ -406,10 +505,10 @@ async def edit_users_profile_route(query: EditProfileQuery = Depends()):
         }
 
     # Update the user's password
-    if query.new_password is not None and query.old_password is not None:
+    if request.new_password is not None and request.old_password is not None:
         api_initializer.user_manager.update_user_password(
             user_id=user_id,
-            new_password=query.new_password
+            new_password=request.new_password
         )
 
         return {
@@ -418,10 +517,10 @@ async def edit_users_profile_route(query: EditProfileQuery = Depends()):
         }
 
     # Update about
-    if query.about is not None:
+    if request.about is not None:
         api_initializer.user_manager.update_user_about(
             user_id=user_id,
-            new_about=query.about
+            new_about=request.about
         )
         return {
             "status_code": 200,
@@ -431,8 +530,8 @@ async def edit_users_profile_route(query: EditProfileQuery = Depends()):
 # File upload endpoints
 @api.post("/api/v1/users/profile/avatar", status_code=201)
 async def upload_user_avatar_route(
-    auth_token: str = Body(..., description="User's authentication token"),
-    file: UploadFile = Body(..., description="Avatar image file")
+    auth_token: str = Form(..., description="User's authentication token"),
+    file: UploadFile = Form(..., description="Avatar image file")
 ):
     """
     Upload user's avatar image
@@ -474,8 +573,8 @@ async def upload_user_avatar_route(
 
 @api.post("/api/v1/users/profile/banner", status_code=201)
 async def upload_user_banner_route(
-    auth_token: str = Body(..., description="User's authentication token"),
-    file: UploadFile = Body(..., description="Banner image file")
+    auth_token: str = Form(..., description="User's authentication token"),
+    file: UploadFile = Form(..., description="Banner image file")
 ):
     """
     Upload user's banner image
@@ -722,6 +821,23 @@ async def create_new_channel_route(request: CreateChannelRequest):
             is_private=request.is_private
         )
         logger.info(f"Channel '{request.channel_name}' created successfully by user {user_id}")
+
+        # Log channel creation activity
+        api_initializer.database_handler.create_activity_audit_entry(
+            ActivityAudit(
+                activity_id=str(uuid.uuid4()),
+                activity_type="channel_created",
+                user_id=str(user_id),
+                title=f"Channel #{request.channel_name} created",
+                description=f"New {'private' if request.is_private else 'public'} channel '{request.channel_name}' was created",
+                metadata_json=json.dumps({
+                    "channel_name": request.channel_name,
+                    "channel_id": str(channel_data.channel_id),
+                    "is_private": request.is_private,
+                    "created_by": str(user_id)
+                })
+            )
+        )
     except Exception as e:
         logger.error(f"Channel creation failed: {str(e)}")
         raise
@@ -965,7 +1081,7 @@ async def remove_user_from_channel_route(
         "message": f"User ID: '{to_remove_user_id}' was successfully removed from Channel ID: '{channel_id}'"
     }
 
-@api.get("/api/v1/channels/{channel_id}/load_messages", status_code=200)
+@api.get("/api/v1/channels/{channel_id}/load_messages", status_code=200, response_model=LoadMessagesResponse)
 async def channel_load_messages(
     auth_token: str,
     channel_id: str,
@@ -974,8 +1090,8 @@ async def channel_load_messages(
 ):
     """
     Load a specific number of messages for a given channel. The number of messages to load is controlled by the `messages_count`
-    argument, which defaults to 20 messages. We implement a lazy loading mechanism using a paging system, allowing users to 
-    scroll through older messages in the channel. The `page` parameter increases as the user scrolls, and each `page` 
+    argument, which defaults to 20 messages. We implement a lazy loading mechanism using a paging system, allowing users to
+    scroll through older messages in the channel. The `page` parameter increases as the user scrolls, and each `page`
     typically contains 20 messages by default.
 
     Args:
@@ -983,7 +1099,7 @@ async def channel_load_messages(
         channel_id (str): The channel's `channel_id` that the messages will be loaded for.
         page (int, optional, default: 1): The page number (pages start from 1 to `x` depending on how many messages a channel contains).
         messages_per_page (int, optional, default: 20): The number of messages for each page, defaults to 20, max is 50 (NOTE: Setting a very high value for `messages_per_page` may negatively impact performance).
-    
+
     Returns:
         200 GOOD: If all the parameters where right, a list of messages will be returned.
         400 BAD REQUEST: If the `auth_token` is improperly formatted, or if the `messages_per_page` number exceeded the allowed maximum value.
@@ -995,9 +1111,9 @@ async def channel_load_messages(
             detail=f"`messages_per_page` number exceeded the maximal number which is '{api_initializer.config.MAX_MESSAGES_PER_PAGE}'",
             status_code=400
         )
-    
+
     user_id = extract_user_id(auth_token=auth_token)
-    
+
     # Check if the channel is private, if True then the user should be an admin or the server owner
     if api_initializer.channels_manager.is_private(channel_id=channel_id) and (not api_initializer.user_manager.is_server_owner(user_id=user_id) or not api_initializer.user_manager.is_admin(user_id=user_id)):
         # We return that the channel doesn't exists because it's private
@@ -1009,17 +1125,31 @@ async def channel_load_messages(
             status_code=404,
             detail="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
         )
-    
+
     messages = api_initializer.messages_manager.load_messages(
         channel_id=channel_id,
         messages_per_page=messages_per_page,
         page=page
     )
 
-    return {
-        "status_code": 200,
-        "messages": messages
-    }
+    # Convert the raw messages to Pydantic MessageData models
+    message_data_list = []
+    for msg in messages:
+        message_data_list.append(MessageData(
+            message_id=msg.get('message_id', ''),
+            channel_id=msg.get('channel_id', None),
+            conversation_id=msg.get('conversation_id', None),
+            sender_id=msg.get('sender_id', ''),
+            message=msg.get('message', ''),
+            sent_at=msg.get('sent_at', ''),
+            attachments=msg.get('attachments', []),
+            username=msg.get('sender_username', '')
+        ))
+
+    return LoadMessagesResponse(
+        status_code=200,
+        messages=message_data_list
+    )
 
 @api.post("/api/v1/channels/{channel_id}/send_message")
 async def channel_send_message(
@@ -1143,12 +1273,15 @@ async def channel_send_message(
         "message": message,
         "hashed_message": message_obj.hashed_message,
         "username": sender_user["username"],
+        "sender_avatar_url": sender_user.get("avatar_url"),
+        "sender_status": sender_user.get("status", "offline"),
+        "sender_roles": sender_user.get("roles_ids", []),
         "sent_at": sent_at_value,
         "attachments": attachment_urls
     }
 
-    # Broadcast to all websocket clients in this channel
-    await api_initializer.websockets_manager.broadcast_to_channel(channel_id, message_dict)
+    # Broadcast to all eligible users using global websocket system
+    await api_initializer.websockets_manager.broadcast_to_eligible_users(channel_id, message_dict)
 
     return {
         "status_code": 201,
@@ -1624,13 +1757,14 @@ async def get_cdn_file_info_route(request: CDNFileInfoRequest):
 async def delete_cdn_file_route(request: CDNDeleteFileRequest):
     """
     Delete a file from the CDN. Server Owner only.
+    Prevents deletion of avatar/banner files that are currently in use.
 
     Args:
         request (CDNDeleteFileRequest): Request body containing auth_token and file_url.
 
     Returns:
         200 OK: File deleted successfully
-        403 FORBIDDEN: User is not server owner
+        403 FORBIDDEN: User is not server owner or trying to delete active avatar/banner
         404 NOT FOUND: File not found or invalid auth_token
         500 INTERNAL SERVER ERROR: Deletion failed
     """
@@ -1644,6 +1778,14 @@ async def delete_cdn_file_route(request: CDNDeleteFileRequest):
         )
 
     try:
+        # Check if the file is currently used as an avatar or banner
+        is_protected = await check_if_file_is_protected(request.file_url)
+        if is_protected:
+            raise exceptions.HTTPException(
+                status_code=403,
+                detail="Cannot delete this file as it is currently used as a user or server avatar/banner."
+            )
+
         deleted = api_initializer.cdn_manager.delete_file(request.file_url)
         if not deleted:
             raise exceptions.HTTPException(
@@ -1838,20 +1980,9 @@ async def list_blocked_ips_route(request: AuthTokenQuery):
     try:
         blocked_ips = api_initializer.database_handler.fetch_blocked_ips()
 
-        # Format the response with full IP details
-        formatted_ips = []
-        for ip in blocked_ips:
-            # Note: In SQLite tests, blocked_ips table is excluded, so this will return an empty list
-            # In production, we'd need to get full details from database
-            formatted_ips.append({
-                "ip": ip,
-                "reason": "Blocked due to excessive rate limit warnings",
-                "blocked_at": "Recent"
-            })
-
         return {
             "status_code": 200,
-            "blocked_ips": formatted_ips
+            "blocked_ips": blocked_ips
         }
 
     except Exception as e:
@@ -2466,6 +2597,7 @@ async def upload_server_avatar_route(
 ):
     """
     Upload server's avatar image. Server Owner only.
+    Deletes the old avatar file to prevent storage buildup.
 
     Args:
         auth_token: User's authentication token
@@ -2487,31 +2619,102 @@ async def upload_server_avatar_route(
         )
 
     try:
-        # Use the existing CDN system to handle file uploads
-        # Create unique filename for server avatar
-        import uuid
-        from pathlib import Path
-        from datetime import datetime
+        # Get current server data to check for existing avatar
+        current_server = api_initializer.database_handler.get_server()
+        old_avatar_url = current_server.avatar_url
 
-        # Generate unique filename to avoid conflicts
-        file_extension = Path(avatar.filename).suffix
-        unique_filename = f"server_avatar_{user_id}_{uuid.uuid4().hex}{file_extension}"
+        # Delete old avatar file if it exists
+        if old_avatar_url:
+            try:
+                # Extract relative path from the URL for deletion
+                if old_avatar_url.startswith('/'):
+                    # It's a local CDN URL like /api/v1/cdn/file/...
+                    relative_path = old_avatar_url.replace('/api/v1/cdn/file/', '', 1)
+                    full_path = Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
+                    if full_path.exists():
+                        full_path.unlink()
+                        logger.info(f"Deleted old server avatar: {relative_path}")
+                else:
+                    # Try the CDN manager deletion method
+                    api_initializer.cdn_manager.delete_file(old_avatar_url)
+            except Exception as e:
+                logger.warning(f"Failed to delete old server avatar {old_avatar_url}: {str(e)}")
 
-        # Create CDN path
-        cdn_path = f"server/{unique_filename}"
-        cdn_url = f"/api/v1/cdn/file/{cdn_path}"
+        # Upload new avatar
+        cdn_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_categorized_file(
+            file=avatar,
+            user_id=user_id,
+            force_category="avatars",
+            check_duplicates=False
+        )
 
-        # Save file to CDN storage directory
-        cdn_storage_path = Path(api_initializer.config.CDN_STORAGE_PATH) / cdn_path
-        cdn_storage_path.parent.mkdir(parents=True, exist_ok=True)
+        # Register file in database and create reference
+        try:
+            # Extract file info from URL
+            relative_path = cdn_url[len(api_initializer.config.CDN_BASE_URL):].lstrip('/')
+            file_path_obj = Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
 
-        # Save uploaded file to CDN storage
-        with open(cdn_storage_path, "wb") as buffer:
-            import shutil
-            shutil.copyfileobj(avatar.file, buffer)
+            if file_path_obj.exists():
+                # Read file to compute hash
+                with open(file_path_obj, "rb") as f:
+                    content = f.read()
 
-        # Update server avatar URL in database - use public CDN URL
+                file_hash = api_initializer.cdn_manager.compute_file_hash(content)
+
+                # Always check if file object exists and increment reference count if duplicate
+                # Skip creating file object if it already exists
+                existing_ref_count = api_initializer.database_handler.get_file_reference_count(file_hash)
+                if existing_ref_count is not None and existing_ref_count > 0:
+                    # File already exists, just increment reference count
+                    api_initializer.database_handler.increment_file_reference_count(file_hash)
+                else:
+                    # For new files, register and create reference
+                    api_initializer.database_handler.create_file_object(
+                        file_hash=file_hash,
+                        ref_count=1,
+                        file_path=relative_path,  # Store relative path
+                        file_size=len(content),
+                        mime_type=api_initializer.cdn_manager.mime_detector.from_buffer(content) or 'application/octet-stream',
+                        verification_status="verified"
+                    )
+
+                # Create reference for server avatar
+                reference_id = f"server_avatar_{uuid.uuid4()}"
+                api_initializer.database_handler.create_file_reference(
+                    reference_id=reference_id,
+                    file_hash=file_hash,
+                    reference_type="server_avatar",
+                    reference_entity_id="server"  # Server entity
+                )
+
+        except Exception as e:
+            # Log error but don't fail the upload
+            logger.warning(f"Failed to create file reference for server avatar: {str(e)}")
+
+        # Update server avatar URL in database - ensure full path for proper serving
+        if not cdn_url.startswith('/api/v1/cdn/file/'):
+            # Convert CDN-mounted URL to API route URL for database storage
+            if cdn_url.startswith('/cdn/'):
+                cdn_url = cdn_url.replace('/cdn/', '/api/v1/cdn/file/', 1)
         api_initializer.database_handler.update_server_avatar_url(cdn_url)
+
+        # Log server avatar update activity
+        try:
+            api_initializer.database_handler.create_activity_audit_entry(
+                ActivityAudit(
+                    activity_id=str(uuid.uuid4()),
+                    activity_type="server_avatar_updated",
+                    user_id=user_id,
+                    title="Server avatar updated",
+                    description=f"Server avatar was updated by user {user_id}",
+                    metadata_json=json.dumps({
+                        "avatar_url": cdn_url,
+                        "updated_by": user_id
+                    })
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log server avatar update activity: {str(e)}")
 
         return {
             "status_code": 201,
@@ -2534,6 +2737,7 @@ async def upload_server_banner_route(
 ):
     """
     Upload server's banner image. Server Owner only.
+    Deletes the old banner file to prevent storage buildup.
 
     Args:
         auth_token: User's authentication token
@@ -2555,36 +2759,90 @@ async def upload_server_banner_route(
         )
 
     try:
-        # Use the existing CDN system to handle file uploads
-        # Create unique filename for server banner
-        import uuid
-        from pathlib import Path
-        from datetime import datetime
+        # Get current server data to check for existing banner
+        current_server = api_initializer.database_handler.get_server()
+        old_banner_url = current_server.banner_url
 
-        # Generate unique filename to avoid conflicts
-        file_extension = Path(banner.filename).suffix
-        unique_filename = f"server_banner_{user_id}_{uuid.uuid4().hex}{file_extension}"
+        # Delete old banner file if it exists
+        if old_banner_url:
+            try:
+                # Extract relative path from the URL for deletion
+                if old_banner_url.startswith('/'):
+                    # It's a local CDN URL like /api/v1/cdn/file/...
+                    relative_path = old_banner_url.replace('/api/v1/cdn/file/', '', 1)
+                    full_path = Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
+                    if full_path.exists():
+                        full_path.unlink()
+                        logger.info(f"Deleted old server banner: {relative_path}")
+                else:
+                    # Try the CDN manager deletion method
+                    api_initializer.cdn_manager.delete_file(old_banner_url)
+            except Exception as e:
+                logger.warning(f"Failed to delete old server banner {old_banner_url}: {str(e)}")
 
-        # Create CDN path
-        cdn_path = f"server/{unique_filename}"
-        banner_cdn_url = f"/api/v1/cdn/file/{cdn_path}"
+        # Upload new banner
+        cdn_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_categorized_file(
+            file=banner,
+            user_id=user_id,
+            force_category="banners",
+            check_duplicates=False
+        )
 
-        # Save file to CDN storage directory
-        cdn_storage_path = Path(api_initializer.config.CDN_STORAGE_PATH) / cdn_path
-        cdn_storage_path.parent.mkdir(parents=True, exist_ok=True)
+        # Register file in database and create reference
+        try:
+            # Extract file info from URL
+            from pathlib import Path
+            relative_path = cdn_url[len(api_initializer.config.CDN_BASE_URL):].lstrip('/')
+            file_path_obj = Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
 
-        # Save uploaded file to CDN storage
-        with open(cdn_storage_path, "wb") as buffer:
-            import shutil
-            shutil.copyfileobj(banner.file, buffer)
+            if file_path_obj.exists():
+                # Read file to compute hash
+                with open(file_path_obj, "rb") as f:
+                    content = f.read()
 
-        # Update server banner URL in database - use public CDN URL
-        api_initializer.database_handler.update_server_banner_url(banner_cdn_url)
+                file_hash = api_initializer.cdn_manager.compute_file_hash(content)
+
+                # Always check if file object exists and increment reference count if duplicate
+                # Skip creating file object if it already exists
+                existing_ref_count = api_initializer.database_handler.get_file_reference_count(file_hash)
+                if existing_ref_count is not None and existing_ref_count > 0:
+                    # File already exists, just increment reference count
+                    api_initializer.database_handler.increment_file_reference_count(file_hash)
+                else:
+                    # For new files, register and create reference
+                    api_initializer.database_handler.create_file_object(
+                        file_hash=file_hash,
+                        ref_count=1,
+                        file_path=relative_path,  # Store relative path
+                        file_size=len(content),
+                        mime_type=api_initializer.cdn_manager.mime_detector.from_buffer(content) or 'application/octet-stream',
+                        verification_status="verified"
+                    )
+
+                # Create reference for server banner
+                reference_id = f"server_banner_{uuid.uuid4()}"
+                api_initializer.database_handler.create_file_reference(
+                    reference_id=reference_id,
+                    file_hash=file_hash,
+                    reference_type="server_banner",
+                    reference_entity_id="server"  # Server entity
+                )
+
+        except Exception as e:
+            # Log error but don't fail the upload
+            logger.warning(f"Failed to create file reference for server banner: {str(e)}")
+
+        # Update server banner URL in database - ensure full path for proper serving
+        if not cdn_url.startswith('/api/v1/cdn/file/'):
+            # Convert CDN-mounted URL to API route URL for database storage
+            if cdn_url.startswith('/cdn/'):
+                cdn_url = cdn_url.replace('/cdn/', '/api/v1/cdn/file/', 1)
+        api_initializer.database_handler.update_server_banner_url(cdn_url)
 
         return {
             "status_code": 201,
             "message": "Server banner uploaded successfully",
-            "banner_url": banner_cdn_url
+            "banner_url": cdn_url
         }
 
     except exceptions.HTTPException:
@@ -2798,6 +3056,184 @@ class RecentActivityRequest(BaseModel):
     auth_token: str
     limit: int = 10
 
+# Request body model for server logs
+class ServerLogsRequest(BaseModel):
+    auth_token: str = Field(min_length=1)
+    lines: int = Field(default=50, ge=1, le=1000)
+    search: str | None = Field(default=None)
+    level: str | None = Field(default=None, description="Filter by log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+
+@api.post("/api/v1/system/logs", status_code=200)
+async def get_server_logs_route(request: ServerLogsRequest):
+    """
+    Get server logs with filtering options. Server Owner only.
+
+    Args:
+        request (ServerLogsRequest): Request body containing auth_token and filtering options.
+
+    Returns:
+        200 OK: Server logs data
+        403 FORBIDDEN: User is not server owner
+        404 NOT FOUND: Invalid auth_token
+        500 INTERNAL SERVER ERROR: Failed to fetch logs
+    """
+    user_id = extract_user_id(auth_token=request.auth_token)
+
+    # Check if user is server owner
+    if not api_initializer.user_manager.is_server_owner(user_id=user_id):
+        raise exceptions.HTTPException(
+            status_code=403,
+            detail="Access forbidden. Only the server owner can access server logs."
+        )
+
+    try:
+        import os
+        import glob
+        from pathlib import Path
+
+        # Get log directory (using config defined log path)
+        log_dir = Path(api_initializer.config.LOGS_PATH).parent
+
+        # Look for log files
+        log_files = []
+        if log_dir.exists():
+            # Look for common log file patterns
+            patterns = ['*.log', '*.txt', 'pufferblow*.log', 'server*.log']
+            for pattern in patterns:
+                log_files.extend(list(log_dir.glob(pattern)))
+
+        if not log_files:
+            # Fallback to common system log locations
+            possible_paths = [
+                Path('/var/log/pufferblow.log'),
+                Path('/var/log/pufferblow/server.log'),
+                Path('./logs/pufferblow.log'),
+                Path('./logs/server.log')
+            ]
+            for path in possible_paths:
+                if path.exists():
+                    log_files.append(path)
+                    break
+
+        logs_content = []
+        if log_files:
+            # Read the most recent log file
+            latest_log = max(log_files, key=lambda p: p.stat().st_mtime)
+            try:
+                with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
+                    all_lines = f.readlines()
+
+                    # Reverse to get most recent first, apply line limit
+                    all_lines.reverse()
+                    lines = all_lines[:request.lines]
+
+                    # Apply filters
+                    filtered_lines = []
+                    for line in lines:
+                        # Ensure line is a string
+                        if not isinstance(line, str):
+                            line = str(line)
+
+                        # Apply search filter
+                        if request.search and request.search.lower() not in line.lower():
+                            continue
+
+                        # Apply level filter
+                        if request.level:
+                            level_upper = request.level.upper()
+                            level_found = False
+
+                            # Check for common log level patterns
+                            if level_upper == 'DEBUG' and ('DEBUG' in line.upper() or 'DBUG' in line.upper()):
+                                level_found = True
+                            elif level_upper == 'INFO' and ('INFO' in line.upper() or 'INF' in line.upper()):
+                                level_found = True
+                            elif level_upper == 'WARNING' and ('WARNING' in line.upper() or 'WARN' in line.upper()):
+                                level_found = True
+                            elif level_upper == 'ERROR' and ('ERROR' in line.upper() or 'ERR' in line.upper()):
+                                level_found = True
+                            elif level_upper == 'CRITICAL' and ('CRITICAL' in line.upper() or 'CRIT' in line.upper()):
+                                level_found = True
+
+                            if not level_found:
+                                continue
+
+                        # Inline colors using ANSI escape codes
+                        colored_line = line
+                        line_upper = line.upper()
+                        if 'ERROR' in line_upper or 'ERR' in line_upper:
+                            colored_line = f"\x1b[31m{line}\x1b[0m"  # Red for errors
+                        elif 'WARNING' in line_upper or 'WARN' in line_upper:
+                            colored_line = f"\x1b[33m{line}\x1b[0m"  # Yellow for warnings
+                        elif 'DEBUG' in line_upper:
+                            colored_line = f"\x1b[36m{line}\x1b[0m"  # Cyan for debug
+                        elif 'INFO' in line_upper:
+                            colored_line = f"\x1b[32m{line}\x1b[0m"  # Green for info
+
+                        filtered_lines.append({
+                            "content": colored_line.strip(),
+                            "raw": line.strip()
+                        })
+
+                    logs_content = filtered_lines
+
+                    # Log the access
+                    api_initializer.database_handler.create_activity_audit_entry(
+                        ActivityAudit(
+                            activity_id=str(uuid.uuid4()),
+                            activity_type="logs_viewed",
+                            user_id=user_id,
+                            title="Server logs accessed",
+                            description=f"Server owner accessed logs with filters: lines={request.lines}, search='{request.search or 'None'}', level='{request.level or 'None'}'",
+                            metadata_json=json.dumps({
+                                "action": "logs_access",
+                                "lines_requested": request.lines,
+                                "search_filter": request.search,
+                                "level_filter": request.level,
+                                "log_file": str(latest_log)
+                            })
+                        )
+                    )
+
+            except Exception as e:
+                logger.error(f"Failed to read log file {latest_log}: {str(e)}")
+                return {
+                    "status_code": 200,
+                    "logs": [],
+                    "message": f"Error reading log file: {str(e)}",
+                    "available_log_files": [str(f) for f in log_files]
+                }
+        else:
+            return {
+                "status_code": 200,
+                "logs": [],
+                "message": "No log files found. Logs may not be configured or accessible.",
+                "searched_paths": [
+                    str(log_dir),
+                    "/var/log/pufferblow.log",
+                    "/var/log/pufferblow/server.log",
+                    "./logs/pufferblow.log",
+                    "./logs/server.log"
+                ]
+            }
+
+        return {
+            "status_code": 200,
+            "logs": logs_content,
+            "total_lines": len(logs_content),
+            "filtered": bool(request.search or request.level),
+            "log_file": str(log_files[0]) if log_files else None,
+            "note": "Logs are displayed with ANSI color codes preserved. Latest entries appear first."
+        }
+
+    except exceptions.HTTPException:
+        raise
+    except Exception as e:
+        raise exceptions.HTTPException(
+            status_code=500,
+            detail=f"Failed to get server logs: {str(e)}"
+        )
+
 @api.post("/api/v1/system/recent-activity", status_code=200)
 async def get_recent_activity_route(request: RecentActivityRequest):
     """
@@ -2998,40 +3434,208 @@ async def get_server_overview_route(request: AuthTokenQuery):
             detail=f"Failed to get server overview: {str(e)}"
         )
 
-# Websockets used for real-time messaging server's channels
-@api.websocket("/ws/channels/{channel_id}")
-async def channels_messages_websocket(websocket: WebSocket, auth_token: str, channel_id: str):
+# Global WebSocket used for real-time messaging across all channels
+@api.websocket("/ws")
+async def global_messages_websocket(websocket: WebSocket, auth_token: str):
     """
-    WebSocket endpoint handles the exchange of messages within channels.
-    It establishes a WebSocket connection for managing message retrieval
-    within the specified `channel_id` channel. If the `channel_id` channel is
-    private and the user does not have permission to access it, an HTTP exception
-    will be raised. However, if the user has the necessary privileges,
-    they will be able to view and interact with messages within
-    the `channel_id` channel.
+    Global WebSocket endpoint handles real-time messaging for all accessible channels.
+    It establishes a single WebSocket connection that receives updates from all channels
+    the user has permission to access. This replaces the per-channel websockets with
+    a more efficient global approach.
 
     Args:
-        websocket (Websocket): WebSocket connection object.
-        auth_token (str): The user's `auth_token`.
-        channel_id (str): The channel's `channel_id`.
+        websocket (WebSocket): WebSocket connection object.
+        auth_token (str): The user's authentication token.
 
     Returns:
         1001 Going Away: This status code may be raised if:
-            - The `auth_token` format is not valid.
-            - The `auth_token` doesn't exist or is suspended.
-            - The `channel_id` doesn't exist.
-            - The `channel_id` is private, and the user doesn't have privileges to view it.
+            - The auth_token format or validity is invalid.
+            - The user doesn't exist or authentication fails.
+            - Access restrictions apply.
     """
     user_id = extract_user_id(auth_token=auth_token) if 'auth_token' in locals() else "unknown"
-    logger.info(f"WebSocket endpoint accessed | User: {user_id} | Channel: {channel_id}")
+    logger.info(f"Global WebSocket endpoint accessed | User: {user_id}")
 
-    api_initializer.websockets_manager.connect(
-        websocket=websocket,
-        auth_token=auth_token,
-        channel_id=channel_id
+    # Validate auth_token format
+    if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
+        logger.warning(f"Invalid auth_token format from user {user_id}")
+        raise exceptions.WebSocketException(
+            reason="Invalid auth_token format. Please check your authentication token.",
+            code=1001
+        )
+
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if the user exists
+    if not api_initializer.user_manager.check_user(user_id=user_id, auth_token=auth_token):
+        logger.warning(f"Authentication failed for user {user_id}")
+        raise exceptions.WebSocketException(
+            code=1001,
+            reason="Authentication failed. Invalid or expired auth_token."
+        )
+
+    # Get user's accessible channels for global permission filtering
+    accessible_channels = api_initializer.websockets_manager.get_user_accessible_channels(
+        user_id=user_id,
+        database_handler=api_initializer.database_handler
     )
 
-    # Check `auth_token` format and validity
+    if not accessible_channels:
+        logger.warning(f"User {user_id} has no accessible channels, denying WebSocket connection")
+        raise exceptions.WebSocketException(
+            code=1001,
+            reason="No accessible channels found. Please contact an administrator."
+        )
+
+    # Establish global WebSocket connection with user's accessible channels
+    await api_initializer.websockets_manager.connect_global(
+        websocket=websocket,
+        auth_token=auth_token,
+        accessible_channels=accessible_channels
+    )
+
+    logger.info(f"Global WebSocket connection established | User: {user_id} | Accessible channels: {len(accessible_channels)}")
+
+    sent_messages_ids = set()  # Track sent message IDs to avoid duplicates
+    unconfirmed_messages = {}  # Track messages sent but not confirmed as read
+    total_messages_sent = 0
+    total_read_confirmations = 0
+
+    MESSAGE_POLL_INTERVAL = 2  # seconds between polling for new messages
+
+    try:
+        logger.debug(f"Starting global WebSocket message loop for user {user_id} with {len(accessible_channels)} accessible channels")
+
+        while True:
+            # Handle incoming messages from client (like read confirmations)
+            try:
+                incoming_data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+                if incoming_data:
+                    try:
+                        message_data = json.loads(incoming_data)
+                        message_type = message_data.get('type', 'unknown')
+                        logger.debug(f"Received client message | User: {user_id} | Type: {message_type}")
+
+                        # Handle read confirmation
+                        if message_type == "read_confirmation":
+                            message_id = message_data.get("message_id")
+                            channel_id = message_data.get("channel_id")  # Channel context needed
+                            if message_id and channel_id and message_id in unconfirmed_messages:
+                                try:
+                                    api_initializer.messages_manager.mark_message_as_read(
+                                        user_id=user_id,
+                                        message_id=message_id,
+                                        channel_id=channel_id
+                                    )
+                                    unconfirmed_messages.pop(message_id, None)
+                                    total_read_confirmations += 1
+                                    logger.debug(f"Message marked as read | User: {user_id} | Channel: {channel_id} | Message: {message_id}")
+
+                                except Exception as e:
+                                    logger.warning(f"Failed to mark message as read | User: {user_id} | Channel: {channel_id} | Message: {message_id} | Error: {str(e)}")
+                            else:
+                                logger.debug(f"Invalid read confirmation | User: {user_id} | Message: {message_id} | Channel: {channel_id}")
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid JSON from client | User: {user_id} | Data: {incoming_data[:100]}... | Error: {str(e)}")
+
+            except asyncio.TimeoutError:
+                # No client message, continue with message polling
+                pass
+
+            # Poll for new messages across all accessible channels
+            try:
+                # Get unread message IDs for all channels
+                viewed_messages_ids = api_initializer.database_handler.get_user_read_messages_ids(user_id)
+
+                all_new_messages = []
+
+                # Check each accessible channel for new messages
+                for channel_id in accessible_channels:
+                    try:
+                        channel_messages = api_initializer.messages_manager.load_messages(
+                            websocket=True,
+                            channel_id=channel_id,
+                            viewed_messages_ids=viewed_messages_ids
+                        )
+
+                        # Filter out already sent messages and add channel context
+                        for message in channel_messages:
+                            if isinstance(message, dict):
+                                message_id = message.get("message_id")
+                                if message_id and message_id not in sent_messages_ids:
+                                    # Add channel context to message
+                                    message["channel_id"] = channel_id
+                                    all_new_messages.append(message)
+
+                    except Exception as e:
+                        logger.warning(f"Failed to load messages for channel {channel_id}: {str(e)}")
+                        continue
+
+                if not all_new_messages:
+                    await asyncio.sleep(MESSAGE_POLL_INTERVAL)
+                    continue
+
+                logger.debug(f"Found {len(all_new_messages)} new messages across {len(accessible_channels)} channels for user {user_id}")
+
+                messages_sent_this_cycle = 0
+
+                # Send new messages to client
+                for message in all_new_messages:
+                    message_id = message.get("message_id")
+                    channel_id = message.get("channel_id")
+                    message_type = message.get("type", "message")
+
+                    if not message_id or not channel_id:
+                        continue
+
+                    try:
+                        await websocket.send_json(message)
+                        sent_messages_ids.add(message_id)
+                        unconfirmed_messages[message_id] = True
+                        messages_sent_this_cycle += 1
+                        total_messages_sent += 1
+
+                        # Log message for debugging
+                        content_preview = message.get('message', '')[:50] + "..." if len(message.get('message', '')) > 50 else message.get('message', '')
+                        logger.debug(f"Sent message | User: {user_id} | Channel: {channel_id} | Type: {message_type} | Message: {message_id} | Preview: {content_preview}")
+
+                    except Exception as e:
+                        logger.error(f"Failed to send message to WebSocket client | User: {user_id} | Channel: {channel_id} | Message: {message_id} | Error: {str(e)}")
+
+                if messages_sent_this_cycle > 0:
+                    logger.info(f"Sent {messages_sent_this_cycle} messages to client | User: {user_id} | Total sent: {total_messages_sent}")
+
+            except Exception as e:
+                logger.error(f"Error during message polling for user {user_id}: {str(e)}")
+
+            await asyncio.sleep(MESSAGE_POLL_INTERVAL)
+
+    except WebSocketDisconnect as e:
+        logger.info(f"Global WebSocket disconnected | User: {user_id} | Code: {e.code} | Reason: {e.reason or 'No reason'} | Stats: sent={total_messages_sent}, confirmed={total_read_confirmations}")
+        await api_initializer.websockets_manager.disconnect(websocket)
+
+    except Exception as e:
+        logger.error(f"Unexpected global WebSocket error | User: {user_id} | Error: {str(e)}", exc_info=True)
+        try:
+            await api_initializer.websockets_manager.disconnect(websocket)
+        except Exception as disconnect_error:
+            logger.error(f"Error during WebSocket cleanup | User: {user_id} | Error: {str(disconnect_error)}")
+
+
+# Keep legacy WebSocket endpoint for backwards compatibility
+@api.websocket("/ws/channels/{channel_id}")
+async def channels_messages_websocket_legacy(websocket: WebSocket, auth_token: str, channel_id: str):
+    """
+    Legacy WebSocket endpoint for backwards compatibility.
+    Now routes through the global WebSocket system.
+    """
+    logger.warning(f"Legacy WebSocket endpoint used for channel {channel_id} - consider upgrading to /ws")
+
+    user_id = extract_user_id(auth_token=auth_token) if 'auth_token' in locals() else "unknown"
+    logger.info(f"Legacy WebSocket endpoint accessed | User: {user_id} | Channel: {channel_id}")
+
+    # Validate inputs using legacy logic
     if not api_initializer.auth_token_manager.check_auth_token_format(auth_token=auth_token):
         raise exceptions.WebSocketException(
             reason="Bad auth_token format. Please check your auth_token and try again.",
@@ -3040,95 +3644,72 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
 
     user_id = extract_user_id(auth_token=auth_token)
 
-    # Check if the user exists or not
-    if not api_initializer.user_manager.check_user(
-        user_id=user_id,
-        auth_token=auth_token
-    ):
+    if not api_initializer.user_manager.check_user(user_id=user_id, auth_token=auth_token):
         raise exceptions.WebSocketException(
             code=1001,
             reason="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
         )
-    
-    # Check if the user who requested this route is an admin or server owner
-    if not api_initializer.user_manager.is_admin(
-        user_id=user_id
-    ) and not api_initializer.user_manager.is_server_owner(
-        user_id=user_id
-    ):
+
+    if not api_initializer.user_manager.is_admin(user_id=user_id) and not api_initializer.user_manager.is_server_owner(user_id=user_id):
         raise exceptions.WebSocketException(
             code=1001,
-            reason="Access forbidden. Only admins and server owners can access channel WebSocket endpoints."
+            reason="Access forbidden. Only admins and server owners can access legacy channel WebSocket endpoints."
         )
 
-    # Check if the channel exists
-    if not api_initializer.channels_manager.check_channel(
-        channel_id=channel_id
-    ):
-        logger.info(
-            info.INFO_CHANNEL_ID_NOT_FOUND(
-                viewer_user_id=user_id,
-                channel_id=channel_id
-            )
-        )
-
+    if not api_initializer.channels_manager.check_channel(channel_id=channel_id):
+        logger.info(info.INFO_CHANNEL_ID_NOT_FOUND(viewer_user_id=user_id, channel_id=channel_id))
         raise exceptions.WebSocketException(
             code=1001,
             reason="The provided channel ID does not exist or could not be found. Please make sure you have entered a valid channel ID and try again."
         )
-    
-    logger.info(f"WebSocket connection established successfully | User: {user_id} | Channel: {channel_id} | Client will receive real-time messages")
 
+    # Establish connection using legacy method for backwards compatibility
+    api_initializer.websockets_manager.connect(
+        websocket=websocket,
+        auth_token=auth_token,
+        channel_id=channel_id
+    )
+
+    logger.info(f"Legacy WebSocket connection established | User: {user_id} | Channel: {channel_id}")
+
+    # Legacy message handling remains the same for compatibility
     sent_messages_ids = []
-    unconfirmed_messages = {}  # Track messages sent but not confirmed as read
+    unconfirmed_messages = {}
     total_messages_sent = 0
     total_read_confirmations = 0
-
-    DELAY = 3 # in seconds
+    DELAY = 3
 
     try:
-        logger.debug(f"Starting WebSocket message loop for user {user_id} in channel {channel_id}")
+        logger.debug(f"Starting legacy WebSocket message loop for user {user_id} in channel {channel_id}")
 
         while True:
-            # Handle incoming read confirmations from client
             try:
                 incoming_data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
                 if incoming_data:
                     try:
                         message_data = json.loads(incoming_data)
-                        logger.debug(f"Received message from client | Channel: {channel_id} | User: {user_id} | Type: {message_data.get('type', 'unknown')}")
 
-                        # Handle read confirmation message
                         if message_data.get("type") == "read_confirmation":
                             message_id = message_data.get("message_id")
                             if message_id and message_id in unconfirmed_messages:
                                 try:
-                                    # Mark message as read using the HTTP endpoint logic
                                     api_initializer.messages_manager.mark_message_as_read(
                                         user_id=user_id,
                                         message_id=message_id,
                                         channel_id=channel_id
                                     )
-                                    del unconfirmed_messages[message_id]  # Remove from unconfirmed
+                                    del unconfirmed_messages[message_id]
                                     total_read_confirmations += 1
-                                    logger.debug(f"Message marked as read | Channel: {channel_id} | User: {user_id} | Message: {message_id}")
-
+                                    logger.debug(f"Legacy: Message marked as read | Channel: {channel_id} | User: {user_id} | Message: {message_id}")
                                 except Exception as e:
-                                    # Log error but don't crash the websocket
-                                    logger.warning(f"Failed to mark message as read | Channel: {channel_id} | User: {user_id} | Message: {message_id} | Error: {str(e)}")
-                            else:
-                                logger.debug(f"Invalid read confirmation received | Channel: {channel_id} | User: {user_id} | Message: {message_id}")
-                        else:
-                            logger.debug(f"Unknown message type received | Channel: {channel_id} | User: {user_id} | Type: {message_data.get('type', 'unknown')}")
+                                    logger.warning(f"Legacy: Failed to mark message as read | Error: {str(e)}")
 
                     except json.JSONDecodeError as e:
-                        logger.warning(f"Invalid JSON received from client | Channel: {channel_id} | User: {user_id} | Data: {incoming_data[:100]}... | Error: {str(e)}")
+                        logger.warning(f"Legacy: Invalid JSON received | Data: {incoming_data[:100]}... | Error: {str(e)}")
 
             except asyncio.TimeoutError:
-                # No incoming message within timeout, continue polling for new messages
                 pass
 
-            # Send new messages
             try:
                 viewed_messages_ids = api_initializer.database_handler.get_user_read_messages_ids(user_id)
                 latest_messages = api_initializer.messages_manager.load_messages(
@@ -3141,57 +3722,47 @@ async def channels_messages_websocket(websocket: WebSocket, auth_token: str, cha
                     await asyncio.sleep(DELAY)
                     continue
 
-                logger.debug(f"Found {len(latest_messages)} new messages to send | Channel: {channel_id} | User: {user_id}")
-
                 messages_sent_this_cycle = 0
 
                 for message in latest_messages:
                     if not isinstance(message, dict):
-                        logger.warning(f"Invalid message format received from DB | Channel: {channel_id} | Type: {type(message)} | Content: {str(message)[:100]}...")
                         continue
 
                     message_id = message.get("message_id")
-                    if not message_id:
-                        logger.warning(f"Message without ID received from DB | Channel: {channel_id} | Message keys: {list(message.keys()) if isinstance(message, dict) else 'N/A'}")
+                    if not message_id or message_id in sent_messages_ids:
                         continue
 
-                    # Skip already sent messages
-                    if message_id in sent_messages_ids:
-                        continue
-
-                    # Send message to client
                     try:
                         await websocket.send_json(message)
                         sent_messages_ids.append(message_id)
-                        unconfirmed_messages[message_id] = True  # Track as unconfirmed
+                        unconfirmed_messages[message_id] = True
                         messages_sent_this_cycle += 1
                         total_messages_sent += 1
 
-                        # Log message content preview for debugging
                         content_preview = message.get('content', '')[:50] + "..." if len(message.get('content', '')) > 50 else message.get('content', '')
-                        logger.debug(f"Message sent to client | Channel: {channel_id} | User: {user_id} | Message: {message_id} | Preview: {content_preview}")
+                        logger.debug(f"Legacy: Message sent | Channel: {channel_id} | User: {user_id} | Message: {message_id} | Preview: {content_preview}")
 
                     except Exception as e:
-                        logger.error(f"Failed to send message to websocket client | Channel: {channel_id} | User: {user_id} | Message: {message_id} | Error: {str(e)}")
+                        logger.error(f"Legacy: Failed to send message | Error: {str(e)}")
 
                 if messages_sent_this_cycle > 0:
-                    logger.info(f"Sent {messages_sent_this_cycle} messages to client | Channel: {channel_id} | User: {user_id} | Total sent so far: {total_messages_sent}")
+                    logger.info(f"Legacy: Sent {messages_sent_this_cycle} messages | User: {user_id} | Channel: {channel_id} | Total: {total_messages_sent}")
 
             except Exception as e:
-                logger.error(f"Error processing messages for websocket | Channel: {channel_id} | User: {user_id} | Error: {str(e)}")
+                logger.error(f"Legacy: Error processing messages | Error: {str(e)}")
 
             await asyncio.sleep(DELAY)
 
     except WebSocketDisconnect as e:
-        logger.info(f"WebSocket client disconnected | Channel: {channel_id} | User: {user_id} | Code: {e.code} | Reason: {e.reason or 'No reason provided'} | Stats: messages_sent={total_messages_sent}, read_confirmations={total_read_confirmations}")
+        logger.info(f"Legacy WebSocket disconnected | Channel: {channel_id} | User: {user_id} | Code: {e.code} | Reason: {e.reason or 'No reason'} | Stats: sent={total_messages_sent}, confirmed={total_read_confirmations}")
         await api_initializer.websockets_manager.disconnect(websocket)
 
     except Exception as e:
-        logger.error(f"Unexpected WebSocket error | Channel: {channel_id} | User: {user_id} | Error: {str(e)}", exc_info=True)
+        logger.error(f"Legacy: Unexpected WebSocket error | Error: {str(e)}", exc_info=True)
         try:
             await api_initializer.websockets_manager.disconnect(websocket)
         except Exception as disconnect_error:
-            logger.error(f"Error during WebSocket cleanup | Channel: {channel_id} | User: {user_id} | Error: {str(disconnect_error)}")
+            logger.error(f"Legacy: Error during cleanup | Error: {str(disconnect_error)}")
 
 
 # Mount CDN static file serving

@@ -67,7 +67,7 @@ class Users(Base):
         return (
             f"Users(user_id={self.user_id!r}, username={self.username!r}, "
             f"password={self.password!r}, avatar_url={self.avatar_url!r}, "
-            f"banner_url={self.banner_url!r}, inbox_id={self.inbox_Id!r}, "
+            f"banner_url={self.banner_url!r}, inbox_id={self.inbox_id!r}, "
             f"origin_server={self.origin_server!r}, status={self.status!r}, "
             f"roles_ids={self.roles_ids!r}, last_seen={self.last_seen!r}, "
             f"joined_servers_ids={self.joined_servers_ids!r}, auth_token={self.auth_token!r}, "

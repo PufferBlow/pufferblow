@@ -178,31 +178,40 @@ class UserManager (object):
     def user_profile(self, user_id: str, is_account_owner: bool | None = False) -> dict:
         """
         Fetch the user's profile metadata
-        
+
         Paramters:
             `user_id` (str): The user's `user_id`.
             `is_account_owner` (bool, optional, default: False): Is this `user_id` ownes this account.
-        
+
         Returns:
             dict: The user's profile metadata in a dict format.
         """
         user_data = self.database_handler.get_user(
             user_id=user_id,
         ).to_dict()
-        
-        # Cleaning up the dict
+
+        # Process avatar_url and banner_url - they are stored as relative API routes
+        # and should be returned as-is to work with client's API client
+        # Do not modify them - leave as /api/v1/cdn/file/... paths
+
+        # Debug logging
+        if user_data.get('avatar_url'):
+            logger.debug(f"Avatar URL for user {user_id}: {user_data['avatar_url']}")
+        if user_data.get('banner_url'):
+            logger.debug(f"Banner URL for user {user_id}: {user_data['banner_url']}")
+
+        # Cleaning up the dict - remove empty strings but keep None/full URLs
         element_to_pop = [data for data in user_data if user_data[data] == ""]
-    
         for data in element_to_pop:
             user_data.pop(data)
-        
+
         logger.info(
             info.INFO_REQUEST_USER_PROFILE(
                 user_data=user_data,
                 viewer_user_id=user_id
             )
         )
-        
+
         return user_data
     
     def check_user(self, user_id: str | None = None, username: str | None = None, auth_token: str | None=None) -> bool:
@@ -433,6 +442,10 @@ class UserManager (object):
             check_duplicates=True
         )
 
+        # Convert CDN-mounted URL to API route URL for database storage (like server avatars)
+        if avatar_url.startswith('/cdn/'):
+            avatar_url = avatar_url.replace('/cdn/', '/api/v1/cdn/file/', 1)
+
         # Update the user's avatar URL in database
         self.database_handler.update_user_avatar(user_id=user_id, new_avatar_url=avatar_url)
 
@@ -572,6 +585,10 @@ class UserManager (object):
             subdirectory="banners",
             check_duplicates=True
         )
+
+        # Convert CDN-mounted URL to API route URL for database storage (like server banners)
+        if banner_url.startswith('/cdn/'):
+            banner_url = banner_url.replace('/cdn/', '/api/v1/cdn/file/', 1)
 
         # Update the user's banner URL in database
         self.database_handler.update_user_banner(user_id=user_id, new_banner_url=banner_url)

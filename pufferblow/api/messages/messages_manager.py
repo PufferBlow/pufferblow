@@ -3,6 +3,9 @@ import string
 import random
 import base64
 import hashlib
+import urllib.parse
+
+from loguru import logger
 
 from pufferblow.api.hasher.hasher import Hasher
 from pufferblow.api.auth.auth_token_manager import AuthTokenManager
@@ -50,50 +53,49 @@ class MessagesManager(object):
             )
 
             
-        messages_metadata: list[tuple] = list()
+        messages_metadata: list[dict] = list()
 
-        for message in messages:
-            if websocket:
-                message_metadata = message[0]
-            else:
-                message_metadata = message
+        # messages is now list[tuple[Messages, Users | None]] since we joined with users
+        for message_tuple in messages:
+            message_data = message_tuple[0]  # The Messages object
+            user_data = message_tuple[1]    # The Users object (can be None)
 
             # Decrypt the message
             raw_message = self.decrypt_message(
-                user_id=str(message_metadata.sender_id),
-                message_id=message_metadata.message_id,
-                encrypted_message=base64.b64decode(message_metadata.hashed_message)
+                user_id=str(message_data.sender_id),
+                message_id=message_data.message_id,
+                encrypted_message=base64.b64decode(message_data.hashed_message)
             )
 
-            json_metadata_format = message_metadata.to_dict()
-            json_metadata_format['raw_message'] = raw_message
-
-            # injecting in the `username` of the sender
-            sender_user_metadata = self.user_manager.user_profile(
-                user_id=str(message_metadata.sender_id)
-            )
-            json_metadata_format["username"] = sender_user_metadata["username"]
+            json_metadata_format = message_data.to_dict()
+            # Replace the encrypted hashed_message with the decrypted message content
+            json_metadata_format['message'] = raw_message
+            # Remove the encrypted field
+            json_metadata_format.pop('hashed_message', None)
 
             for key in ["channel_id", "conversation_id"]:
                 if json_metadata_format[key] is None:
                     json_metadata_format.pop(key)
 
-            # Re-order the dict
-            reordered_metadata = {}
-            
-            keys = [_ for _ in json_metadata_format.keys()]
-            values = [_ for _ in json_metadata_format.values()]
+            # Add user data if available
+            if user_data:
+                json_metadata_format['sender_username'] = user_data.username
+                json_metadata_format['sender_avatar_url'] = user_data.avatar_url
+                json_metadata_format['sender_status'] = user_data.status or 'offline'
+                json_metadata_format['sender_roles'] = user_data.roles_ids or []
+            else:
+                # Fallback for messages without user data
+                json_metadata_format['sender_username'] = 'Unknown User'
+                json_metadata_format['sender_avatar_url'] = None
+                json_metadata_format['sender_status'] = 'offline'
+                json_metadata_format['sender_roles'] = []
 
-            for i in range(3):
-                reordered_metadata[keys[i]] = values[i]
+            # Keep the sender_user_id for backward compatibility
+            json_metadata_format['sender_user_id'] = str(message_data.sender_id)
 
-            reordered_metadata["username"] = json_metadata_format["username"]
+            messages_metadata.append(json_metadata_format)
 
-            for i in range(3, 5):
-                reordered_metadata[keys[i]] = values[i]
-
-            messages_metadata.append(reordered_metadata)
-
+        logger.debug(f"{messages = }")
         return messages_metadata
 
     def send_message(self, channel_id: str, user_id: str, message: str, attachments: list[str] | None = None) -> Messages:

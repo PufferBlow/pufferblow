@@ -1151,10 +1151,10 @@ class DatabaseHandler (object):
 
             session.commit()
 
-    def fetch_channel_messages(self, channel_id: str, messages_per_page: int, page: int) -> list[Messages]:
+    def fetch_channel_messages(self, channel_id: str, messages_per_page: int, page: int) -> list[tuple[Messages, Users | None]]:
         """
         fetch a specific number of messages from a channel from
-        the `channels` table in the database
+        the `channels` table in the database with user data
 
         Args:
             channel_id (str): The channel's `channel_id`.
@@ -1162,24 +1162,26 @@ class DatabaseHandler (object):
             page (int, optional, default: 1): The page number (pages start from 1 to `x` depending on how many messages a channel contains).
 
         Returns:
-            list[Messages]: A list of `Messages` table object.
+            list[tuple[Messages, Users | None]]: A list of tuples containing `Messages` and `Users` table objects.
         """
-        messages: list[Messages] = list[Messages]
+        messages_with_users: list[tuple[Messages, Users | None]] = []
 
         with self.database_session() as session:
             channel_messages_ids = self.get_channel_data(
                 channel_id=channel_id
             ).messages_ids
-            
+
             start_index = (page*messages_per_page) - messages_per_page
 
-            response = session.query(Messages).filter(
+            response = session.query(Messages, Users).join(
+                Users, Messages.sender_id == Users.user_id, isouter=True
+            ).filter(
                 Messages.message_id.in_(channel_messages_ids)
-                ).order_by(Messages.sent_at).offset(start_index).limit(messages_per_page).all()
+            ).order_by(Messages.sent_at).offset(start_index).limit(messages_per_page).all()
 
-            messages = response
+            messages_with_users = response
 
-        return messages
+        return messages_with_users
 
     def fetch_unviewed_channel_messages(self, channel_id: str, viewed_messages_ids: list[str]) -> list[Messages]:
         """
@@ -1325,7 +1327,7 @@ class DatabaseHandler (object):
 
             session.commit()
 
-    def fetch_blocked_ips(self) -> list[str]:
+    def fetch_blocked_ips(self) -> list[dict]:
         """
         Fetch a list of blocked ips from the blocked_ips table.
 
@@ -1333,9 +1335,9 @@ class DatabaseHandler (object):
             None.
 
         Returns:
-            list[str]: A list of raw blocked ip addresses.
+            list[dict]: A list of dictionaries containing blocked IP data.
         """
-        blocked_ips: list[str] = list()
+        blocked_ips: list[dict] = list()
 
         with self.database_session() as session:
             stmt = select(BlockedIPS)
@@ -1343,8 +1345,12 @@ class DatabaseHandler (object):
             response = session.execute(stmt).fetchall()
 
             for row in response:
-                ip = row[0].ip
-                blocked_ips.append(ip)
+                blocked_ip = row[0]
+                blocked_ips.append({
+                    "ip": blocked_ip.ip,
+                    "reason": blocked_ip.block_reason,
+                    "blocked_at": blocked_ip.blocked_at.isoformat()
+                })
 
         return blocked_ips
 
@@ -1366,32 +1372,26 @@ class DatabaseHandler (object):
 
         return is_blocked
 
-    def delete_blocked_ip(self, blocked_ip: BlockedIPS | None = None, ip: str | None = None) -> None:
+    def delete_blocked_ip(self, blocked_ip: BlockedIPS | None = None, ip: str | None = None) -> bool:
         """
         Deletes a blocked ip from the blocked_ips table, using either a BlockedIPS object or
         a raw ip address.
 
         Args:
             blocked_ip (BlockedIPS): A BlockedIPS object.
-            ip (str): A raw ip address to delete form the database.
+            ip (str): A raw ip address to delete from the database.
 
         Returns:
-            None.
+            bool: True if the IP was deleted, False if not found or failed.
         """
         with self.database_session() as session:
-            stmts = [
-                delete(BlockedIPS).where(
-                    BlockedIPS.ip == blocked_ip.ip
-                ) if blocked_ip is not None else \
-                    delete(BlockedIPS).where(
-                        BlockedIPS.ip == ip
-                    )
-            ]
-
-            for stmt in stmts:
-                session.execute(stmt)
+            if blocked_ip is not None:
+                result = session.execute(delete(BlockedIPS).where(BlockedIPS.ip == blocked_ip.ip))
+            else:
+                result = session.execute(delete(BlockedIPS).where(BlockedIPS.ip == ip))
 
             session.commit()
+            return result.rowcount > 0
     
     def create_server_row(self, server: Server) -> None:
         """

@@ -490,6 +490,9 @@ def serve(
             SEEN.add(name.split(".")[0])
             logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
+    # Always configure loguru to write to the config-defined log file, regardless of development/production mode
+    logger.add(config.LOGS_PATH, rotation="10 MB", level=log_level_str)
+
     # Check if in development mode (hot reload)
     if dev:
         logger.info("Starting server in development mode with auto-reload...")
@@ -511,7 +514,6 @@ def serve(
 
     if not dev:
         logger.configure(handlers=[{"sink": sys.stdout}])
-        logger.add(config.LOGS_PATH, rotation="10 MB")
 
         StubbedGunicornLogger.log_level = log_level_str
 
