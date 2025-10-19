@@ -96,14 +96,14 @@ files = [
 
 [[package]]
 name = "basedpyright"
-version = "1.29.2"
+version = "1.31.7"
 description = "static type checking for Python (but based)"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "basedpyright-1.29.2-py3-none-any.whl", hash = "sha256:f389e2997de33d038c5065fd85bff351fbdc62fa6d6371c7b947fc3bce8d437d"},
-    {file = "basedpyright-1.29.2.tar.gz", hash = "sha256:12c49186003b9f69a028615da883ef97035ea2119a9e3f93a00091b3a27088a6"},
+    {file = "basedpyright-1.31.7-py3-none-any.whl", hash = "sha256:7c54beb7828c9ed0028630aaa6904f395c27e5a9f5a313aa9e91fc1d11170831"},
+    {file = "basedpyright-1.31.7.tar.gz", hash = "sha256:394f334c742a19bcc5905b2455c9f5858182866b7679a6f057a70b44b049bceb"},
 ]
 
 [package.dependencies]
@@ -2492,4 +2492,4 @@ dev = ["black (>=19.3b0) ; python_version >= \"3.6\"", "pytest (>=4.6.2)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "4a315aa79ae3e6b0cb3d08f45c2aad1288f4b24e4905060271044d8bf3d6ddf7"
+content-hash = "b1746b0ef7d361b1af08bdf26686df54c0041fa5006017d2c94e16d76ea70c4a"
