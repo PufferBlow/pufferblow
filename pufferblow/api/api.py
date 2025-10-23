@@ -133,12 +133,12 @@ class MessageOperationsQuery(BaseModel):
     auth_token: str = Field(min_length=1)
     message_id: str = Field(min_length=1)
 
-# Message send request model for validation
-# Note: For multipart form data with files, we need to use Form() parameters individually
-# But we can use Pydantic for validation of non-file fields
+# Message send request model for validation using Pydantic data classes
 class SendMessageForm(BaseModel):
     auth_token: str = Field(..., min_length=1, description="User's authentication token")
     message: str = Field("", description="Message content")
+    sent_at: str = Field("", description="ISO timestamp when message was sent by client")
+    attachments: list = Field(default_factory=list, description="File attachments (optional)")
 
     @field_validator('auth_token')
     @classmethod
@@ -146,6 +146,39 @@ class SendMessageForm(BaseModel):
         if not v or not v.strip():
             raise ValueError('auth_token cannot be empty')
         return v.strip()
+
+    @field_validator('sent_at')
+    @classmethod
+    def validate_sent_at(cls, v):
+        if v and v.strip():
+            # Validate ISO timestamp format if provided
+            try:
+                from datetime import datetime
+                datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except ValueError:
+                raise ValueError('sent_at must be a valid ISO timestamp')
+        return v
+
+# Dependency to parse form data into Pydantic model
+async def parse_send_message_form(
+    auth_token: str = Form(..., description="User's authentication token"),
+    message: str = Form("", description="Message content"),
+    sent_at: str = Form("", description="ISO timestamp when message was sent by client"),
+    attachments: list[UploadFile] = Form([], description="File attachments (optional)")
+) -> tuple[SendMessageForm, list[UploadFile]]:
+    """
+    Parse multipart form data into a validated SendMessageForm and return attachments separately.
+    This allows us to use Pydantic validation for the form fields while handling files separately.
+    """
+    # Validate using Pydantic model
+    form_data = SendMessageForm(
+        auth_token=auth_token,
+        message=message,
+        sent_at=sent_at,
+        attachments=[]  # We'll handle attachments separately since they can't be validated in Pydantic easily
+    )
+
+    return form_data, attachments
 
 class CDNFilesRequest(BaseModel):
     auth_token: str = Field(min_length=1)
@@ -1154,24 +1187,26 @@ async def channel_load_messages(
 @api.post("/api/v1/channels/{channel_id}/send_message")
 async def channel_send_message(
     channel_id: str,
-    auth_token: str = Form(..., description="User's authentication token"),
-    message: str = Form("", description="Message content"),
-    attachments: list[UploadFile] = Form([], description="File attachments (optional)")
+    form_data: tuple[SendMessageForm, list[UploadFile]] = Depends(parse_send_message_form)
 ):
     """
     Send a message into a server channel with optional attachments.
 
     Args:
-        auth_token (str): The sender user's `auth_token`.
         channel_id (str): The channel's `channel_id`.
-        message (str): The message to send (optional with attachments).
-        attachments (list[UploadFile]): List of file attachments.
+        form_data (tuple[SendMessageForm, list[UploadFile]]): Validated form data and file attachments from dependency.
 
     Returns:
         201 CREATED: The message will be sent in the desired channel.
         400 BAD REQUEST: If the `auth_token` is improperly formatted, message too long, or invalid attachments.
         404 NOT FOUND: The `auth_token` is invalid, or the `channel_id` doesn't exist.
     """
+    # Unpack validated form data and attachments
+    validated_form, attachments = form_data
+    auth_token = validated_form.auth_token
+    message = validated_form.message
+    sent_at = validated_form.sent_at
+
     # Check if message is too long
     if sys.getsizeof(message) > api_initializer.config.MAX_MESSAGE_SIZE:
         raise exceptions.HTTPException(
@@ -1248,7 +1283,8 @@ async def channel_send_message(
         channel_id=channel_id,
         user_id=user_id,
         message=message,
-        attachments=attachment_urls
+        attachments=attachment_urls,
+        sent_at=sent_at if sent_at.strip() else None
     )
 
     # Prepare message dict for broadcasting
@@ -1488,7 +1524,7 @@ async def upload_cdn_file(
             elif 'content' in locals():
                 # For new files, use the content we read
                 file_size = len(content)
-                file_type = mime_type or 'unknown'
+                file_type = api_initializer.cdn_manager.mime_detector.from_buffer(content) or 'unknown'
 
             # Create activity entry for file upload (new files or duplicates)
             upload_type = "existing file reused" if is_duplicate else "new file uploaded"

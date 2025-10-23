@@ -11,12 +11,16 @@ class Config:
     MAX_RATE_LIMIT_REQUESTS :       int     =       6000
     MAX_RATE_LIMIT_WARNINGS :       int     =       15
 
-    # PostgeSQL Database
+    # PostgreSQL Database
     DATABASE_NAME           :       str
     USERNAME                :       str
     DATABASE_PASSWORD       :       str
     DATABASE_HOST           :       str
-    DATABASE_PORT           :       int  
+    DATABASE_PORT           :       int
+    DATABASE_SSL_MODE       :       str     =       "prefer"
+    DATABASE_SSL_CERT       :       str | None = None
+    DATABASE_SSL_KEY        :       str | None = None
+    DATABASE_SSL_ROOT_CERT  :       str | None = None
 
     # Encryption
     DERIVED_KEY_BYTES       :       int     =       56
@@ -55,12 +59,21 @@ class Config:
         self.MAX_RATE_LIMIT_REQUESTS    =   config["api"]["max_rate_limit_requests"]
         self.MAX_RATE_LIMIT_WARNINGS    =   config["api"]["max_rate_limit_warnings"]
     
-        # PostgeSQL Database
-        self.DATABASE_NAME        =   config["postregsql"]["database_name"]
-        self.USERNAME             =   config["postregsql"]["username"]
-        self.DATABASE_PASSWORD    =   config["postregsql"]["password"]
-        self.DATABASE_HOST        =   config["postregsql"]["host"]
-        self.DATABASE_PORT        =   config["postregsql"]["port"]   
+        # PostgreSQL Database - support for both postregsql (legacy) and postgresql
+        db_section = config.get("postgresql") or config.get("postregsql")
+        if not db_section:
+            # If neither section exists, raise error
+            raise KeyError("Neither 'postgresql' nor 'postregsql' section found in config")
+
+        self.DATABASE_NAME        =   db_section["database_name"]
+        self.USERNAME             =   db_section["username"]
+        self.DATABASE_PASSWORD    =   db_section["password"]
+        self.DATABASE_HOST        =   db_section["host"]
+        self.DATABASE_PORT        =   db_section["port"]
+        self.DATABASE_SSL_MODE    =   db_section.get("ssl_mode", "prefer")
+        self.DATABASE_SSL_CERT    =   db_section.get("ssl_cert")
+        self.DATABASE_SSL_KEY     =   db_section.get("ssl_key")
+        self.DATABASE_SSL_ROOT_CERT = db_section.get("ssl_root_cert")
 
         # Encryption
         self.DERIVED_KEY_BYTES     =   config["encryption"]["derived_key_bytes"]
@@ -100,12 +113,16 @@ rate_limit_duration = {self.RATE_LIMIT_DURATION} # the duration of a rate limit 
 max_rate_limit_requests = {self.MAX_RATE_LIMIT_REQUESTS} # number of request before a rate limit warning
 max_rate_limit_warnings = {self.MAX_RATE_LIMIT_WARNINGS} # number of rate limit warnings before blocking the IP address
 
-[postregsql]
+[postgresql]
 database_name = "{self.DATABASE_NAME}"
 username = "{self.USERNAME}"
 password = "{self.DATABASE_PASSWORD}"
 host = "{self.DATABASE_HOST}"
 port = "{self.DATABASE_PORT}"
+ssl_mode = "{self.DATABASE_SSL_MODE}"
+ssl_cert = "{self.DATABASE_SSL_CERT}" if self.DATABASE_SSL_CERT else ""
+ssl_key = "{self.DATABASE_SSL_KEY}" if self.DATABASE_SSL_KEY else ""
+ssl_root_cert = "{self.DATABASE_SSL_ROOT_CERT}" if self.DATABASE_SSL_ROOT_CERT else ""
 
 [encryption]
 derived_key_bytes = {self.DERIVED_KEY_BYTES} # This specifies the bytes length of the derived key. A 56-bit key provides a good balance between security and performance. The bytes should be 5 to 56 bytes.

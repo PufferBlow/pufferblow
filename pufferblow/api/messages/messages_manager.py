@@ -98,7 +98,7 @@ class MessagesManager(object):
         logger.debug(f"{messages = }")
         return messages_metadata
 
-    def send_message(self, channel_id: str, user_id: str, message: str, attachments: list[str] | None = None) -> Messages:
+    def send_message(self, channel_id: str, user_id: str, message: str, attachments: list[str] | None = None, sent_at: str | None = None) -> Messages:
         """
         Send a message to a channel
 
@@ -107,6 +107,7 @@ class MessagesManager(object):
             user_id (str): The sender user's `user_id`.
             message (str): The message to send.
             attachments (list[str], optional): List of attachment URLs.
+            sent_at (str, optional): ISO format timestamp when message was sent. If None, uses current time.
 
         Returns:
             Messages: The message metadata object.
@@ -120,6 +121,17 @@ class MessagesManager(object):
         message_metadata.channel_id     = channel_id
         message_metadata.sender_id      = user_id
         message_metadata.attachments    = attachments or []
+
+        # Set sent_at timestamp if provided, otherwise use SQLAlchemy default
+        if sent_at:
+            try:
+                from datetime import datetime
+                # Parse ISO timestamp, removing timezone info to make it naive
+                dt_str = sent_at.replace('Z', '').replace('+00:00', '').replace('+00', '')
+                message_metadata.sent_at = datetime.fromisoformat(dt_str)
+            except ValueError:
+                # If parsing fails, use SQLAlchemy default (don't set sent_at)
+                pass
 
         # Encrypt the message and get the encryption key
         message_metadata.hashed_message, encryption_key = self.encrypt_message(

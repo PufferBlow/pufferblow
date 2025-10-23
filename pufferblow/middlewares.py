@@ -206,17 +206,37 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         "/api/v1/channels/create/": CreateChannelQuery,
     }
 
+    # Routes that should skip query parameter validation (they use form data)
+    form_data_routes = [
+        "/api/v1/channels/*/send_message",
+        "/api/v1/users/profile/avatar",
+        "/api/v1/users/profile/banner",
+        "/api/v1/cdn/upload",
+        "/api/v1/system/upload-avatar",
+        "/api/v1/system/upload-banner",
+    ]
+
     def __init__(self, app) -> None:
         super().__init__(app)
+
+    def is_form_data_route(self, url: str) -> bool:
+        """
+        Check if a route uses form data instead of query parameters.
+        """
+        for route_pattern in self.form_data_routes:
+            route_regex = route_pattern.replace("*", ".*")
+            if re.match(route_regex, url):
+                return True
+        return False
 
     async def dispatch(self, request, call_next):
         # This statements will get triggered when running
         # tests, beside that, it will just continue.
         if request.client is None:
             return await call_next(request)
-        
+
         request_url = request.url.path
-        
+
         url_match = self.match_request_url(
             url=request_url,
             method=request.method
@@ -224,7 +244,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         if not url_match:
             return await call_next(request)
-        
+
+        # Skip query parameter validation for form data routes (they handle validation at endpoint level)
+        if self.is_form_data_route(request_url):
+            return await call_next(request)
+
         query_params = request.query_params
 
         # Validate query params with pydantic if a model is defined for the route
@@ -250,7 +274,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     # and to not continue to the next check
                     if exception is not None:
                         return exception
-                    
+
                     exception = api_initializer.security_checks_handler.check_user(
                         auth_token=query_params.get("auth_token")
                     )
@@ -266,7 +290,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     if "/signup" in request_url:
                         continue
                     exception = api_initializer.security_checks_handler.check_auth_token_format(auth_token=query_params.get("auth_token"))
-                    
+
                     if exception is not None:
                         return exception
 
@@ -302,7 +326,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             if exception is not None:
                 return exception
-                
+
         return await call_next(request)
 
     def match_request_url(self, url: str, method: str) -> bool:

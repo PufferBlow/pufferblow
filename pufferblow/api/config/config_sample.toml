@@ -11,12 +11,16 @@ rate_limit_duration = 5 # the duration of a rate limit of an IP address (in minu
 max_rate_limit_requests = 6000 # number of request before a rate limit warning
 max_rate_limit_warnings = 15 # number of rate limit warnings before blocking the IP address
 
-[postregsql]
+[postgresql]
 database_name = "<your database name>"
 username = "<your username>"
 password = "<your password>"
 host = "<your database host>"
 port = "<your database port>"
+ssl_mode = "prefer"
+ssl_cert = ""  # optional path to client certificate file
+ssl_key = ""  # optional path to client private key file
+ssl_root_cert = ""  # optional path to root certificate file
 
 [encryption]
 derived_key_bytes = 56 # This specifies the bytes length of the derived key. A 56-bit key provides a good balance between security and performance. The bytes should be 5 to 56 bytes.
