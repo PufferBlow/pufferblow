@@ -336,6 +336,27 @@ class BackgroundTasksManager:
             logger.error(f"Auth token cleanup failed: {str(e)}")
             raise
 
+    def update_activity_metrics(self):
+        """Update activity metrics for dashboard display"""
+        logger.info("Starting activity metrics update")
+
+        try:
+            # Calculate daily activity metrics
+            metrics = self.database_handler.calculate_daily_activity_metrics()
+
+            if metrics is not None:
+                # Save activity metrics to database
+                self.database_handler.save_activity_metrics(metrics)
+
+                # Log summary
+                logger.info(f"Activity metrics updated successfully")
+            else:
+                logger.warning("No activity metrics calculated (possibly no data)")
+
+        except Exception as e:
+            logger.error(f"Activity metrics update failed: {str(e)}")
+            raise
+
     def update_server_statistics(self):
         """Update server statistics/usage metrics"""
         logger.info("Starting server statistics update")

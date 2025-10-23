@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, DateTime
+from sqlalchemy import String, Integer, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.utils.current_date import date_in_gmt
@@ -18,9 +18,8 @@ class Server(Base):
     avatar_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     banner_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     welcome_message: Mapped[str] = mapped_column(String, nullable=False)
-    members_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    online_members: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
     # Server stats
     stats_id: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -33,6 +32,6 @@ class Server(Base):
         return (
             f"Server(server_id={self.server_id!r}, server_name={self.server_name!r}, "
             f"description={self.description!r}, avatar_url={self.avatar_url!r}, "
-            f"banner_url={self.banner_url!r}, welcome_message={self.welcome_message!r}, "
+            f"banner_url={self.banner_url!r}, welcome_message={self.welcome_message!r}, is_private={self.is_private!r}, "
             f"updated_at={self.updated_at!r}, created_at={self.created_at!r})"
         )

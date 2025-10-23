@@ -1,4 +1,3 @@
-import pytz
 import uuid
 import string
 import random
@@ -88,16 +87,9 @@ class UserManager (object):
         else:
             new_user.roles_ids = ['user']
 
-        # Use appropriate datetime objects for database compatibility
-        database_uri = str(self.database_handler.database_engine.url)
-        if database_uri.startswith('sqlite://'):
-            # SQLite requires datetime objects
-            new_user.created_at = datetime.datetime.now()
-            new_user.last_seen = datetime.datetime.now()
-        else:
-            # For PostgreSQL, use string format as expected
-            new_user.created_at = datetime.date.today().strftime("%Y-%m-%d %H:%M:%S")
-            new_user.last_seen = datetime.datetime.now(pytz.timezone("GMT")).strftime("%Y-%m-%d %H:%M:%S")
+        # Use datetime objects with UTC timezone for database compatibility
+        new_user.created_at = datetime.datetime.now(datetime.timezone.utc)
+        new_user.last_seen = datetime.datetime.now(datetime.timezone.utc)
 
         self.database_handler.sign_up(
             user_data=new_user

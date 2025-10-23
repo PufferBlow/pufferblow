@@ -97,8 +97,14 @@ class APIInitializer(object):
         self.hasher = Hasher()
 
         # Init Database
-        self.load_database(database_uri=database_uri) 
-        
+        self.load_database(database_uri=database_uri)
+
+        # Initialize default roles, privileges, and server settings for PostgreSQL databases
+        # This ensures they're always present when the system starts
+        database_uri_check = str(self.database_handler.database_engine.url)
+        if not database_uri_check.startswith('sqlite://'):
+            self.database_handler.initialize_default_data()
+
         # Server manager
         self.server_manager = ServerManager(
             database_handler=self.database_handler
@@ -209,6 +215,14 @@ class APIInitializer(object):
         self.background_tasks_manager.register_task(
             task_id="github_releases_check",
             task_func=self.background_tasks_manager.check_github_releases,
+            interval_hours=6,
+            enabled=True
+        )
+
+        # Register activity metrics update task - run every 6 hours
+        self.background_tasks_manager.register_task(
+            task_id="activity_metrics_update",
+            task_func=self.background_tasks_manager.update_activity_metrics,
             interval_hours=6,
             enabled=True
         )

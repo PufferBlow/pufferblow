@@ -2,7 +2,7 @@ import sys
 import asyncio
 import base64
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -355,7 +355,7 @@ async def signup_new_user(
             metadata_json=json.dumps({
                 "username": request.username,
                 "user_id": str(user_data.user_id),
-                "joined_at": user_data.created_at
+                "joined_at": user_data.created_at.isoformat()
             })
         )
     )
@@ -1515,7 +1515,7 @@ async def upload_cdn_file(
             # Update activity metrics (increment files uploaded and file size)
             try:
                 # Get current day's metrics (or create if doesn't exist)
-                today = datetime.utcnow().date()
+                today = datetime.now(timezone.utc())
                 metrics = api_initializer.database_handler.calculate_daily_activity_metrics()
 
                 if metrics:
@@ -2283,20 +2283,18 @@ async def get_server_info_route():
         "server_name": server_data.server_name,
         "server_description": server_data.description,
         "version": getattr(api_initializer.config, 'VERSION', '1.0.0'),
-        "max_users": None,  # Not stored in current schema, can be added later
         "is_private": server_settings.is_private,
         "creation_date": server_data.created_at.isoformat(),
         "avatar_url": server_data.avatar_url,
         "banner_url": server_data.banner_url,
         "welcome_message": server_data.welcome_message,
-        "members_count": server_data.members_count,
-        "online_members": server_data.online_members,
+        
         # Include server settings
         "max_message_length": server_settings.max_message_length,
-        "max_image_size": server_settings.max_image_size,  # MB
-        "max_video_size": server_settings.max_video_size,  # MB
-        "max_sticker_size": server_settings.max_sticker_size,  # MB
-        "max_gif_size": server_settings.max_gif_size,  # MB
+        "max_image_size": server_settings.max_image_size,
+        "max_video_size": server_settings.max_video_size,
+        "max_sticker_size": server_settings.max_sticker_size,
+        "max_gif_size": server_settings.max_gif_size,
         "allowed_image_types": server_settings.allowed_images_extensions,
         "allowed_video_types": server_settings.allowed_videos_extensions,
         "allowed_file_types": server_settings.allowed_doc_extensions,
