@@ -32,7 +32,7 @@ class Config:
     MIN_MESSAGES_PER_PAGE   :       int     =       20
 
     # CDN related parameters
-    CDN_STORAGE_PATH        :       str     =       f"{constants.HOME}/cdn"
+    CDN_STORAGE_PATH        :       str     =       f"{constants.HOME}/.pufferblow/cdn"
     CDN_BASE_URL            :       str     =       "/cdn"
     CDN_CACHE_MAX_AGE       :       int     =       86400  # 24 hours in seconds
    

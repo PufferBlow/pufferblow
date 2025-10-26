@@ -124,6 +124,8 @@ class DatabaseHandler (object):
             try:
                 # Use migration-safe approach for PostgreSQL
                 self._create_tables_safely(base)
+                # Ensure default server settings are created
+                self._ensure_default_server_settings()
             except Exception as e:
                 logger.error(f"PostgreSQL table creation failed: {e}")
                 raise
@@ -284,7 +286,56 @@ class DatabaseHandler (object):
         except Exception as e:
             logger.warning(f"Schema migration failed: {str(e)}")
             # This shouldn't prevent setup from continuing, just log warnings
-        
+
+    def _ensure_default_server_settings(self) -> None:
+        """
+        Ensure that default server settings exist in the database.
+        This is called during table setup to guarantee server settings are available.
+        """
+        # Skip for SQLite tests where server_settings table is not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        try:
+            with self.database_session() as session:
+                # Check if server settings already exist
+                existing_settings = session.query(ServerSettings).first()
+
+                if existing_settings:
+                    logger.debug("Server settings already exist, skipping initialization")
+                    return
+
+                logger.info("Inserting default server settings")
+
+                # Create default server settings
+                server_settings = ServerSettings(
+                    server_settings_id="global_settings",
+                    is_private=False,
+                    max_message_length=50000,
+                    max_image_size=5,  # 5MB
+                    max_video_size=50,  # 50MB
+                    max_sticker_size=5,  # 5MB
+                    max_gif_size=10,  # 10MB for animated GIFs
+                    allowed_images_extensions=["png", "jpg", "jpeg", "gif", "webp"],
+                    allowed_stickers_extensions=["png", "gif"],  # Stickers support PNG and GIF
+                    allowed_gif_extensions=["gif"],  # Standalone GIFs
+                    allowed_videos_extensions=["mp4", "webm"],
+                    allowed_doc_extensions=["pdf", "doc", "docx", "txt", "zip"],
+                    rate_limit_duration=5,  # 5 minutes
+                    max_rate_limit_requests=6000,  # 6000 requests per window
+                    max_rate_limit_warnings=15  # 15 warnings before blocking
+                )
+
+                session.add(server_settings)
+                session.commit()
+
+                logger.info("Default server settings inserted successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to ensure default server settings: {str(e)}")
+            raise
+
     def sign_up(self, user_data: Users) -> None:
         """
         Sign up a new user
@@ -1919,32 +1970,35 @@ class DatabaseHandler (object):
     def get_user_registration_count_by_period(self, start_date: datetime, end_date: datetime) -> int:
         """Get count of user registrations between dates"""
         with self.database_session() as session:
-            return session.query(
+            result = session.query(
                 func.count(Users.user_id)
             ).filter(
                 Users.created_at >= start_date,
                 Users.created_at < end_date
-            ).scalar() or 0
+            )
+            return result.scalar() if result.scalar() is not None else 0
 
     def get_message_count_by_period(self, start_date: datetime, end_date: datetime) -> int:
         """Get count of messages between dates"""
         with self.database_session() as session:
-            return session.query(
+            result = session.query(
                 func.count(Messages.message_id)
             ).filter(
                 Messages.sent_at >= start_date,
                 Messages.sent_at < end_date
-            ).scalar() or 0
+            )
+            return result.scalar() if result.scalar() is not None else 0
 
     def get_channel_creation_count_by_period(self, start_date: datetime, end_date: datetime) -> int:
         """Get count of channel creations between dates"""
         with self.database_session() as session:
-            return session.query(
+            result = session.query(
                 func.count(Channels.channel_id)
             ).filter(
                 Channels.created_at >= start_date,
                 Channels.created_at < end_date
-            ).scalar() or 0
+            )
+            return result.scalar() if result.scalar() is not None else 0
 
     def save_chart_data_entry(self, chart_data_entry: ChartData) -> None:
         """Save a chart data entry"""

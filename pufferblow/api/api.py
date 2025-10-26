@@ -69,11 +69,31 @@ class CreateChannelRequest(BaseModel):
     auth_token: str
     channel_name: str
     is_private: bool = False
+    channel_type: str = "text"  # "text", "voice", or "mixed"
 
 class CreateChannelResponse(BaseModel):
     status_code: int
     message: str
     channel_data: dict  # Keep complex dict structure for channel data
+
+class VoiceChannelJoinRequest(BaseModel):
+    auth_token: str
+
+class VoiceChannelJoinResponse(BaseModel):
+    status_code: int
+    token: str | None = None
+    room_name: str | None = None
+    livekit_url: str | None = None
+    proxy: bool | None = None
+    error: str | None = None
+
+class VoiceChannelStatusResponse(BaseModel):
+    status_code: int
+    channel_id: str
+    room_name: str | None = None
+    participants: list = []
+    participant_count: int = 0
+    error: str | None = None
 
 # Query parameter models
 class AuthTokenQuery(BaseModel):
@@ -109,6 +129,13 @@ class LoadMessagesQuery(BaseModel):
     page: int = Field(default=1, ge=1)
     messages_per_page: int = Field(default=20, ge=1, le=50)
 
+class MessageAttachment(BaseModel):
+    """Pydantic model for message attachments"""
+    url: str
+    filename: str
+    type: str
+    size: int | None = None
+
 class MessageData(BaseModel):
     """Pydantic model for individual message data"""
     message_id: str
@@ -117,7 +144,7 @@ class MessageData(BaseModel):
     sender_id: str
     message: str
     sent_at: str
-    attachments: list[str] = []
+    attachments: list[MessageAttachment] = []
     username: str
 
 class LoadMessagesResponse(BaseModel):
@@ -879,6 +906,149 @@ async def create_new_channel_route(request: CreateChannelRequest):
         "status_code": 200,
         "message": "Channel created successfully",
         "channel_data": channel_data.to_dict()
+    }
+
+@api.post("/api/v1/channels/{channel_id}/join-audio", status_code=200, response_model=VoiceChannelJoinResponse)
+async def join_voice_channel_route(auth_token: str, channel_id: str):
+    """
+    Join a voice channel through API proxy. API handles LiveKit connection internally.
+
+    Args:
+        auth_token (str): User's authentication token
+        channel_id (str): The voice channel's ID
+
+    Returns:
+        200 OK: Session ID for voice channel connection
+        400 BAD REQUEST: Invalid request or voice channels disabled
+        404 NOT FOUND: Channel not found or not a voice channel
+        403 FORBIDDEN: Access denied
+    """
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if voice channels are enabled in config
+    if not api_initializer.config.get("livekit", {}).get("voice_channels_enabled", False):
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail="Voice channels are not enabled on this server"
+        )
+
+    # Check if channel exists and user has access
+    if not api_initializer.channels_manager.check_channel(channel_id):
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail="Channel not found"
+        )
+
+    # Check if user has access to this channel (private channels)
+    if api_initializer.channels_manager.is_private(channel_id):
+        # For private channels, check if user is admin/owner or in allowed users
+        is_authorized = (api_initializer.user_manager.is_admin(user_id) or
+                        api_initializer.user_manager.is_server_owner(user_id))
+
+        if not is_authorized:
+            # Would need to check allowed_users list - for now, private voice channels require admin access
+            raise exceptions.HTTPException(
+                status_code=403,
+                detail="Access denied to private voice channel"
+            )
+
+    logger.info(f"Voice channel proxy join attempt | User: {user_id} | Channel: {channel_id}")
+
+    # API proxy approach - provide LiveKit tokens through secure API gateway
+    result = api_initializer.channels_manager.join_voice_channel(user_id, channel_id)
+
+    if "error" in result:
+        logger.warning(f"Voice channel proxy join failed | User: {user_id} | Channel: {channel_id} | Error: {result['error']}")
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail=result["error"]
+        )
+
+    # Log successful proxy operation
+    logger.info(f"Voice channel proxy join successful | User: {user_id} | Channel: {channel_id} | Room: {result.get('room_name')} | Proxy: {result.get('proxy', False)}")
+
+    # Return LiveKit connection info through API proxy
+    return {
+        "status_code": 200,
+        "token": result.get("token"),
+        "room_name": result.get("room_name"),
+        "livekit_url": result.get("livekit_url"),
+        "proxy": result.get("proxy", False)
+    }
+
+@api.post("/api/v1/channels/{channel_id}/leave-audio", status_code=200)
+async def leave_voice_channel_route(auth_token: str, channel_id: str):
+    """
+    Leave a voice channel.
+
+    Args:
+        auth_token (str): User's authentication token
+        channel_id (str): The voice channel's ID
+
+    Returns:
+        200 OK: Successfully left voice channel
+        404 NOT FOUND: Channel not found
+    """
+    user_id = extract_user_id(auth_token=auth_token)
+
+    logger.info(f"Voice channel proxy leave attempt | User: {user_id} | Channel: {channel_id}")
+
+    result = api_initializer.channels_manager.leave_voice_channel(user_id, channel_id)
+
+    if "error" in result:
+        logger.warning(f"Voice channel proxy leave failed | User: {user_id} | Channel: {channel_id} | Error: {result['error']}")
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail=result["error"]
+        )
+
+    logger.info(f"Voice channel proxy leave successful | User: {user_id} | Channel: {channel_id}")
+
+    return {
+        "status_code": 200,
+        "message": "Successfully left voice channel"
+    }
+
+@api.get("/api/v1/channels/{channel_id}/audio-status", status_code=200, response_model=VoiceChannelStatusResponse)
+async def get_voice_channel_status_route(auth_token: str, channel_id: str):
+    """
+    Get status of a voice channel including participants.
+
+    Args:
+        auth_token (str): User's authentication token
+        channel_id (str): The voice channel's ID
+
+    Returns:
+        200 OK: Channel status with participants
+        404 NOT FOUND: Channel not found or not a voice channel
+        403 FORBIDDEN: Access denied
+    """
+    user_id = extract_user_id(auth_token=auth_token)
+
+    # Check if user has access to this channel
+    if api_initializer.channels_manager.is_private(channel_id):
+        is_authorized = (api_initializer.user_manager.is_admin(user_id) or
+                        api_initializer.user_manager.is_server_owner(user_id))
+        if not is_authorized:
+            raise exceptions.HTTPException(
+                status_code=403,
+                detail="Access denied to private voice channel"
+            )
+
+    result = api_initializer.channels_manager.get_voice_channel_status(channel_id)
+
+    if "error" in result:
+        raise exceptions.HTTPException(
+            status_code=404,
+            detail=result["error"]
+        )
+
+    return {
+        "status_code": 200,
+        "channel_id": channel_id,
+        "room_name": result.get("room_name"),
+        "participants": result.get("participants", []),
+        "participant_count": result.get("participant_count", 0)
     }
 
 @api.delete("/api/v1/channels/{channel_id}/delete")

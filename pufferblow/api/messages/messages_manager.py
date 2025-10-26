@@ -4,6 +4,7 @@ import random
 import base64
 import hashlib
 import urllib.parse
+import mimetypes
 
 from loguru import logger
 
@@ -89,6 +90,27 @@ class MessagesManager(object):
                 json_metadata_format['sender_avatar_url'] = None
                 json_metadata_format['sender_status'] = 'offline'
                 json_metadata_format['sender_roles'] = []
+
+            # Enhance attachments with type information for client rendering decisions
+            if message_data.attachments and len(message_data.attachments) > 0:
+                enhanced_attachments = []
+                for attachment_url in message_data.attachments:
+                    # Extract filename from URL
+                    filename = attachment_url.split('/')[-1] if attachment_url else ''
+                    # Determine MIME type from file extension (fallback logic)
+                    extension = filename.split('.')[-1].lower() if '.' in filename else ''
+                    mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+                    enhanced_attachments.append({
+                        'url': attachment_url,
+                        'filename': filename,
+                        'type': mime_type,
+                        'size': None  # File size lookup would require additional DB query
+                    })
+
+                json_metadata_format['attachments'] = enhanced_attachments
+            else:
+                json_metadata_format['attachments'] = []
 
             # Keep the sender_user_id for backward compatibility
             json_metadata_format['sender_user_id'] = str(message_data.sender_id)

@@ -532,60 +532,80 @@ class BackgroundTasksManager:
             with self.database_handler.database_session() as session:
                 from sqlalchemy import select, func
 
+                # Check if Messages table is empty first
+                messages_exist = session.query(Messages).count() > 0
+
+                if not messages_exist:
+                    logger.debug("No messages in database, returning zero statistics")
+                    return {
+                        'total': 0,
+                        'past_24h': 0,
+                        'past_week': 0,
+                        'past_month': 0,
+                        'past_quarter': 0,
+                        'past_year': 0
+                    }
+
                 # Total messages
-                total_messages = session.execute(
+                total_result = session.execute(
                     select(func.count()).select_from(Messages)
-                ).scalar()
+                )
+                total_messages = total_result.scalar()
 
                 now = datetime.now()
 
                 # Messages in past 24 hours
                 day_ago = now - timedelta(days=1)
-                messages_24h = session.execute(
+                messages_24h_result = session.execute(
                     select(func.count()).select_from(Messages).where(
                         Messages.sent_at >= day_ago
                     )
-                ).scalar()
+                )
+                messages_24h = messages_24h_result.scalar()
 
                 # Messages in past week
                 week_ago = now - timedelta(days=7)
-                messages_week = session.execute(
+                messages_week_result = session.execute(
                     select(func.count()).select_from(Messages).where(
                         Messages.sent_at >= week_ago
                     )
-                ).scalar()
+                )
+                messages_week = messages_week_result.scalar()
 
                 # Messages in past month
                 month_ago = now - timedelta(days=30)
-                messages_month = session.execute(
+                messages_month_result = session.execute(
                     select(func.count()).select_from(Messages).where(
                         Messages.sent_at >= month_ago
                     )
-                ).scalar()
+                )
+                messages_month = messages_month_result.scalar()
 
                 # Messages in past 3 months
                 quarter_ago = now - timedelta(days=90)
-                messages_quarter = session.execute(
+                messages_quarter_result = session.execute(
                     select(func.count()).select_from(Messages).where(
                         Messages.sent_at >= quarter_ago
                     )
-                ).scalar()
+                )
+                messages_quarter = messages_quarter_result.scalar()
 
                 # Messages in past year
                 year_ago = now - timedelta(days=365)
-                messages_year = session.execute(
+                messages_year_result = session.execute(
                     select(func.count()).select_from(Messages).where(
                         Messages.sent_at >= year_ago
                     )
-                ).scalar()
+                )
+                messages_year = messages_year_result.scalar()
 
             return {
-                'total': total_messages or 0,
-                'past_24h': messages_24h or 0,
-                'past_week': messages_week or 0,
-                'past_month': messages_month or 0,
-                'past_quarter': messages_quarter or 0,
-                'past_year': messages_year or 0
+                'total': total_messages if total_messages is not None else 0,
+                'past_24h': messages_24h if messages_24h is not None else 0,
+                'past_week': messages_week if messages_week is not None else 0,
+                'past_month': messages_month if messages_month is not None else 0,
+                'past_quarter': messages_quarter if messages_quarter is not None else 0,
+                'past_year': messages_year if messages_year is not None else 0
             }
 
         except Exception as e:

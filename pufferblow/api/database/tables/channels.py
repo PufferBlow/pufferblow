@@ -14,9 +14,12 @@ class Channels(Base):
 
     channel_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
     channel_name: Mapped[str] = mapped_column(String, nullable=False)
+    channel_type: Mapped[str] = mapped_column(String, default="text")  # text, voice, mixed
     messages_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), default=list)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
     allowed_users: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), default=list)
+    livekit_room_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # For voice channels
+    participant_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), default=list)  # Active voice participants
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: date_in_gmt("%Y-%m-%d %H:%M:%S"),
@@ -37,9 +40,12 @@ class Channels(Base):
         return {
             "channel_id"         :   self.channel_id,
             "channel_name"       :   self.channel_name,
+            "channel_type"       :   self.channel_type,
             "messages_ids"       :   self.messages_ids,
             "is_private"         :   self.is_private,
             "allowed_users"      :   self.allowed_users,
+            "livekit_room_name"  :   self.livekit_room_name,
+            "participant_ids"    :   self.participant_ids,
             "created_at"         :   self.created_at
         }
 
