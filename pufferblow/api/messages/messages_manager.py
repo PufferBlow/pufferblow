@@ -134,6 +134,20 @@ class MessagesManager(object):
         Returns:
             Messages: The message metadata object.
         """
+        # Check if channel is audio-only (prevents text messages in audio channels)
+        from pufferblow.api.channels.channels_manager import ChannelsManager
+        from pufferblow.api_initializer import api_initializer
+
+        channel_type = api_initializer.channels_manager.get_channel_type(channel_id)
+        if channel_type == "audio":
+            from loguru import logger
+            from fastapi import exceptions
+            logger.warning(f"Attempted to send message to audio channel | User: {user_id} | Channel: {channel_id}")
+            raise exceptions.HTTPException(
+                status_code=400,
+                detail="Messages cannot be sent to audio-only channels. Audio channels are for voice communication only."
+            )
+
         message_metadata = Messages()
 
         message_metadata.message_id     =   self._generate_message_id(

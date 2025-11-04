@@ -42,6 +42,7 @@ pytest-asyncio = "^1.2.0"
 python-multipart = "^0.0.20"
 psutil = "^7.1.0"
 livekit = "^0.15.0"
+aiortc = "^1.14.0"
 
 [tool.poetry.group.dev.dependencies]
 loguru = "^0.7.3"

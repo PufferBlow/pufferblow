@@ -66,10 +66,10 @@ class ListChannelsResponse(BaseModel):
     channels: list = []  # Keep as list for now since complex nested channel structure
 
 class CreateChannelRequest(BaseModel):
-    auth_token: str
-    channel_name: str
+    auth_token: str = Field(min_length=1)
+    channel_name: str = Field(min_length=1)
     is_private: bool = False
-    channel_type: str = "text"  # "text", "voice", or "mixed"
+    channel_type: str = Field(default="text", pattern="^(text|voice|mixed)$")
 
 class CreateChannelResponse(BaseModel):
     status_code: int
@@ -878,7 +878,8 @@ async def create_new_channel_route(request: CreateChannelRequest):
         channel_data = api_initializer.channels_manager.create_channel(
             user_id=user_id,
             channel_name=request.channel_name,
-            is_private=request.is_private
+            is_private=request.is_private,
+            channel_type=request.channel_type
         )
         logger.info(f"Channel '{request.channel_name}' created successfully by user {user_id}")
 
@@ -911,70 +912,129 @@ async def create_new_channel_route(request: CreateChannelRequest):
 @api.post("/api/v1/channels/{channel_id}/join-audio", status_code=200, response_model=VoiceChannelJoinResponse)
 async def join_voice_channel_route(auth_token: str, channel_id: str):
     """
-    Join a voice channel through API proxy. API handles LiveKit connection internally.
+    Join a voice channel using WebRTC. Provides direct WebRTC configuration for clients.
 
     Args:
         auth_token (str): User's authentication token
         channel_id (str): The voice channel's ID
 
     Returns:
-        200 OK: Session ID for voice channel connection
+        200 OK: WebRTC configuration for voice channel connection
         400 BAD REQUEST: Invalid request or voice channels disabled
         404 NOT FOUND: Channel not found or not a voice channel
         403 FORBIDDEN: Access denied
+        409 CONFLICT: User already in another voice channel
     """
     user_id = extract_user_id(auth_token=auth_token)
+    logger.debug(f"Voice channel join request | User: {user_id} | Channel: {channel_id} | Timestamp: {datetime.now().isoformat()}")
 
-    # Check if voice channels are enabled in config
-    if not api_initializer.config.get("livekit", {}).get("voice_channels_enabled", False):
+    # Check if aiortc/WebRTC is available
+    try:
+        from pufferblow.api.webrtc.webrtc_manager import AIORTC_AVAILABLE
+        if not AIORTC_AVAILABLE:
+            logger.error(f"Voice channels unavailable | User: {user_id} | Reason: aiortc not installed")
+            raise exceptions.HTTPException(
+                status_code=400,
+                detail="Voice channels are not available - aiortc library is not installed"
+            )
+    except ImportError as e:
+        logger.error(f"Voice channels unavailable | User: {user_id} | Reason: {str(e)}")
         raise exceptions.HTTPException(
             status_code=400,
-            detail="Voice channels are not enabled on this server"
+            detail="Voice channels are not available - aiortc library is not installed"
         )
 
     # Check if channel exists and user has access
     if not api_initializer.channels_manager.check_channel(channel_id):
+        logger.warning(f"Voice channel not found | User: {user_id} | Channel: {channel_id}")
         raise exceptions.HTTPException(
             status_code=404,
             detail="Channel not found"
         )
+    logger.debug(f"Channel exists | User: {user_id} | Channel: {channel_id}")
 
     # Check if user has access to this channel (private channels)
     if api_initializer.channels_manager.is_private(channel_id):
-        # For private channels, check if user is admin/owner or in allowed users
         is_authorized = (api_initializer.user_manager.is_admin(user_id) or
                         api_initializer.user_manager.is_server_owner(user_id))
-
         if not is_authorized:
-            # Would need to check allowed_users list - for now, private voice channels require admin access
+            logger.warning(f"Access denied to private voice channel | User: {user_id} | Channel: {channel_id}")
             raise exceptions.HTTPException(
                 status_code=403,
                 detail="Access denied to private voice channel"
             )
+    logger.debug(f"Access check passed | User: {user_id} | Channel: {channel_id} | Private: {api_initializer.channels_manager.is_private(channel_id)}")
 
-    logger.info(f"Voice channel proxy join attempt | User: {user_id} | Channel: {channel_id}")
+    # Check if user is already in another voice channel (single channel rule)
+    try:
+        webrtc_manager = api_initializer.channels_manager.get_webrtc_manager_singleton()
+        if hasattr(webrtc_manager, 'get_user_current_channel'):
+            current_channel = webrtc_manager.get_user_current_channel(user_id)
+            if current_channel and current_channel != channel_id:
+                logger.warning(f"User already in voice channel | User: {user_id} | Requested: {channel_id} | Current: {current_channel}")
+                raise exceptions.HTTPException(
+                    status_code=409,
+                    detail=f"You're already in voice channel {current_channel}. Leave it first or use client prompt to switch."
+                )
+    except Exception as e:
+        logger.debug(f"Single channel check failed | User: {user_id} | Error: {str(e)}")
 
-    # API proxy approach - provide LiveKit tokens through secure API gateway
-    result = api_initializer.channels_manager.join_voice_channel(user_id, channel_id)
+    logger.info(f"Voice channel WebRTC join attempt | User: {user_id} | Channel: {channel_id} | Checking WebRTC validity")
 
-    if "error" in result:
-        logger.warning(f"Voice channel proxy join failed | User: {user_id} | Channel: {channel_id} | Error: {result['error']}")
-        raise exceptions.HTTPException(
-            status_code=400,
-            detail=result["error"]
+    # WebRTC approach - provide direct WebRTC configuration
+    try:
+        result = api_initializer.channels_manager.join_voice_channel(user_id, channel_id)
+        logger.debug(f"WebRTC manager response | User: {user_id} | Channel: {channel_id} | Result: {result}")
+
+        if "error" in result:
+            logger.warning(f"Voice channel WebRTC join failed | User: {user_id} | Channel: {channel_id} | Error: {result['error']}")
+            raise exceptions.HTTPException(
+                status_code=400,
+                detail=result["error"]
+            )
+
+        # Log successful WebRTC join operation with detailed metrics
+        participant_count = result.get('participant_count', 0)
+        channel_type = result.get('webrtc_config', {}).get('channel_type', 'unknown')
+        logger.info(f"Voice channel WebRTC join successful | User: {user_id} | Channel: {channel_id} | Type: {channel_type} | Participants: {participant_count} | ICE servers: {len(result.get('webrtc_config', {}).get('ice_servers', []))}")
+
+        # Log activity audit for voice channel join
+        api_initializer.database_handler.create_activity_audit_entry(
+            ActivityAudit(
+                activity_id=str(uuid.uuid4()),
+                activity_type="voice_channel_join",
+                user_id=user_id,
+                title=f"Joined voice channel #{result.get('channel_name', channel_id)}",
+                description=f"User joined voice channel with {participant_count} participants",
+                metadata_json=json.dumps({
+                    "channel_id": channel_id,
+                    "channel_type": channel_type,
+                    "participant_count": participant_count,
+                    "action": "join_voice_channel"
+                })
+            )
         )
 
-    # Log successful proxy operation
-    logger.info(f"Voice channel proxy join successful | User: {user_id} | Channel: {channel_id} | Room: {result.get('room_name')} | Proxy: {result.get('proxy', False)}")
+        # Return WebRTC configuration directly
+        response = {
+            "status_code": 200,
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "participants": result.get("participants", 0),
+            "participant_count": result.get("participant_count", 0),
+            "webrtc_config": result.get("webrtc_config", {})
+        }
+        logger.debug(f"Voice channel join response | User: {user_id} | Channel: {channel_id} | Config size: {len(str(response['webrtc_config']))}")
+        return response
 
-    # Return LiveKit connection info through API proxy
-    return {
-        "status_code": 200,
-        "token": result.get("token"),
-        "room_name": result.get("room_name"),
-        "livekit_url": result.get("livekit_url"),
-        "proxy": result.get("proxy", False)
-    }
+    except exceptions.HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in voice channel join | User: {user_id} | Channel: {channel_id} | Error: {str(e)}", exc_info=True)
+        raise exceptions.HTTPException(
+            status_code=500,
+            detail="Internal server error during voice channel join"
+        )
 
 @api.post("/api/v1/channels/{channel_id}/leave-audio", status_code=200)
 async def leave_voice_channel_route(auth_token: str, channel_id: str):

@@ -34,6 +34,9 @@ from pufferblow.api.cdn.cdn_manager import CDNManager
 # Background tasks manager
 from pufferblow.api.background_tasks import BackgroundTasksManager
 
+# WebRTC manager
+from pufferblow.api.webrtc.webrtc_manager import initialize_webrtc_manager
+
 # SecurityChecks handler
 from pufferblow.api.security.security_checks_handler import SecurityChecksHandler
 
@@ -172,6 +175,9 @@ class APIInitializer(object):
             channels_manager        =   self.channels_manager,
             auth_token_manager      =   self.auth_token_manager
         )
+
+        # Init WebRTC manager
+        initialize_webrtc_manager(self.database_handler)
 
         self.is_loaded = True
 

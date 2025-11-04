@@ -218,99 +218,41 @@ class ChannelsManager (object):
 
     def join_voice_channel(self, user_id: str, channel_id: str) -> dict:
         """
-        Join voice channel and provide LiveKit token through API proxy.
-        API acts as secure gateway to LiveKit without exposing server details.
+        Join voice channel using aiortc WebRTC manager.
+        Provides direct WebRTC configuration for clients.
 
         Args:
             `user_id` (str): The user's `user_id`.
             `channel_id` (str): The channel's `channel_id`.
 
         Returns:
-            dict: Contains LiveKit token info through API proxy, or error message.
+            dict: Contains WebRTC configuration, or error message.
         """
-        from pufferblow.api_initializer import api_initializer
-
-        # Check if voice channels are enabled
-        if not api_initializer.config.get("livekit", {}).get("voice_channels_enabled", False):
-            return {"error": "Voice channels are not enabled"}
-
-        # Check if channel exists and is voice-enabled
-        if not self.check_channel(channel_id):
-            return {"error": "Channel does not exist"}
-
-        if not self.is_voice_channel(channel_id):
-            return {"error": "Channel does not support voice"}
-
-        # Get channel data
-        channel_data = self.database_handler.get_channel_data(channel_id=channel_id)
-        room_name = channel_data.livekit_room_name
-
-        if not room_name:
-            return {"error": "Voice channel not properly configured"}
-
         try:
-            # Import LiveKit SDK for token generation
-            from livekit import api
+            from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
+            webrtc_manager = get_webrtc_manager()
 
-            # Get user info for token generation
-            user_data = self.database_handler.get_user(user_id=user_id)
-            if not user_data:
-                return {"error": "User not found"}
+            # Join voice channel using WebRTC manager
+            result = asyncio.run(webrtc_manager.join_voice_channel(user_id, channel_id))
 
-            username = user_data.username
+            if "error" in result:
+                return {"error": result["error"]}
 
-            # Add user to participant list
-            current_participants = channel_data.participant_ids or []
-            if user_id not in current_participants:
-                current_participants.append(user_id)
-                self.database_handler.update_channel_participants(channel_id, current_participants)
+            # Get channel data for additional info
+            channel_data = self.database_handler.get_channel_data(channel_id=channel_id)
+            if channel_data and channel_data.livekit_room_name:
+                # Include fallback info in case WebRTC fails
+                result["fallback_room_name"] = channel_data.livekit_room_name
 
-            # Initialize LiveKit API for secure token generation
-            lk_api = api.LiveKitAPI(
-                url=api_initializer.config["livekit"]["url"],
-                api_key=api_initializer.config["livekit"]["api_key"],
-                api_secret=api_initializer.config["livekit"]["api_secret"]
-            )
-
-            # Create access token
-            token = api.AccessToken(
-                api_key=api_initializer.config["livekit"]["api_key"],
-                api_secret=api_initializer.config["livekit"]["api_secret"]
-            )
-
-            # Set up participant permissions
-            token.set_identity(user_id)
-            token.set_name(username)
-            token.set_metadata(f"pufferblow_user:{user_id}")
-
-            # Grant permissions based on channel type
-            grant = api.VideoGrants(
-                room_join=True,
-                room=room_name,
-                can_publish=True,
-                can_subscribe=True
-            )
-            token.set_grants(grant)
-
-            # Generate JWT token
-            jwt_token = token.to_jwt()
-
-            logger.info(f"User {username} ({user_id}) joined voice channel {channel_id} through API proxy")
-
-            return {
-                "token": jwt_token,
-                "room_name": room_name,
-                "livekit_url": api_initializer.config["livekit"]["url"],
-                "proxy": True  # Indicate this is through API proxy
-            }
+            return result
 
         except Exception as e:
-            logger.error(f"Failed to generate LiveKit token for user {user_id} in channel {channel_id}: {str(e)}")
+            logger.error(f"Failed to join WebRTC voice channel for user {user_id}: {str(e)}")
             return {"error": f"Failed to join voice channel: {str(e)}"}
 
     def leave_voice_channel(self, user_id: str, channel_id: str) -> dict:
         """
-        Handle leaving a voice channel
+        Handle leaving a WebRTC voice channel
 
         Args:
             `user_id` (str): The user's `user_id`.
@@ -320,24 +262,24 @@ class ChannelsManager (object):
             dict: Success or error message.
         """
         try:
-            # Remove user from participant list
-            channel_data = self.database_handler.get_channel_data(channel_id=channel_id)
-            if channel_data:
-                current_participants = channel_data.participant_ids or []
-                if user_id in current_participants:
-                    current_participants.remove(user_id)
-                    self.database_handler.update_channel_participants(channel_id, current_participants)
+            from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
+            webrtc_manager = get_webrtc_manager()
 
-            logger.info(f"User {user_id} left voice channel {channel_id}")
-            return {"success": True}
+            # Leave voice channel using WebRTC manager
+            result = asyncio.run(webrtc_manager.leave_voice_channel(user_id, channel_id))
+
+            if "error" in result:
+                return {"error": result["error"]}
+
+            return result
 
         except Exception as e:
-            logger.error(f"Failed to leave voice channel for user {user_id}: {str(e)}")
+            logger.error(f"Failed to leave WebRTC voice channel for user {user_id}: {str(e)}")
             return {"error": f"Failed to leave voice channel: {str(e)}"}
 
     def get_voice_channel_status(self, channel_id: str) -> dict:
         """
-        Get status of a voice channel including participants
+        Get status of a WebRTC voice channel including participants
 
         Args:
             `channel_id` (str): The channel's `channel_id`.
@@ -345,31 +287,15 @@ class ChannelsManager (object):
         Returns:
             dict: Channel status including participant info.
         """
-        channel_data = self.database_handler.get_channel_data(channel_id=channel_id)
-        if not channel_data:
-            return {"error": "Channel not found"}
+        try:
+            from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
+            webrtc_manager = get_webrtc_manager()
 
-        if not self.is_voice_channel(channel_id):
-            return {"error": "Not a voice channel"}
+            return webrtc_manager.get_voice_channel_status(channel_id)
 
-        # Get participant details
-        participants = []
-        if channel_data.participant_ids:
-            for pid in channel_data.participant_ids:
-                user_data = self.database_handler.get_user(pid)
-                if user_data:
-                    participants.append({
-                        "user_id": pid,
-                        "username": user_data.username,
-                        "avatar_url": user_data.avatar_url
-                    })
-
-        return {
-            "channel_id": channel_id,
-            "room_name": channel_data.livekit_room_name,
-            "participants": participants,
-            "participant_count": len(participants)
-        }
+        except Exception as e:
+            logger.error(f"Failed to get WebRTC voice channel status for {channel_id}: {str(e)}")
+            return {"error": "Failed to get voice channel status"}
 
     def _generate_channel_id(self, channel_name: str) -> str:
         """
