@@ -28,8 +28,13 @@ from pufferblow.api.messages.messages_manager import MessagesManager
 # WebSockets manager
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
-# CDN manager
-from pufferblow.api.cdn.cdn_manager import CDNManager
+# CDN manager - conditionally imported
+try:
+    from pufferblow.api.cdn.cdn_manager import CDNManager
+    CDN_AVAILABLE = True
+except ImportError:
+    CDN_AVAILABLE = False
+    CDNManager = None
 
 # Background tasks manager
 from pufferblow.api.background_tasks import BackgroundTasksManager
@@ -145,14 +150,17 @@ class APIInitializer(object):
         # Init websockets manager
         self.websockets_manager = WebSocketsManager()
 
-        # Init CDN manager
-        self.cdn_manager = CDNManager(
-            database_handler=self.database_handler,
-            config=self.config
-        )
-
-        # Update CDN limits from server settings
-        self.cdn_manager.update_server_limits()
+        # Init CDN manager (only if available)
+        if CDN_AVAILABLE and CDNManager:
+            self.cdn_manager = CDNManager(
+                database_handler=self.database_handler,
+                config=self.config
+            )
+            # Update CDN limits from server settings
+            self.cdn_manager.update_server_limits()
+        else:
+            self.cdn_manager = None
+            logger.warning("CDN manager not available - file upload features will be disabled")
 
         # Init background tasks manager (only register, don't start scheduler)
         self.background_tasks_manager = BackgroundTasksManager(

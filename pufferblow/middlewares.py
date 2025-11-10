@@ -235,6 +235,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if request.client is None:
             return await call_next(request)
 
+        # Skip OPTIONS requests entirely - let CORS middleware handle preflight requests
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         request_url = request.url.path
 
         url_match = self.match_request_url(

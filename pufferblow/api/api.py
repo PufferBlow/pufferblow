@@ -321,10 +321,9 @@ api = FastAPI(
 
 # NOTE: the middleware should be added with the following order
 # because fastAPI reorders them to the last middleware added to be the first,
-# in our case we want the RateLimitingMiddleware to be the first middleware to run
-# to protect the instace from DDOS attacks and blocked IPs, after that the SecutiryMiddleware,
-# which is related to auth_token checks..., will be the second. With this order we can be assured
-# that blocked IPs can't access the protected api routes. 
+# in our case we want the CORSMiddleware to be the first middleware to run
+# to handle CORS preflight requests, then RateLimitingMiddleware to protect
+# from DDOS attacks and blocked IPs, then SecurityMiddleware for auth checks.
 
 allowed_origins = [
     "http://localhost:5173",  # or whatever port your frontend runs on
@@ -338,8 +337,6 @@ allowed_origins = [
     "http://pufferblow.space",    # HTTP version
     "http://www.pufferblow.space" # HTTP version with www
 ]
-api.add_middleware(SecurityMiddleware)
-api.add_middleware(RateLimitingMiddleware)
 api.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -347,6 +344,8 @@ api.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+api.add_middleware(SecurityMiddleware)
+api.add_middleware(RateLimitingMiddleware)
 
 @api.get("/")
 async def redirect_route():

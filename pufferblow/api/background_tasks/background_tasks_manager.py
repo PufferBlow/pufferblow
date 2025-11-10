@@ -11,7 +11,13 @@ import json
 from loguru import logger
 
 from pufferblow.api.database.database_handler import DatabaseHandler
-from pufferblow.api.cdn.cdn_manager import CDNManager
+# CDN manager - conditionally imported
+try:
+    from pufferblow.api.cdn.cdn_manager import CDNManager
+    CDN_AVAILABLE = True
+except ImportError:
+    CDN_AVAILABLE = False
+    CDNManager = None
 from pufferblow.api.models.config_model import Config
 
 # Database table models
@@ -30,7 +36,7 @@ class BackgroundTasksManager:
     def __init__(
         self,
         database_handler: DatabaseHandler,
-        cdn_manager: CDNManager,
+        cdn_manager: Optional[CDNManager],
         config: Config
     ):
         self.database_handler = database_handler
@@ -250,6 +256,11 @@ class BackgroundTasksManager:
         logger.info("Starting CDN cleanup task")
 
         try:
+            # Check if CDN manager is available
+            if not self.cdn_manager:
+                logger.info("CDN manager not available, skipping cleanup task")
+                return
+
             # Get all referenced file URLs from database
             referenced_urls = await self._get_referenced_file_urls()
 
