@@ -5,7 +5,7 @@ class Config:
     # API related parameters
     API_HOST                :       str     =       "127.0.0.1"
     API_PORT                :       int     =       7575
-    LOGS_PATH               :       str     =       f"{constants.HOME}/logs/pufferblow_api.log"     
+    LOGS_PATH               :       str     =       f"{constants.HOME}/.pufferblow/logs/pufferblow.log"     
     WORKERS                 :       int     =       7
     RATE_LIMIT_DURATION     :       int     =       5
     MAX_RATE_LIMIT_REQUESTS :       int     =       6000
@@ -31,7 +31,20 @@ class Config:
     MAX_MESSAGES_PER_PAGE   :       int     =       50
     MIN_MESSAGES_PER_PAGE   :       int     =       20
 
-    # CDN related parameters
+    # Storage related parameters (replaces CDN)
+    STORAGE_PROVIDER        :       str     =       "local"
+    STORAGE_PATH            :       str     =       f"{constants.HOME}/.pufferblow/storage"
+    STORAGE_BASE_URL        :       str     =       "/storage"
+    STORAGE_ALLOCATED_GB    :       int     =       10  # Default 10GB for local storage
+
+    # AWS S3 configuration (when provider = "s3")
+    S3_BUCKET_NAME          :       str | None = None
+    S3_REGION               :       str     =       "us-east-1"
+    S3_ACCESS_KEY           :       str | None = None
+    S3_SECRET_KEY           :       str | None = None
+    S3_ENDPOINT_URL         :       str | None = None  # For custom S3-compatible services
+
+    # Legacy CDN parameters (for backward compatibility)
     CDN_STORAGE_PATH        :       str     =       f"{constants.HOME}/.pufferblow/cdn"
     CDN_BASE_URL            :       str     =       "/cdn"
     CDN_CACHE_MAX_AGE       :       int     =       86400  # 24 hours in seconds
@@ -84,7 +97,22 @@ class Config:
         self.MAX_MESSAGES_PER_PAGE   =   config["messages"]["max_messages_per_page"]
         self.MIN_MESSAGES_PER_PAGE   =   config["messages"]["min_messages_per_page"]
 
-        # CDN related parameters
+        # Storage related parameters
+        if "storage" in config:
+            self.STORAGE_PROVIDER        =   config["storage"]["provider"]
+            self.STORAGE_PATH            =   config["storage"]["storage_path"]
+            self.STORAGE_BASE_URL        =   config["storage"]["base_url"]
+            self.STORAGE_ALLOCATED_GB    =   config["storage"]["allocated_gb"]
+
+            # S3 configuration
+            if "s3" in config["storage"]:
+                self.S3_BUCKET_NAME      =   config["storage"]["s3"]["bucket_name"]
+                self.S3_REGION           =   config["storage"]["s3"]["region"]
+                self.S3_ACCESS_KEY       =   config["storage"]["s3"]["access_key"]
+                self.S3_SECRET_KEY       =   config["storage"]["s3"]["secret_key"]
+                self.S3_ENDPOINT_URL     =   config["storage"]["s3"].get("endpoint_url")
+
+        # Legacy CDN related parameters (for backward compatibility)
         if "cdn" in config:
             self.CDN_STORAGE_PATH        =   config["cdn"]["storage_path"]
             self.CDN_BASE_URL            =   config["cdn"]["base_url"]
@@ -132,6 +160,19 @@ derived_key_rounds = {self.DERIVED_KEY_ROUNDS} # This represents the number of i
 max_message_size = {self.MAX_MESSAGE_SIZE} # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
 max_messages_per_page = {self.MAX_MESSAGES_PER_PAGE} # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
 min_messages_per_page = {self.MIN_MESSAGES_PER_PAGE} # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
+
+[storage]
+provider = "{self.STORAGE_PROVIDER}" # Storage backend provider: "local" or "s3"
+storage_path = "{self.STORAGE_PATH}" # Local storage directory (for local provider)
+base_url = "{self.STORAGE_BASE_URL}" # Base URL for serving files
+allocated_gb = {self.STORAGE_ALLOCATED_GB} # Allocated storage space in GB (for local provider)
+
+[storage.s3]
+bucket_name = "{self.S3_BUCKET_NAME}" if self.S3_BUCKET_NAME else "" # S3 bucket name (for s3 provider)
+region = "{self.S3_REGION}" # AWS region
+access_key = "{self.S3_ACCESS_KEY}" if self.S3_ACCESS_KEY else "" # AWS access key
+secret_key = "{self.S3_SECRET_KEY}" if self.S3_SECRET_KEY else "" # AWS secret key
+endpoint_url = "{self.S3_ENDPOINT_URL}" if self.S3_ENDPOINT_URL else "" # Custom S3 endpoint (optional)
 
 [cdn]
 storage_path = "{self.CDN_STORAGE_PATH}" # This defines the directory where uploaded files will be stored on the server.

@@ -184,7 +184,7 @@ class UserManager (object):
 
         # Process avatar_url and banner_url - they are stored as relative API routes
         # and should be returned as-is to work with client's API client
-        # Do not modify them - leave as /api/v1/cdn/file/... paths
+        # Do not modify them - leave as /api/v1/storage/file/... paths
 
         # Debug logging
         if user_data.get('avatar_url'):
@@ -425,18 +425,24 @@ class UserManager (object):
         allowed_extensions = server_settings.allowed_images_extensions or ['png', 'jpg', 'jpeg', 'gif', 'webp']
 
         # Validate and save the avatar file with duplicate checking
-        avatar_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_file(
+        avatar_url, is_duplicate = api_initializer.storage_manager.validate_and_save_categorized_file(
             file=avatar_file,
             user_id=user_id,
-            max_size_mb=api_initializer.cdn_manager.MAX_IMAGE_SIZE_MB,
-            allowed_extensions=allowed_extensions,
-            subdirectory="avatars",
+            force_category="avatars",
             check_duplicates=True
         )
 
-        # Convert CDN-mounted URL to API route URL for database storage (like server avatars)
-        if avatar_url.startswith('/cdn/'):
-            avatar_url = avatar_url.replace('/cdn/', '/api/v1/cdn/file/', 1)
+        # Convert storage-mounted URL to API route URL for database storage (like server avatars)
+        if avatar_url.startswith('http://') or avatar_url.startswith('https://'):
+            # Full URL - extract the path part and convert to API route
+            from urllib.parse import urlparse
+            parsed_url = urlparse(avatar_url)
+            path_part = parsed_url.path
+            if path_part.startswith('/storage/'):
+                avatar_url = path_part.replace('/storage/', '/api/v1/storage/file/', 1)
+        elif avatar_url.startswith('/storage/'):
+            # Relative path - convert directly
+            avatar_url = avatar_url.replace('/storage/', '/api/v1/storage/file/', 1)
 
         # Update the user's avatar URL in database
         self.database_handler.update_user_avatar(user_id=user_id, new_avatar_url=avatar_url)
@@ -459,12 +465,10 @@ class UserManager (object):
         import uuid
 
         # Upload the sticker
-        sticker_url, _ = api_initializer.cdn_manager.validate_and_save_file(
+        sticker_url, _ = api_initializer.storage_manager.validate_and_save_categorized_file(
             file=sticker_file,
             user_id=user_id,
-            max_size_mb=5,  # Use sticker size limit
-            allowed_extensions=["png", "gif"],  # Sticker extensions
-            subdirectory="stickers",
+            force_category="stickers",
             check_duplicates=False  # Allow duplicate stickers for message sending
         )
 
@@ -500,12 +504,10 @@ class UserManager (object):
         import uuid
 
         # Upload the GIF
-        gif_url, _ = api_initializer.cdn_manager.validate_and_save_file(
+        gif_url, _ = api_initializer.storage_manager.validate_and_save_categorized_file(
             file=gif_file,
             user_id=user_id,
-            max_size_mb=10,  # GIF size limit
-            allowed_extensions=["gif"],  # Only GIFs
-            subdirectory="gifs",
+            force_category="gifs",
             check_duplicates=False  # Allow duplicate GIFs for message sending
         )
 
@@ -569,18 +571,24 @@ class UserManager (object):
         allowed_extensions = server_settings.allowed_images_extensions or ['png', 'jpg', 'jpeg', 'gif', 'webp']
 
         # Validate and save the banner file with duplicate checking
-        banner_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_file(
+        banner_url, is_duplicate = api_initializer.storage_manager.validate_and_save_categorized_file(
             file=banner_file,
             user_id=user_id,
-            max_size_mb=api_initializer.cdn_manager.MAX_IMAGE_SIZE_MB,
-            allowed_extensions=allowed_extensions,
-            subdirectory="banners",
+            force_category="banners",
             check_duplicates=True
         )
 
-        # Convert CDN-mounted URL to API route URL for database storage (like server banners)
-        if banner_url.startswith('/cdn/'):
-            banner_url = banner_url.replace('/cdn/', '/api/v1/cdn/file/', 1)
+        # Convert storage-mounted URL to API route URL for database storage (like server banners)
+        if banner_url.startswith('http://') or banner_url.startswith('https://'):
+            # Full URL - extract the path part and convert to API route
+            from urllib.parse import urlparse
+            parsed_url = urlparse(banner_url)
+            path_part = parsed_url.path
+            if path_part.startswith('/storage/'):
+                banner_url = path_part.replace('/storage/', '/api/v1/storage/file/', 1)
+        elif banner_url.startswith('/storage/'):
+            # Relative path - convert directly
+            banner_url = banner_url.replace('/storage/', '/api/v1/storage/file/', 1)
 
         # Update the user's banner URL in database
         self.database_handler.update_user_banner(user_id=user_id, new_banner_url=banner_url)

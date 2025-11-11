@@ -2563,3 +2563,58 @@ class DatabaseHandler (object):
             ).limit(limit).all()
 
             return activities
+
+    def update_file_object(self, old_file_hash: str, new_file_hash: str, new_file_path: str, new_file_size: int, new_mime_type: str) -> None:
+        """
+        Update a file object with new metadata after optimization
+
+        Args:
+            old_file_hash (str): Original file hash
+            new_file_hash (str): New file hash after optimization
+            new_file_path (str): New file path after optimization
+            new_file_size (int): New file size after optimization
+            new_mime_type (str): New MIME type after optimization
+
+        Returns:
+            None
+        """
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+
+        with self.database_session() as session:
+            stmt = update(FileObjects).values(
+                file_hash=new_file_hash,
+                file_path=new_file_path,
+                file_size=new_file_size,
+                mime_type=new_mime_type,
+                updated_at=updated_at
+            ).where(FileObjects.file_hash == old_file_hash)
+            session.execute(stmt)
+            session.commit()
+
+    def update_file_references(self, old_file_hash: str, new_file_hash: str) -> None:
+        """
+        Update all file references to point to the new file hash after optimization
+
+        Args:
+            old_file_hash (str): Original file hash
+            new_file_hash (str): New file hash after optimization
+
+        Returns:
+            None
+        """
+        # Skip for SQLite tests where file tables are not created
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith('sqlite://'):
+            return
+
+        with self.database_session() as session:
+            stmt = update(FileReferences).values(
+                file_hash=new_file_hash
+            ).where(FileReferences.file_hash == old_file_hash)
+            session.execute(stmt)
+            session.commit()

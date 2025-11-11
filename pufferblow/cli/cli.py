@@ -1,3 +1,4 @@
+from pathlib import Path
 import sys
 import typer
 
@@ -51,6 +52,10 @@ from pufferblow.api.database.database import Database
 
 # Init cli
 cli = typer.Typer()
+
+# Init storage subcommand
+storage_cli = typer.Typer()
+cli.add_typer(storage_cli, name="storage", help="Manage storage backends and configuration")
 
 # Init console
 console = Console()
@@ -529,6 +534,503 @@ def serve(
         }
 
         StandaloneApplication(api, OPTIONS).run()
+
+def display_storage_welcome():
+    """Display the modern storage setup welcome screen"""
+    # Clear screen for fresh start
+    console.clear()
+
+    # Welcome banner
+    welcome_panel = Panel.fit(
+        "[bold cyan]PufferBlow Storage Setup Wizard[/bold cyan]\n\n"
+        "[dim]Configure your file storage backend[/dim]\n"
+        "[dim]Choose between local storage or cloud providers[/dim]",
+        title="[bold yellow]Storage Configuration[/bold yellow]",
+        border_style="cyan",
+        padding=(1, 2)
+    )
+    console.print(welcome_panel)
+    console.print()
+
+def choose_storage_provider():
+    """Interactive storage provider selection"""
+    console.print("[bold]Choose your storage backend:[/bold]")
+    console.print()
+
+    providers = [
+        {
+            "key": "1",
+            "prefix": "[💾] ",
+            "title": "Local Storage",
+            "description": "Store files locally on your server with space allocation limits",
+            "features": ["10GB limit", "Fast access", "No external costs"],
+            "recommended": True
+        },
+        {
+            "key": "2",
+            "prefix": "[☁️]  ",
+            "title": "AWS S3",
+            "description": "Store files in Amazon S3 buckets with global CDN",
+            "features": ["Scalable", "Durable", "Pay per use"],
+            "recommended": False
+        },
+        {
+            "key": "3",
+            "prefix": "[🔧] ",
+            "title": "S3 Compatible",
+            "description": "Use any S3-compatible service (MinIO, DigitalOcean, etc.)",
+            "features": ["Flexible", "Self-hosted options", "Cost effective"],
+            "recommended": False
+        },
+        {
+            "key": "4",
+            "prefix": "[❌] ",
+            "title": "Cancel Setup",
+            "description": "Exit the storage setup wizard",
+            "features": [],
+            "recommended": False
+        }
+    ]
+
+    for provider in providers:
+        rec_marker = " [bold green](Recommended)[/bold green]" if provider["recommended"] else ""
+        console.print(f"  [{provider['key']}] {provider['prefix']}[bold]{provider['title']}[/bold]{rec_marker}")
+        console.print(f"      {provider['description']}")
+        if provider['features']:
+            features_str = ", ".join(f"[dim]{f}[/dim]" for f in provider['features'])
+            console.print(f"      [dim]Features: {features_str}[/dim]")
+        console.print()
+
+    # Enhanced selection with validation
+    while True:
+        choice = Prompt.ask(
+            "[bold cyan]Select a storage provider[/bold cyan]",
+            choices=["1", "2", "3", "4"],
+            default="1"
+        )
+
+        return choice
+
+def setup_local_storage():
+    """Setup local storage configuration"""
+    console.print("[bold]Local Storage Configuration[/bold]")
+    console.print()
+
+    # Get storage path
+    default_path = "./storage"  # Relative to project root
+    storage_path = Prompt.ask(
+        "[bold cyan]Storage directory path[/bold cyan]",
+        default=default_path
+    )
+
+    # Convert to absolute path
+    if not storage_path.startswith('/'):
+        # Make it relative to current working directory
+        storage_path = str(Path.cwd() / storage_path)
+
+    # Validate path
+    storage_path_obj = Path(storage_path)
+    if storage_path_obj.exists() and not storage_path_obj.is_dir():
+        console.print("[bold red]Error:[/bold red] Path exists but is not a directory!")
+        return None
+
+    # Get allocation limit
+    allocation_gb = Prompt.ask(
+        "[bold cyan]Storage allocation limit (GB)[/bold cyan]",
+        default="10"
+    )
+
+    try:
+        allocation_gb = float(allocation_gb)
+        if allocation_gb <= 0:
+            raise ValueError("Must be positive")
+    except ValueError:
+        console.print("[bold red]Error:[/bold red] Invalid allocation limit!")
+        return None
+
+    # Check available disk space
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage(storage_path_obj.parent)
+        free_gb = free / (1024**3)
+
+        if free_gb < allocation_gb:
+            console.print(f"[yellow]Warning:[/yellow] Only {free_gb:.1f}GB free space available!")
+            if not Confirm.ask("Continue anyway?", default=False):
+                return None
+    except Exception:
+        console.print("[yellow]Warning:[/yellow] Could not check available disk space")
+
+    return {
+        "provider": "local",
+        "storage_path": storage_path,
+        "allocated_space_gb": allocation_gb,
+        "base_url": "/api/v1/storage"  # Will be configured by server
+    }
+
+def setup_s3_storage(is_aws=True):
+    """Setup S3 storage configuration"""
+    provider_name = "AWS S3" if is_aws else "S3 Compatible"
+
+    console.print(f"[bold]{provider_name} Configuration[/bold]")
+    console.print()
+
+    # Bucket name
+    bucket_name = Prompt.ask("[bold cyan]Bucket name[/bold cyan]")
+
+    # Region
+    default_region = "us-east-1" if is_aws else ""
+    region = Prompt.ask(
+        "[bold cyan]Region[/bold cyan]",
+        default=default_region
+    )
+
+    # Access Key
+    access_key = Prompt.ask("[bold cyan]Access Key ID[/bold cyan]")
+
+    # Secret Key
+    secret_key = Prompt.ask(
+        "[bold cyan]Secret Access Key[/bold cyan]",
+        password=True
+    )
+
+    # Endpoint URL (for non-AWS S3)
+    endpoint_url = None
+    if not is_aws:
+        endpoint_url = Prompt.ask(
+            "[bold cyan]Endpoint URL[/bold cyan]",
+            default="https://s3.amazonaws.com"
+        )
+
+    return {
+        "provider": "s3",
+        "bucket_name": bucket_name,
+        "region": region,
+        "access_key": access_key,
+        "secret_key": secret_key,
+        "endpoint_url": endpoint_url,
+        "base_url": f"https://{bucket_name}.s3.{region}.amazonaws.com" if is_aws else endpoint_url
+    }
+
+def test_storage_config(config):
+    """Test the storage configuration"""
+    console.print("[bold]Testing Storage Configuration[/bold]")
+    console.print()
+
+    try:
+        from pufferblow.api.storage.storage_backend import StorageBackend
+        from pufferblow.api.storage.local_storage import LocalStorageBackend
+        from pufferblow.api.storage.s3_storage import S3StorageBackend
+
+        # Create backend instance
+        if config["provider"] == "local":
+            backend = LocalStorageBackend(config)
+        elif config["provider"] == "s3":
+            backend = S3StorageBackend(config)
+        else:
+            raise ValueError(f"Unsupported provider: {config['provider']}")
+
+        # Test basic operations
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            # Test 1: Basic connectivity
+            task = progress.add_task("Testing connectivity...")
+            # For local storage, check if we can create directory
+            # For S3, check if we can list objects (will fail gracefully if no permissions)
+            try:
+                if config["provider"] == "local":
+                    Path(config["storage_path"]).mkdir(parents=True, exist_ok=True)
+                else:
+                    # Try to check if bucket exists (this might fail with permissions)
+                    import boto3
+                    s3_client = boto3.client(
+                        's3',
+                        aws_access_key_id=config["access_key"],
+                        aws_secret_access_key=config["secret_key"],
+                        region_name=config["region"],
+                        endpoint_url=config.get("endpoint_url")
+                    )
+                    s3_client.head_bucket(Bucket=config["bucket_name"])
+                progress.update(task, description="[green]✓ Connectivity test passed[/green]")
+            except Exception as e:
+                progress.update(task, description=f"[red]✗ Connectivity test failed: {str(e)}[/red]")
+                return False
+
+            # Test 2: Write permissions
+            progress.update(task, advance=1, description="Testing write permissions...")
+            test_file = "test_config_file.txt"
+            test_content = b"Storage configuration test file"
+
+            try:
+                success = backend.upload_file(test_content, test_file)
+                if not success:
+                    raise Exception("Upload returned False")
+                progress.update(task, description="[green]✓ Write test passed[/green]")
+            except Exception as e:
+                progress.update(task, description=f"[red]✗ Write test failed: {str(e)}[/red]")
+                return False
+
+            # Test 3: Read permissions
+            progress.update(task, advance=1, description="Testing read permissions...")
+            try:
+                read_content = backend.download_file(test_file)
+                if read_content != test_content:
+                    raise Exception("Content mismatch")
+                progress.update(task, description="[green]✓ Read test passed[/green]")
+            except Exception as e:
+                progress.update(task, description=f"[red]✗ Read test failed: {str(e)}[/red]")
+                return False
+
+            # Test 4: Delete permissions
+            progress.update(task, advance=1, description="Testing delete permissions...")
+            try:
+                success = backend.delete_file(test_file)
+                if not success:
+                    raise Exception("Delete returned False")
+                progress.update(task, description="[green]✓ Delete test passed[/green]")
+            except Exception as e:
+                progress.update(task, description=f"[red]✗ Delete test failed: {str(e)}[/red]")
+                return False
+
+        console.print("[green]✓ All storage tests passed![/green]")
+        return True
+
+    except Exception as e:
+        console.print(f"[red]✗ Storage configuration test failed: {str(e)}[/red]")
+        return False
+
+def save_storage_config(storage_config):
+    """Save storage configuration to config file"""
+    try:
+        config_handler = ConfigHandler()
+
+        # Load existing config or create new one
+        if config_handler.check_config():
+            config_content = config_handler.load_config()
+            config = Config(config=config_content)
+        else:
+            config = Config()
+
+        # Update storage settings
+        config.STORAGE_PROVIDER = storage_config["provider"]
+        config.STORAGE_PATH = storage_config.get("storage_path", "")
+        config.STORAGE_BASE_URL = storage_config.get("base_url", "")
+        config.STORAGE_ALLOCATED_GB = storage_config.get("allocated_space_gb", 10)
+
+        # S3 specific settings
+        if storage_config["provider"] == "s3":
+            config.S3_BUCKET_NAME = storage_config["bucket_name"]
+            config.S3_REGION = storage_config["region"]
+            config.S3_ACCESS_KEY = storage_config["access_key"]
+            config.S3_SECRET_KEY = storage_config["secret_key"]
+            config.S3_ENDPOINT_URL = storage_config.get("endpoint_url", "")
+
+        # Save configuration
+        config_toml = config.export_toml()
+        config_handler.write_config(config=config_toml)
+
+        return True
+
+    except Exception as e:
+        console.print(f"[red]Error saving configuration: {str(e)}[/red]")
+        return False
+
+@storage_cli.command("setup")
+def storage_setup():
+    """Interactive storage backend setup wizard"""
+    display_storage_welcome()
+
+    # Choose provider
+    provider_choice = choose_storage_provider()
+
+    if provider_choice == "4":  # Cancel
+        console.print("[dim]Storage setup cancelled. Goodbye!\n[/dim]")
+        return
+
+    # Configure based on choice
+    storage_config = None
+
+    if provider_choice == "1":  # Local
+        storage_config = setup_local_storage()
+    elif provider_choice == "2":  # AWS S3
+        storage_config = setup_s3_storage(is_aws=True)
+    elif provider_choice == "3":  # S3 Compatible
+        storage_config = setup_s3_storage(is_aws=False)
+
+    if not storage_config:
+        console.print("[bold red]Configuration cancelled or failed![/bold red]")
+        return
+
+    console.print()
+    console.print("[bold]Configuration Summary:[/bold]")
+    for key, value in storage_config.items():
+        if 'secret' in key.lower() or 'key' in key.lower():
+            console.print(f"  {key}: [dim]***hidden***[/dim]")
+        else:
+            console.print(f"  {key}: {value}")
+    console.print()
+
+    # Test configuration
+    if not Confirm.ask("Test the storage configuration?", default=True):
+        console.print("[yellow]Skipping configuration test...[/yellow]")
+        test_passed = True
+    else:
+        test_passed = test_storage_config(storage_config)
+
+    if not test_passed:
+        if not Confirm.ask("Configuration test failed. Save anyway?", default=False):
+            console.print("[dim]Configuration not saved.[/dim]")
+            return
+
+    # Save configuration
+    console.print()
+    console.print("[bold]Saving configuration...[/bold]")
+
+    if save_storage_config(storage_config):
+        console.print("[green]✓ Storage configuration saved successfully![/green]")
+
+        # Success panel
+        success_panel = Panel.fit(
+            "[bold cyan]Storage backend configured![/bold cyan]\n\n"
+            f"[bold green]Provider:[/bold green] {storage_config['provider'].upper()}\n"
+            f"[bold green]Status:[/bold green] Ready to use\n\n"
+            "[dim]Your server will now use this storage backend for file uploads.[/dim]",
+            title="[green]Setup Complete![/green]",
+            border_style="green",
+            padding=(1, 2)
+        )
+        console.print(success_panel)
+
+        # Migration hint
+        if Confirm.ask("Would you like to migrate existing files to this new storage?", default=False):
+            console.print()
+            console.print("[bold]To migrate existing files, run:[/bold]")
+            console.print("[dim]pufferblow storage migrate --source-provider local --target-provider s3[/dim]")
+    else:
+        console.print("[bold red]Failed to save configuration![/bold red]")
+
+@storage_cli.command("test")
+def storage_test():
+    """Test current storage configuration"""
+    try:
+        config_handler = ConfigHandler()
+        if not config_handler.check_config():
+            console.print("[bold red]No configuration file found. Run 'pufferblow storage setup' first.[/bold red]")
+            return
+
+        config_content = config_handler.load_config()
+        config = Config(config=config_content)
+
+        # Build storage config from current settings
+        storage_config = {
+            "provider": config.STORAGE_PROVIDER,
+            "storage_path": config.STORAGE_PATH,
+            "base_url": config.STORAGE_BASE_URL,
+            "allocated_space_gb": config.STORAGE_ALLOCATED_GB,
+            "bucket_name": config.S3_BUCKET_NAME,
+            "region": config.S3_REGION,
+            "access_key": config.S3_ACCESS_KEY,
+            "secret_key": config.S3_SECRET_KEY,
+            "endpoint_url": config.S3_ENDPOINT_URL
+        }
+
+        console.print(f"[bold]Testing {storage_config['provider'].upper()} storage configuration...[/bold]")
+        console.print()
+
+        if test_storage_config(storage_config):
+            console.print("[green]✓ Storage configuration is working correctly![/green]")
+        else:
+            console.print("[bold red]✗ Storage configuration has issues![/bold red]")
+            console.print("[dim]Run 'pufferblow storage setup' to reconfigure.[/dim]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error testing storage: {str(e)}[/bold red]")
+
+@storage_cli.command("migrate")
+def storage_migrate(
+    source_provider: str = typer.Option(..., "--source-provider", help="Source storage provider"),
+    target_provider: str = typer.Option(..., "--target-provider", help="Target storage provider"),
+    batch_size: int = typer.Option(10, "--batch-size", help="Number of files to migrate per batch"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Analyze migration without executing")
+):
+    """Migrate files between storage backends"""
+    try:
+        config_handler = ConfigHandler()
+        if not config_handler.check_config():
+            console.print("[bold red]No configuration file found. Run 'pufferblow setup' first.[/bold red]")
+            return
+
+        config_content = config_handler.load_config()
+        config = Config(config=config_content)
+
+        # Initialize API to get database access
+        api_initializer.load_objects()
+
+        # Import migration script
+        from scripts.migrate_storage import StorageMigrator
+
+        # Create source config (from current config)
+        source_config = {
+            "provider": source_provider,
+            "storage_path": config.STORAGE_PATH,
+            "base_url": config.STORAGE_BASE_URL,
+            "bucket_name": config.S3_BUCKET_NAME,
+            "region": config.S3_REGION,
+            "access_key": config.S3_ACCESS_KEY,
+            "secret_key": config.S3_SECRET_KEY,
+            "endpoint_url": config.S3_ENDPOINT_URL
+        }
+
+        # Create target config (from current config, but override provider)
+        target_config = source_config.copy()
+        target_config["provider"] = target_provider
+
+        console.print(f"[bold]Migrating from {source_provider.upper()} to {target_provider.upper()}[/bold]")
+        if dry_run:
+            console.print("[yellow]DRY RUN MODE - No files will be migrated[/yellow]")
+        console.print()
+
+        # Create migrator
+        migrator = StorageMigrator(
+            source_config=source_config,
+            target_config=target_config,
+            database_handler=api_initializer.database_handler
+        )
+
+        # Run migration
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            console=console,
+        ) as progress:
+            overall_task = progress.add_task("Migrating files...", total=1)
+
+            stats = migrator.migrate_all_files(
+                batch_size=batch_size,
+                dry_run=dry_run
+            )
+
+            progress.update(overall_task, completed=1)
+
+        # Display results
+        console.print()
+        console.print("[bold]Migration Results:[/bold]")
+        console.print(f"  Total files: {stats['total_files']}")
+        console.print(f"  Migrated: {stats['migrated_files']}")
+        console.print(f"  Failed: {stats['failed_files']}")
+        console.print(f"  Skipped: {stats['skipped_files']}")
+        console.print(f"  Data transferred: {stats['migrated_size'] / (1024**3):.2f} GB")
+
+        if stats['failed_files'] > 0:
+            console.print(f"[yellow]Warning: {stats['failed_files']} files failed to migrate[/yellow]")
+        else:
+            console.print("[green]✓ Migration completed successfully![/green]")
+
+    except Exception as e:
+        console.print(f"[bold red]Migration failed: {str(e)}[/bold red]")
 
 def run() -> None:
     constants.banner()

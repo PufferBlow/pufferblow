@@ -1471,7 +1471,7 @@ async def channel_send_message(
             if file.filename:
                 try:
                     # Use the CDN manager to save the attachment
-                    cdn_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_categorized_file(
+                    cdn_url, is_duplicate = api_initializer.storage_manager.validate_and_save_categorized_file(
                         file=file,
                         user_id=user_id,
                         force_category="attachments",
@@ -1642,15 +1642,15 @@ async def channel_delete_message(
         "message": "The message have been deleted successfully"
     }
 
-# CDN Upload Route (Server Owner Only)
-@api.post("/api/v1/cdn/upload", status_code=201)
-async def upload_cdn_file(
+# Storage Upload Route (Server Owner Only)
+@api.post("/api/v1/storage/upload", status_code=201)
+async def upload_storage_file(
     auth_token: str,
     file: UploadFile = Form(..., description="File to upload"),
     directory: str = Form(..., description="Target directory (uploads, avatars, banners, etc.)")
 ):
     """
-    Upload a file to the CDN. Server Owner only.
+    Upload a file to storage. Server Owner only.
 
     Args:
         auth_token: User's authentication token
@@ -1681,8 +1681,8 @@ async def upload_cdn_file(
                 detail=f"Invalid directory. Allowed: {', '.join(allowed_dirs)}"
             )
 
-        # Use CDN manager to handle the upload with categorization if no directory specified
-        cdn_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_categorized_file(
+        # Use storage manager to handle the upload with categorization if no directory specified
+        cdn_url, is_duplicate = api_initializer.storage_manager.validate_and_save_categorized_file(
             file=file,
             user_id=user_id,
             force_category=directory if directory else None,
@@ -1814,11 +1814,11 @@ async def upload_cdn_file(
             detail=f"Upload failed: {str(e)}"
         )
 
-# CDN Management Routes (Server Owner Only)
-@api.post("/api/v1/cdn/files", status_code=200)
-async def list_cdn_files_route(request: CDNFilesRequest):
+# Storage Management Routes (Server Owner Only)
+@api.post("/api/v1/storage/files", status_code=200)
+async def list_storage_files_route(request: CDNFilesRequest):
     """
-    List all files in a CDN directory. Server Owner only.
+    List all files in a storage directory. Server Owner only.
 
     Args:
         query (CDNFilesQuery): Query parameters containing auth_token and directory.
@@ -1978,10 +1978,10 @@ async def list_cdn_files_route(request: CDNFilesRequest):
             detail=f"Failed to list CDN files: {str(e)}"
         )
 
-@api.post("/api/v1/cdn/file-info", status_code=200)
-async def get_cdn_file_info_route(request: CDNFileInfoRequest):
+@api.post("/api/v1/storage/file-info", status_code=200)
+async def get_storage_file_info_route(request: CDNFileInfoRequest):
     """
-    Get information about a specific CDN file. Server Owner only.
+    Get information about a specific storage file. Server Owner only.
 
     Args:
         request (CDNFileInfoRequest): Request body containing auth_token and file_url.
@@ -2018,10 +2018,10 @@ async def get_cdn_file_info_route(request: CDNFileInfoRequest):
         }
     }
 
-@api.post("/api/v1/cdn/delete-file", status_code=200)
-async def delete_cdn_file_route(request: CDNDeleteFileRequest):
+@api.post("/api/v1/storage/delete-file", status_code=200)
+async def delete_storage_file_route(request: CDNDeleteFileRequest):
     """
-    Delete a file from the CDN. Server Owner only.
+    Delete a file from storage. Server Owner only.
     Prevents deletion of avatar/banner files that are currently in use.
 
     Args:
@@ -2136,12 +2136,76 @@ async def serve_cdn_file_route(file_path: str, auth_token: str = None):
             detail="Failed to serve file"
         )
 
+@api.get("/api/v1/storage/file/{file_path:path}", status_code=200)
+async def serve_storage_file_route(file_path: str, auth_token: str = None):
+    """
+    Serve a storage file directly with validation and optional authentication.
+
+    This route provides secure access to storage files with file validation.
+    Use this when you need authenticated access to storage files.
+
+    Args:
+        file_path: The file path relative to the storage directory
+        auth_token: Optional authentication token
+
+    Returns:
+        200 OK: File served
+        404 NOT FOUND: File not found
+        403 FORBIDDEN: Authentication required but not provided
+        500 INTERNAL SERVER ERROR: Failed to serve file
+    """
+    from pathlib import Path
+    import mimetypes
+
+    try:
+        # Verify file exists on filesystem
+        storage_path = Path(api_initializer.config.STORAGE_PATH) / file_path
+        if not storage_path.exists() or not storage_path.is_file():
+            raise exceptions.HTTPException(
+                status_code=404,
+                detail="File not found"
+            )
+
+        # Optional auth check if provided
+        if auth_token:
+            try:
+                extract_user_id(auth_token=auth_token)
+            except:
+                raise exceptions.HTTPException(
+                    status_code=403,
+                    detail="Invalid authentication token"
+                )
+
+        # Get MIME type
+        content_type, _ = mimetypes.guess_type(storage_path.name)
+        if not content_type:
+            content_type = 'application/octet-stream'
+
+        # Read and return file
+        with open(storage_path, 'rb') as file:
+            content = file.read()
+
+        return responses.Response(
+            content=content,
+            media_type=content_type,
+            headers={"Content-Disposition": f"inline; filename={storage_path.name}"}
+        )
+
+    except exceptions.HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve storage file {file_path}: {str(e)}")
+        raise exceptions.HTTPException(
+            status_code=500,
+            detail="Failed to serve file"
+        )
+
 class CleanupOrphanedRequest(BaseModel):
     auth_token: str = Field(min_length=1)
     subdirectory: str = Field(default="", min_length=0)
 
-@api.post("/api/v1/cdn/cleanup-orphaned", status_code=200)
-async def cleanup_orphaned_cdn_files_route(request: CleanupOrphanedRequest):
+@api.post("/api/v1/storage/cleanup-orphaned", status_code=200)
+async def cleanup_orphaned_storage_files_route(request: CleanupOrphanedRequest):
     """
     Remove CDN files that are no longer referenced in the database. Server Owner only.
 
@@ -2904,7 +2968,7 @@ async def upload_server_avatar_route(
                 logger.warning(f"Failed to delete old server avatar {old_avatar_url}: {str(e)}")
 
         # Upload new avatar
-        cdn_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_categorized_file(
+        cdn_url, is_duplicate = await api_initializer.storage_manager.validate_and_save_categorized_file(
             file=avatar,
             user_id=user_id,
             force_category="avatars",
@@ -3044,7 +3108,7 @@ async def upload_server_banner_route(
                 logger.warning(f"Failed to delete old server banner {old_banner_url}: {str(e)}")
 
         # Upload new banner
-        cdn_url, is_duplicate = api_initializer.cdn_manager.validate_and_save_categorized_file(
+        cdn_url, is_duplicate = await api_initializer.storage_manager.validate_and_save_categorized_file(
             file=banner,
             user_id=user_id,
             force_category="banners",
@@ -4031,3 +4095,7 @@ async def channels_messages_websocket_legacy(websocket: WebSocket, auth_token: s
 # Mount CDN static file serving
 if api_initializer.is_loaded:
     api.mount(api_initializer.config.CDN_BASE_URL, StaticFiles(directory=api_initializer.config.CDN_STORAGE_PATH), name="cdn")
+
+# Mount storage static file serving
+if api_initializer.is_loaded:
+    api.mount(api_initializer.config.STORAGE_BASE_URL, StaticFiles(directory=api_initializer.config.STORAGE_PATH), name="storage")

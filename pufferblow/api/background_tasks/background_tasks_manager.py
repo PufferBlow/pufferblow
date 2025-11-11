@@ -7,17 +7,21 @@ from concurrent.futures import ThreadPoolExecutor
 import uuid
 import httpx
 import json
+import os
+import io
+from pathlib import Path
 
 from loguru import logger
+from PIL import Image
 
 from pufferblow.api.database.database_handler import DatabaseHandler
-# CDN manager - conditionally imported
+# Storage manager - conditionally imported
 try:
-    from pufferblow.api.cdn.cdn_manager import CDNManager
-    CDN_AVAILABLE = True
+    from pufferblow.api.storage.storage_manager import StorageManager
+    STORAGE_AVAILABLE = True
 except ImportError:
-    CDN_AVAILABLE = False
-    CDNManager = None
+    STORAGE_AVAILABLE = False
+    StorageManager = None
 from pufferblow.api.models.config_model import Config
 
 # Database table models
@@ -36,11 +40,11 @@ class BackgroundTasksManager:
     def __init__(
         self,
         database_handler: DatabaseHandler,
-        cdn_manager: Optional[CDNManager],
+        storage_manager: Optional[StorageManager],
         config: Config
     ):
         self.database_handler = database_handler
-        self.cdn_manager = cdn_manager
+        self.storage_manager = storage_manager
         self.config = config
 
         # Task registry
@@ -251,20 +255,20 @@ class BackgroundTasksManager:
 
     # Specific task implementations
 
-    async def cleanup_cdn_orphaned_files(self):
-        """Clean up orphaned files in CDN storage"""
-        logger.info("Starting CDN cleanup task")
+    async def cleanup_storage_orphaned_files(self):
+        """Clean up orphaned files in storage"""
+        logger.info("Starting storage cleanup task")
 
         try:
-            # Check if CDN manager is available
-            if not self.cdn_manager:
-                logger.info("CDN manager not available, skipping cleanup task")
+            # Check if storage manager is available
+            if not self.storage_manager:
+                logger.info("Storage manager not available, skipping cleanup task")
                 return
 
             # Get all referenced file URLs from database
             referenced_urls = await self._get_referenced_file_urls()
 
-            # Get all file categories from CDN manager
+            # Get all file categories
             all_categories = [
                 'files', 'images', 'avatars', 'banners', 'gifs', 'stickers',
                 'videos', 'audio', 'documents', 'config'
@@ -273,17 +277,17 @@ class BackgroundTasksManager:
             total_deleted = 0
 
             for category in all_categories:
-                # Get all files in directory
+                # Get all files in category
                 directory_files = self._get_directory_files(category)
 
                 # Filter to keep only referenced files
-                subdir_deleted = self.cdn_manager.cleanup_orphaned_files(directory_files, category)
+                subdir_deleted = await self.storage_manager.cleanup_orphaned_files(directory_files, category)
                 total_deleted += subdir_deleted or 0
 
-            logger.info(f"CDN cleanup completed. Deleted {total_deleted} orphaned files from {len(all_categories)} categories")
+            logger.info(f"Storage cleanup completed. Deleted {total_deleted} orphaned files from {len(all_categories)} categories")
 
         except Exception as e:
-            logger.error(f"CDN cleanup failed: {str(e)}")
+            logger.error(f"Storage cleanup failed: {str(e)}")
             raise
 
     async def _get_referenced_file_urls(self) -> List[str]:
@@ -1303,6 +1307,146 @@ class BackgroundTasksManager:
         except Exception as e:
             logger.error(f"Failed to calculate online user stats: {str(e)}")
             return {'peak_today': 0, 'avg_today': 0, 'peak_week': 0, 'avg_week': 0}
+
+    def optimize_image(self, file_path: str, file_hash: str, mime_type: str, category: str):
+        """
+        Optimize uploaded images by converting them to AVIF format for better compression.
+        This runs as a background task after successful file uploads.
+
+        Args:
+            file_path: Relative path to the uploaded file
+            file_hash: SHA-256 hash of the original file
+            mime_type: MIME type of the original file
+            category: File category (avatars, banners, images, etc.)
+        """
+        try:
+            logger.info(f"Starting image optimization for {file_path} (category: {category})")
+
+            # Skip optimization for GIFs and videos as requested
+            if mime_type in ['image/gif', 'video/mp4', 'video/webm', 'video/mov', 'video/avi']:
+                logger.info(f"Skipping optimization for {mime_type} file: {file_path}")
+                return
+
+            # Only optimize static images
+            supported_formats = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
+            if mime_type not in supported_formats:
+                logger.info(f"Skipping optimization for unsupported format {mime_type}: {file_path}")
+                return
+
+            # Get full path to the file
+            if not self.storage_manager:
+                logger.error("Storage manager not available for image optimization")
+                return
+
+            # For local storage, get the actual file path
+            if hasattr(self.storage_manager.backend, 'storage_path'):
+                full_file_path = Path(self.storage_manager.backend.storage_path) / file_path
+            else:
+                logger.error("Cannot determine file path for optimization")
+                return
+
+            if not full_file_path.exists():
+                logger.error(f"File does not exist for optimization: {full_file_path}")
+                return
+
+            # Read original file
+            with open(full_file_path, 'rb') as f:
+                original_data = f.read()
+
+            original_size = len(original_data)
+            logger.info(f"Original file size: {original_size} bytes")
+
+            # Open image with Pillow
+            try:
+                with Image.open(full_file_path) as img:
+                    # Convert to RGB if necessary (remove alpha channel for better compression)
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        # Create white background for transparent images
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        if img.mode == 'P':
+                            img = img.convert('RGBA')
+                        background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                        img = background
+                    elif img.mode != 'RGB':
+                        img = img.convert('RGB')
+
+                    # Optimize image quality and convert to AVIF
+                    # Use high quality settings for good compression vs quality balance
+                    avif_buffer = io.BytesIO()
+
+                    # Save as AVIF with optimization settings
+                    img.save(
+                        avif_buffer,
+                        format='AVIF',
+                        quality=85,  # High quality (80-90 range recommended)
+                        optimize=True,
+                        subsampling=0  # Best quality subsampling
+                    )
+
+                    optimized_data = avif_buffer.getvalue()
+                    optimized_size = len(optimized_data)
+
+                    # Calculate compression ratio
+                    compression_ratio = (original_size - optimized_size) / original_size * 100
+                    logger.info(f"Optimized file size: {optimized_size} bytes ({compression_ratio:.1f}% reduction)")
+
+                    # Only replace if optimization actually reduced file size significantly (>5%)
+                    if compression_ratio > 5:
+                        # Create new filename with .avif extension
+                        original_name = full_file_path.stem
+                        new_filename = f"{original_name}.avif"
+                        new_file_path = full_file_path.parent / new_filename
+
+                        # Write optimized file
+                        with open(new_file_path, 'wb') as f:
+                            f.write(optimized_data)
+
+                        # Remove original file
+                        full_file_path.unlink()
+
+                        # Update file metadata in database
+                        new_file_hash = self.storage_manager.compute_file_hash(optimized_data)
+                        new_mime_type = 'image/avif'
+                        new_relative_path = f"{full_file_path.parent.name}/{new_filename}"
+
+                        # Update database records
+                        try:
+                            # Update file object with new hash, size, and MIME type
+                            self.database_handler.update_file_object(
+                                old_file_hash=file_hash,
+                                new_file_hash=new_file_hash,
+                                new_file_path=new_relative_path,
+                                new_file_size=optimized_size,
+                                new_mime_type=new_mime_type
+                            )
+
+                            # Update any references to point to the new file
+                            self.database_handler.update_file_references(
+                                old_file_hash=file_hash,
+                                new_file_hash=new_file_hash
+                            )
+
+                            logger.info(f"Successfully optimized image: {file_path} -> {new_relative_path}")
+                            logger.info(f"Compression achieved: {compression_ratio:.1f}% ({original_size} -> {optimized_size} bytes)")
+
+                        except Exception as db_error:
+                            logger.error(f"Failed to update database after optimization: {str(db_error)}")
+                            # If database update fails, revert file changes
+                            new_file_path.unlink()
+                            with open(full_file_path, 'wb') as f:
+                                f.write(original_data)
+                            raise
+
+                    else:
+                        logger.info(f"Optimization not beneficial (only {compression_ratio:.1f}% reduction), keeping original file")
+
+            except Exception as img_error:
+                logger.error(f"Image processing failed for {file_path}: {str(img_error)}")
+                raise
+
+        except Exception as e:
+            logger.error(f"Image optimization failed for {file_path}: {str(e)}")
+            raise
 
 @asynccontextmanager
 async def lifespan_background_tasks():

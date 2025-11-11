@@ -30,8 +30,8 @@ from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
 # CDN manager - conditionally imported
 try:
-    from pufferblow.api.cdn.cdn_manager import CDNManager
-    CDN_AVAILABLE = True
+    from pufferblow.api.storage.storage_manager import StorageManager
+    STORAGE_AVAILABLE = True
 except ImportError:
     CDN_AVAILABLE = False
     CDNManager = None
@@ -76,7 +76,7 @@ class APIInitializer(object):
     user_manager            :       UserManager             =   None
     channels_manager        :       ChannelsManager         =   None
     websockets_manager      :       WebSocketsManager       =   None
-    cdn_manager             :       CDNManager              =   None
+    storage_manager         :       StorageManager          =   None
     background_tasks_manager:       BackgroundTasksManager  =   None
     security_checks_handler :       SecurityChecksHandler   =   None
 
@@ -150,22 +150,37 @@ class APIInitializer(object):
         # Init websockets manager
         self.websockets_manager = WebSocketsManager()
 
-        # Init CDN manager (only if available)
-        if CDN_AVAILABLE and CDNManager:
-            self.cdn_manager = CDNManager(
-                database_handler=self.database_handler,
-                config=self.config
+        # Init storage manager (only if available)
+        if STORAGE_AVAILABLE and StorageManager:
+            # Create storage config from main config
+            storage_config = {
+                "provider": self.config.STORAGE_PROVIDER,
+                "storage_path": self.config.STORAGE_PATH,
+                "base_url": self.config.STORAGE_BASE_URL,
+                "allocated_space_gb": self.config.STORAGE_ALLOCATED_GB,
+                "api_host": self.config.API_HOST,
+                "api_port": self.config.API_PORT,
+                "bucket_name": self.config.S3_BUCKET_NAME,
+                "region": self.config.S3_REGION,
+                "access_key": self.config.S3_ACCESS_KEY,
+                "secret_key": self.config.S3_SECRET_KEY,
+                "endpoint_url": self.config.S3_ENDPOINT_URL
+            }
+
+            self.storage_manager = StorageManager(
+                storage_config=storage_config,
+                database_handler=self.database_handler
             )
-            # Update CDN limits from server settings
-            self.cdn_manager.update_server_limits()
+            # Update storage limits from server settings
+            self.storage_manager.update_server_limits()
         else:
-            self.cdn_manager = None
-            logger.warning("CDN manager not available - file upload features will be disabled")
+            self.storage_manager = None
+            logger.warning("Storage manager not available - file upload features will be disabled")
 
         # Init background tasks manager (only register, don't start scheduler)
         self.background_tasks_manager = BackgroundTasksManager(
             database_handler=self.database_handler,
-            cdn_manager=self.cdn_manager,
+            storage_manager=self.storage_manager,
             config=self.config
         )
 
@@ -193,10 +208,10 @@ class APIInitializer(object):
         """
         Register background tasks that will be scheduled to run periodically.
         """
-        # Register CDN cleanup task - run every 24 hours
+        # Register storage cleanup task - run every 24 hours
         self.background_tasks_manager.register_task(
-            task_id="cdn_cleanup",
-            task_func=self.background_tasks_manager.cleanup_cdn_orphaned_files,
+            task_id="storage_cleanup",
+            task_func=self.background_tasks_manager.cleanup_storage_orphaned_files,
             interval_hours=24,
             enabled=True
         )

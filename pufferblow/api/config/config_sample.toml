@@ -32,14 +32,15 @@ max_message_size = 1024 # This defines the maximum size (in KB) for a message th
 max_messages_per_page = 50 # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
 min_messages_per_page = 20 # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
 
-[cdn]
-storage_path = "{HOME}/.pufferblow/cdn" # This defines the directory where uploaded files will be stored on the server.
-base_url = "/cdn" # This defines the base URL path for serving files (e.g., /cdn).
-cache_max_age = 86400 # This defines the maximum age (in seconds) for caching file responses. A value of 86400 (24 hours) is recommended for good performance.
+[storage]
+provider = "local" # Storage backend provider: "local" or "s3"
+storage_path = "{HOME}/.pufferblow/storage" # Local storage directory (for local provider)
+base_url = "/storage" # Base URL for serving files
+allocated_gb = 10 # Allocated storage space in GB (for local provider - hard limit)
 
-[livekit]
-url = "https://your-livekit-server.livekit.cloud" # LiveKit server URL (Cloud URL or self-hosted)
-api_key = "your_api_key_here" # LiveKit API key for server-side operations
-api_secret = "your_api_secret_here" # LiveKit API secret - KEEP SECURE!
-auto_create_rooms = true # Automatically create LiveKit rooms for voice channels
-voice_channels_enabled = true # Enable voice channel functionality
+[storage.s3]
+bucket_name = "" # S3 bucket name (for s3 provider)
+region = "us-east-1" # AWS region
+access_key = "" # AWS access key
+secret_key = "" # AWS secret key
+endpoint_url = "" # Custom S3 endpoint (optional, for S3-compatible services)
