@@ -1,32 +1,29 @@
-import bcrypt
 import base64
-import datetime
-
 from os import urandom
 
-from cryptography.hazmat.primitives.ciphers import (
-    Cipher,
-    algorithms,
-    modes
-)
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Tables
 from pufferblow.api.database.tables.keys import Keys
 
-class Hasher(object):
+
+class Hasher:
     """
     Hasher class used to encrypt and decrypt data
     using the AES algorithm.
     """
+
     PADDING: int = 128
 
     def __init__(self) -> None:
         pass
-    
-    def encrypt(self, data: str, is_to_check: bool | None = False, key: bytes | None=None) -> tuple[str, Keys] | str:
+
+    def encrypt(
+        self, data: str, is_to_check: bool | None = False, key: bytes | None = None
+    ) -> tuple[str, Keys] | str:
         """
         Encrypt the data using AES.
 
@@ -43,14 +40,14 @@ class Hasher(object):
             key = self.__generate_key__(data)
         else:
             key = base64.b64decode(key)
-        
+
         iv = urandom(16)
 
         cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
         encryptor = cipher.encryptor()
 
         padded_data = self.__add_padding__(data.encode())
-        
+
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
 
         if is_to_check is not True:
@@ -58,21 +55,18 @@ class Hasher(object):
             _key.key_value = base64.b64encode(key).decode("ascii")
             _key.iv = base64.b64encode(iv).decode("ascii")
 
-            return (
-                ciphertext,
-                _key
-            )
+            return (ciphertext, _key)
         else:
             return ciphertext.decode()
 
     def decrypt(self, ciphertext: bytes, key: str, iv: str) -> str:
         """
         Decrypts the encrypted data
-        
+
         Args:
             ciphertext (str): The encrypted data to decrypt.
             key (str): The `key` used to encrypt the data.
-        
+
         Returns:
             str: The decrypted data.
         """
@@ -86,14 +80,14 @@ class Hasher(object):
         unpadded_data = self.__remove_padding__(decrypted_data)
 
         return unpadded_data.decode()
-    
+
     def __generate_key__(self, data: str) -> dict:
         """
         Generates a key to encrypt data.
-        
+
         Parameters:
             data (str): The data that the key will be derived from.
-        
+
         Returns:
             tuple: Contains the drived key.
         """
@@ -116,7 +110,7 @@ class Hasher(object):
         """
         padding_length = 16 - (len(data) % 16)
         padd = bytes([padding_length] * padding_length)
-        
+
         return data + padd
 
     def __remove_padding__(self, data: bytes) -> bytes:

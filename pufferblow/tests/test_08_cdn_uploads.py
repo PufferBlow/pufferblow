@@ -1,9 +1,9 @@
-import pytest
 import io
+
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from pufferblow.api.api import api
 from pufferblow.tests.conftest import ValueStorage
 
 
@@ -19,17 +19,13 @@ class TestCDNUploads:
     def test_upload_avatar_success(self, client: TestClient):
         """Test successful avatar upload"""
         # Create a small test image
-        test_image = Image.new('RGB', (100, 100), color='red')
+        test_image = Image.new("RGB", (100, 100), color="red")
         image_buffer = io.BytesIO()
-        test_image.save(image_buffer, format='PNG')
+        test_image.save(image_buffer, format="PNG")
         image_buffer.seek(0)
 
-        data = {
-            "auth_token": self.auth_token
-        }
-        files = {
-            "file": ("test_avatar.png", image_buffer, "image/png")
-        }
+        data = {"auth_token": self.auth_token}
+        files = {"file": ("test_avatar.png", image_buffer, "image/png")}
 
         response = client.post("/api/v1/users/profile/avatar", data=data, files=files)
 
@@ -43,17 +39,13 @@ class TestCDNUploads:
     def test_upload_banner_success(self, client: TestClient):
         """Test successful banner upload"""
         # Create a rectangular test image (suitable for banner)
-        test_image = Image.new('RGB', (400, 200), color='blue')
+        test_image = Image.new("RGB", (400, 200), color="blue")
         image_buffer = io.BytesIO()
-        test_image.save(image_buffer, format='JPEG')
+        test_image.save(image_buffer, format="JPEG")
         image_buffer.seek(0)
 
-        data = {
-            "auth_token": self.auth_token
-        }
-        files = {
-            "file": ("test_banner.jpg", image_buffer, "image/jpeg")
-        }
+        data = {"auth_token": self.auth_token}
+        files = {"file": ("test_banner.jpg", image_buffer, "image/jpeg")}
 
         response = client.post("/api/v1/users/profile/banner", data=data, files=files)
 
@@ -69,9 +61,9 @@ class TestCDNUploads:
         # Create a large image (exceeding default 5MB limit)
         # Note: PIL can't create extremely large images, so we create a normal sized one
         # In a real scenario with very large files, this would trigger the size check
-        test_image = Image.new('RGB', (1000, 1000), color='green')
+        test_image = Image.new("RGB", (1000, 1000), color="green")
         image_buffer = io.BytesIO()
-        test_image.save(image_buffer, format='PNG')
+        test_image.save(image_buffer, format="PNG")
         image_buffer.seek(0)
 
         # Manually make the buffer appear larger than the limit
@@ -80,7 +72,9 @@ class TestCDNUploads:
             data = {"auth_token": self.auth_token}
             files = {"file": ("large_image.png", image_buffer, "image/png")}
 
-            response = client.post("/api/v1/users/profile/avatar", data=data, files=files)
+            response = client.post(
+                "/api/v1/users/profile/avatar", data=data, files=files
+            )
 
             # This might not trigger the limit check since PIL compresses well,
             # but the infrastructure is in place for when files exceed limits
@@ -88,9 +82,9 @@ class TestCDNUploads:
     def test_upload_avatar_invalid_extension_error(self, client: TestClient):
         """Test invalid file extension error"""
         # Create a valid JPEG but rename with invalid extension
-        test_image = Image.new('RGB', (100, 100), color='yellow')
+        test_image = Image.new("RGB", (100, 100), color="yellow")
         image_buffer = io.BytesIO()
-        test_image.save(image_buffer, format='JPEG')
+        test_image.save(image_buffer, format="JPEG")
         image_buffer.seek(0)
 
         data = {"auth_token": self.auth_token}
@@ -127,9 +121,9 @@ class TestCDNUploads:
 
     def test_upload_avatar_invalid_auth_token(self, client: TestClient):
         """Test invalid auth token error"""
-        test_image = Image.new('RGB', (100, 100), color='purple')
+        test_image = Image.new("RGB", (100, 100), color="purple")
         image_buffer = io.BytesIO()
-        test_image.save(image_buffer, format='PNG')
+        test_image.save(image_buffer, format="PNG")
         image_buffer.seek(0)
 
         data = {"auth_token": self.moke_auth_token}
@@ -142,15 +136,17 @@ class TestCDNUploads:
     def test_cdn_file_serving(self, client: TestClient):
         """Test that uploaded files are served correctly"""
         # First upload an avatar
-        test_image = Image.new('RGB', (50, 50), color='orange')
+        test_image = Image.new("RGB", (50, 50), color="orange")
         image_buffer = io.BytesIO()
-        test_image.save(image_buffer, format='PNG')
+        test_image.save(image_buffer, format="PNG")
         image_buffer.seek(0)
 
         data = {"auth_token": self.auth_token}
         files = {"file": ("serve_test.png", image_buffer, "image/png")}
 
-        upload_response = client.post("/api/v1/users/profile/avatar", data=data, files=files)
+        upload_response = client.post(
+            "/api/v1/users/profile/avatar", data=data, files=files
+        )
         assert upload_response.status_code == 201
 
         avatar_url = upload_response.json()["avatar_url"]
@@ -160,7 +156,10 @@ class TestCDNUploads:
 
         # The CDN is mounted, so this should serve the file
         # Note: In testing, the actual file serving might be mocked
-        assert serve_response.status_code in [200, 404]  # 404 if not served in test environment
+        assert serve_response.status_code in [
+            200,
+            404,
+        ]  # 404 if not served in test environment
 
     def test_upload_banner_image_too_large_dimensions(self, client: TestClient):
         """Test image dimensions too large error"""
@@ -168,15 +167,17 @@ class TestCDNUploads:
         # Note: PIL won't actually create extremely large images in memory,
         # but this tests the logic path
         try:
-            test_image = Image.new('RGB', (3000, 3000), color='black')
+            test_image = Image.new("RGB", (3000, 3000), color="black")
             image_buffer = io.BytesIO()
-            test_image.save(image_buffer, format='PNG')
+            test_image.save(image_buffer, format="PNG")
             image_buffer.seek(0)
 
             data = {"auth_token": self.auth_token}
             files = {"file": ("large_dim.png", image_buffer, "image/png")}
 
-            response = client.post("/api/v1/users/profile/banner", data=data, files=files)
+            response = client.post(
+                "/api/v1/users/profile/banner", data=data, files=files
+            )
 
             # If the dimension check triggers, there will be an error
             if response.status_code == 400:
@@ -195,4 +196,6 @@ class TestCDNUploads:
 
         # Ensure CDN manager has server settings loaded
         assert api_initializer.cdn_manager.MAX_IMAGE_SIZE_MB == 5  # Default
-        assert len(api_initializer.cdn_manager.IMAGE_EXTENSIONS) >= 1  # At least has defaults
+        assert (
+            len(api_initializer.cdn_manager.IMAGE_EXTENSIONS) >= 1
+        )  # At least has defaults

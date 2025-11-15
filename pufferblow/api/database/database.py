@@ -1,14 +1,17 @@
-import sqlalchemy
-
 from urllib.parse import quote
+
+import sqlalchemy
 from sqlalchemy_utils import database_exists
 
 # Models
 from pufferblow.api.models.config_model import Config
 
-class Database(object):
-    def __init__(self, config: Config | None = None, database_uri: str | None = None) -> None:
-        self.config = config 
+
+class Database:
+    def __init__(
+        self, config: Config | None = None, database_uri: str | None = None
+    ) -> None:
+        self.config = config
 
         if self.config is not None:
             self.database_uri = self._create_database_uri(
@@ -35,14 +38,14 @@ class Database(object):
         Returns:
             Engine: A database engine object.
         """
-        
+
         database_engine = sqlalchemy.create_engine(
             url=self.database_uri,
             pool_size=20,
             max_overflow=10,
-            pool_recycle=3600*3, # recycled every three hours
+            pool_recycle=3600 * 3,  # recycled every three hours
             pool_timeout=27,
-            pool_pre_ping=True   # prevents stale connections
+            pool_pre_ping=True,  # prevents stale connections
         )
 
         return database_engine
@@ -54,16 +57,25 @@ class Database(object):
 
         Args:
             None.
-        
+
         Returns:
             bool: True if it exists, otherwise False.
         """
         return database_exists(database_uri)
 
     @classmethod
-    def _create_database_uri(cls, username: str, password: str, host: str, port: int, database_name: str,
-                             ssl_mode: str = "prefer", ssl_cert: str | None = None, ssl_key: str | None = None,
-                             ssl_root_cert: str | None = None) -> str:
+    def _create_database_uri(
+        cls,
+        username: str,
+        password: str,
+        host: str,
+        port: int,
+        database_name: str,
+        ssl_mode: str = "prefer",
+        ssl_cert: str | None = None,
+        ssl_key: str | None = None,
+        ssl_root_cert: str | None = None,
+    ) -> str:
         """
         Create a database uri to use to connect
         to the database
@@ -88,7 +100,9 @@ class Database(object):
         password = quote(password)
         host = quote(host)
 
-        database_uri = f"postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}"
+        database_uri = (
+            f"postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}"
+        )
 
         # Add SSL parameters as query string
         params = []

@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 from datetime import datetime, timezone
-from typing import Optional
-from sqlalchemy import String, Integer, BigInteger, DateTime, Text
-from sqlalchemy.orm import Mapped, mapped_column, DeclarativeBase
+
+from sqlalchemy import BigInteger, DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 # Base
 from pufferblow.api.database.tables.declarative_base import Base
@@ -17,6 +18,7 @@ class FileObjects(Base):
         file_hash (Mapped[str]): SHA-256 hash of file content (primary key).
         ref_count (Mapped[int]): Number of references to this file.
         file_path (Mapped[str]): Relative path to file within CDN storage.
+        filename (Mapped[str]): Original filename of the uploaded file.
         file_size (Mapped[int]): File size in bytes.
         mime_type (Mapped[str]): Detected MIME type of file.
         created_at (Mapped[datetime]): When file was first stored.
@@ -28,20 +30,27 @@ class FileObjects(Base):
         >>> file_obj = FileObjects(
         ...     file_hash="abc123...",
         ...     ref_count=1,
-        ...     file_path="avatars/uuid.png"
+        ...     file_path="avatars/uuid.png",
+        ...     filename="avatar.png"
         ... )
     """
+
     __tablename__ = "file_objects"
 
     file_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     ref_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     file_path: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    last_referenced: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc)
+    )
+    last_referenced: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc)
+    )
     verification_status: Mapped[str] = mapped_column(String(50), default="unverified")
-    integrity_signature: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    integrity_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return (
@@ -75,13 +84,16 @@ class FileReferences(Base):
         ...     reference_entity_id="user-uuid"
         ... )
     """
+
     __tablename__ = "file_references"
 
     reference_id: Mapped[str] = mapped_column(String, primary_key=True)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     reference_type: Mapped[str] = mapped_column(String(50), nullable=False)
     reference_entity_id: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc)
+    )
 
     def __repr__(self) -> str:
         return (

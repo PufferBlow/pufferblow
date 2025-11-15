@@ -1,13 +1,7 @@
-import uuid
 import hashlib
+import uuid
 
 from loguru import logger
-
-# Tables
-from pufferblow.api.database.tables.channels import Channels
-
-# Hasher
-from pufferblow.api.hasher.hasher import Hasher
 
 # AuthToken manager
 from pufferblow.api.auth.auth_token_manager import AuthTokenManager
@@ -15,35 +9,44 @@ from pufferblow.api.auth.auth_token_manager import AuthTokenManager
 # Database handler
 from pufferblow.api.database.database_handler import DatabaseHandler
 
+# Tables
+from pufferblow.api.database.tables.channels import Channels
+
+# Hasher
+from pufferblow.api.hasher.hasher import Hasher
+
+# Log messages
+from pufferblow.api.logger.msgs import info
+
 # Utils
 from pufferblow.api.utils.current_date import date_in_gmt
 
-# Log messages
-from pufferblow.api.logger.msgs import (
-    info
-)
 
-class ChannelsManager (object):
-    """ Channels manager class to manage channels """
-    def __init__(self, database_handler: DatabaseHandler, auth_token_manager: AuthTokenManager,hasher: Hasher) -> None:
-        self.database_handler   =     database_handler
-        self.auth_token_manager =     auth_token_manager
-        self.hasher             =     hasher
-    
+class ChannelsManager:
+    """Channels manager class to manage channels"""
+
+    def __init__(
+        self,
+        database_handler: DatabaseHandler,
+        auth_token_manager: AuthTokenManager,
+        hasher: Hasher,
+    ) -> None:
+        self.database_handler = database_handler
+        self.auth_token_manager = auth_token_manager
+        self.hasher = hasher
+
     def list_channels(self, user_id: str) -> list[dict]:
         """
         List the public channels (and private channels
         in case the user is the server owner or an admin)
-        
+
         Args:
             `user_id` (str): The user's `user_id`.
-        
+
         Returns:
             list[dict]: List of channels and their metadata.
         """
-        channels_data = self.database_handler.fetch_channels(
-            user_id=user_id
-        )
+        channels_data = self.database_handler.fetch_channels(user_id=user_id)
         channels = []
 
         for channel_data in channels_data:
@@ -52,10 +55,16 @@ class ChannelsManager (object):
             channel_metadata_json = channel_data.to_dict()
 
             channels.append(channel_metadata_json)
-        
+
         return channels
 
-    def create_channel(self, user_id: str, channel_name: str, is_private: bool, channel_type: str = "text") -> Channels:
+    def create_channel(
+        self,
+        user_id: str,
+        channel_name: str,
+        is_private: bool,
+        channel_type: str = "text",
+    ) -> Channels:
         """
         Create a new channel
 
@@ -70,9 +79,7 @@ class ChannelsManager (object):
         """
         channel = Channels()
 
-        channel.channel_id = self._generate_channel_id(
-            channel_name=channel_name
-        )
+        channel.channel_id = self._generate_channel_id(channel_name=channel_name)
         channel.channel_name = channel_name
         channel.channel_type = channel_type
         channel.is_private = is_private
@@ -81,115 +88,109 @@ class ChannelsManager (object):
         # For voice channels, generate a LiveKit room name
         if channel_type in ["voice", "mixed"]:
             from pufferblow.api_initializer import api_initializer
-            if api_initializer.config.get("livekit", {}).get("voice_channels_enabled", False):
+
+            if api_initializer.config.get("livekit", {}).get(
+                "voice_channels_enabled", False
+            ):
                 channel.livekit_room_name = f"pufferblow_channel_{channel.channel_id}"
 
-        self.database_handler.create_new_channel(
-            user_id=user_id,
-            channel=channel
-        )
+        self.database_handler.create_new_channel(user_id=user_id, channel=channel)
 
         return channel
-    
+
     def delete_channel(self, channel_id: str) -> None:
         """
         Delete a server channel
-        
+
         Args:
             `channel_id` (str): The channel's `channel_id`.
-        
+
         Returns:
             `None`.
         """
-        self.database_handler.delete_channel(
-            channel_id=channel_id
-        )
-    
+        self.database_handler.delete_channel(channel_id=channel_id)
+
     def check_channel(self, channel_id: str) -> bool:
         """
         Check the existsing of a channel
-        
+
         Args:
             `channel_id` (str): The channel's `channel_id`.
-        
+
         Returns:
             bool: True if the channel exists, otherwise False.
         """
-        channel_data = self.database_handler.get_channel_data(
-            channel_id=channel_id
-        )
+        channel_data = self.database_handler.get_channel_data(channel_id=channel_id)
 
-        if not channel_data: # If the channel doesn't exists, `None` is returned
+        if not channel_data:  # If the channel doesn't exists, `None` is returned
             return False
-    
+
         return True
-    
+
     def is_private(self, channel_id: str) -> bool:
         """
         Check if a channnel is private or not
-        
+
         Args:
             `channel_id` (str): The channel's `channel_id`.
-        
+
         Returns:
             bool: True if the channel is private, otherwise False.
         """
-        channel_data = self.database_handler.get_channel_data(
-            channel_id=channel_id
-        )
-        
+        channel_data = self.database_handler.get_channel_data(channel_id=channel_id)
+
         return channel_data.is_private
 
-    def add_user_to_channel(self, user_id: str, to_add_user_id: str, channel_id: str) -> None:
+    def add_user_to_channel(
+        self, user_id: str, to_add_user_id: str, channel_id: str
+    ) -> None:
         """
         Add a user to a private channel
-        
+
         Args:
             `user_id` (str): The user's `user_id`.
             `channel_id` (str): The channel's `channel_id`.
             `to_add_user_id` (str): The targeted user's `user_id`.
-        
+
         Returns:
             `None`.
         """
         self.database_handler.add_user_to_channel(
-            channel_id=channel_id,
-            to_add_user_id=to_add_user_id
+            channel_id=channel_id, to_add_user_id=to_add_user_id
         )
 
         logger.info(
             info.INFO_NEW_USER_ADDED_TO_PRIVATE_CHANNEL(
-                user_id=user_id,
-                to_add_user_id=to_add_user_id,
-                channel_id=channel_id
+                user_id=user_id, to_add_user_id=to_add_user_id, channel_id=channel_id
             )
         )
 
-    def remove_user_from_channel(self, user_id: str, to_remove_user_id: str, channel_id: str) -> None:
+    def remove_user_from_channel(
+        self, user_id: str, to_remove_user_id: str, channel_id: str
+    ) -> None:
         """
         Remove a user from a private channel
-        
+
         Args:
             `user_id` (str): The user's `user_id`.
             `channel_id` (str): The channel's `channel_id`.
             `to_remove_user_id` (str): The targeted user's `user_id`.
-        
+
         Returns:
             `None`.
         """
         self.database_handler.remove_user_from_channel(
-            channel_id=channel_id,
-            to_remove_user_id=to_remove_user_id
+            channel_id=channel_id, to_remove_user_id=to_remove_user_id
         )
 
         logger.info(
             info.INFO_USER_REMOVED_FROM_A_PRIVATE_CHANNEL(
                 user_id=user_id,
                 channel_id=channel_id,
-                to_remove_user_id=to_remove_user_id
+                to_remove_user_id=to_remove_user_id,
             )
         )
-    
+
     def get_channel_type(self, channel_id: str) -> str:
         """
         Get the type of a channel
@@ -230,6 +231,7 @@ class ChannelsManager (object):
         """
         try:
             from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
+
             webrtc_manager = get_webrtc_manager()
 
             # Join voice channel using WebRTC manager
@@ -247,7 +249,9 @@ class ChannelsManager (object):
             return result
 
         except Exception as e:
-            logger.error(f"Failed to join WebRTC voice channel for user {user_id}: {str(e)}")
+            logger.error(
+                f"Failed to join WebRTC voice channel for user {user_id}: {str(e)}"
+            )
             return {"error": f"Failed to join voice channel: {str(e)}"}
 
     def leave_voice_channel(self, user_id: str, channel_id: str) -> dict:
@@ -263,10 +267,13 @@ class ChannelsManager (object):
         """
         try:
             from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
+
             webrtc_manager = get_webrtc_manager()
 
             # Leave voice channel using WebRTC manager
-            result = asyncio.run(webrtc_manager.leave_voice_channel(user_id, channel_id))
+            result = asyncio.run(
+                webrtc_manager.leave_voice_channel(user_id, channel_id)
+            )
 
             if "error" in result:
                 return {"error": result["error"]}
@@ -274,7 +281,9 @@ class ChannelsManager (object):
             return result
 
         except Exception as e:
-            logger.error(f"Failed to leave WebRTC voice channel for user {user_id}: {str(e)}")
+            logger.error(
+                f"Failed to leave WebRTC voice channel for user {user_id}: {str(e)}"
+            )
             return {"error": f"Failed to leave voice channel: {str(e)}"}
 
     def get_voice_channel_status(self, channel_id: str) -> dict:
@@ -289,12 +298,15 @@ class ChannelsManager (object):
         """
         try:
             from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
+
             webrtc_manager = get_webrtc_manager()
 
             return webrtc_manager.get_voice_channel_status(channel_id)
 
         except Exception as e:
-            logger.error(f"Failed to get WebRTC voice channel status for {channel_id}: {str(e)}")
+            logger.error(
+                f"Failed to get WebRTC voice channel status for {channel_id}: {str(e)}"
+            )
             return {"error": "Failed to get voice channel status"}
 
     def _generate_channel_id(self, channel_name: str) -> str:

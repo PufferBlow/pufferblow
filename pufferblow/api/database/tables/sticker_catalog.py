@@ -1,17 +1,18 @@
 from __future__ import annotations
-from uuid import UUID
-from dataclasses import dataclass, field
+
 from datetime import datetime, timezone
-from typing import Optional
-from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey
+from uuid import UUID
+
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as SA_UUID
-from sqlalchemy.orm import Mapped, mapped_column, DeclarativeBase
+from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.utils.current_date import date_in_gmt
+
 
 class ServerStickers(Base):
     """Server stickers catalog table"""
+
     __tablename__ = "server_stickers"
 
     sticker_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
@@ -20,8 +21,14 @@ class ServerStickers(Base):
     uploaded_by: Mapped[UUID] = mapped_column(SA_UUID(as_uuid=True), nullable=False)
     usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+    )
 
     def __repr__(self) -> str:
         return (
@@ -31,8 +38,10 @@ class ServerStickers(Base):
             f"usage_count={self.usage_count!r})"
         )
 
+
 class ServerGIFs(Base):
     """Server GIFs catalog table"""
+
     __tablename__ = "server_gifs"
 
     gif_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
@@ -41,8 +50,14 @@ class ServerGIFs(Base):
     uploaded_by: Mapped[UUID] = mapped_column(SA_UUID(as_uuid=True), nullable=False)
     usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+    )
 
     def __repr__(self) -> str:
         return (

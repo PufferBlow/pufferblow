@@ -1,24 +1,27 @@
 from __future__ import annotations
-from dataclasses import dataclass
+
 from datetime import datetime
-from typing import List, Optional
-from sqlalchemy import String, DateTime, ARRAY
+
+from sqlalchemy import ARRAY, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
+
 from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.utils.current_date import date_in_gmt
 
+
 class Roles(Base):
     """Roles table"""
+
     __tablename__ = "roles"
 
     role_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
     role_name: Mapped[str] = mapped_column(String, nullable=False)
-    privileges_ids: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=False)
+    privileges_ids: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=date_in_gmt, nullable=False
     )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self) -> str:
         return (

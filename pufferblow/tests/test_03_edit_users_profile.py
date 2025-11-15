@@ -1,48 +1,41 @@
-import pytest
 from fastapi.testclient import TestClient
 
-from pufferblow.api.api import api
 from pufferblow.tests.conftest import ValueStorage
 
 route = "/api/v1/users/profile"
 
+
 def test_edit_users_profile(client: TestClient):
-    """ Tests the edit a user's profile """
+    """Tests the edit a user's profile"""
     auth_token = ValueStorage.auth_token
 
     # Edit username
-    data = {
-        "auth_token": auth_token,
-        "new_username": ValueStorage.new_username
-    }
+    data = {"auth_token": auth_token, "new_username": ValueStorage.new_username}
 
     response = client.put(route, params=data)
 
     assert response.status_code == 200
     assert response.json() == {
         "status_code": 200,
-        "message": "username updated successfully"
+        "message": "username updated successfully",
     }
 
     # Edit user's status
-    data = {
-        "auth_token": auth_token,
-        "status": "offline"
-    }
+    data = {"auth_token": auth_token, "status": "offline"}
 
     response = client.put(route, params=data)
 
-    assert response.status_code == 200 
+    assert response.status_code == 200
     assert response.json() == {
         "status_code": 200,
-        "message": "Status updated successfully"
+        "message": "Status updated successfully",
     }
 
     # Edit user's password
     data = {
         "auth_token": auth_token,
         "old_password": ValueStorage.password,
-        "new_password": ValueStorage.new_password
+        "new_password": ValueStorage.new_password,
     }
 
     response = client.put(route, params=data)
@@ -50,16 +43,17 @@ def test_edit_users_profile(client: TestClient):
     assert response.status_code == 200
     assert response.json() == {
         "status_code": 200,
-        "message": "Password updated successfully"
+        "message": "Password updated successfully",
     }
 
+
 def test_username_already_exists_exception(client: TestClient):
-    """ Test the exceptions that will get raise in case the 
+    """Test the exceptions that will get raise in case the
     username that we want to change already exists
     """
     data = {
         "auth_token": ValueStorage.auth_token,
-        "new_username": ValueStorage.new_username # The same as the one the other test because it will be changed in to it
+        "new_username": ValueStorage.new_username,  # The same as the one the other test because it will be changed in to it
     }
 
     response = client.put(route, params=data)
@@ -69,17 +63,15 @@ def test_username_already_exists_exception(client: TestClient):
         "detail": "username already exists. Please change it and try again later"
     }
 
+
 def test_unvalid_status_value_exception(client: TestClient):
-    """ Test the exception that will get raised in case 
+    """Test the exception that will get raised in case
     the value of status is neither 'online' or 'offline'
     """
     auth_token = ValueStorage.auth_token
     status = "unvalid"
 
-    data = {
-        "auth_token": auth_token,
-        "status": status
-    }
+    data = {"auth_token": auth_token, "status": status}
 
     response = client.put(route, params=data)
 
@@ -88,8 +80,9 @@ def test_unvalid_status_value_exception(client: TestClient):
         "error": f"status value status='{status}' not found. Accepted values ['online', 'offline']",
     }
 
+
 def test_users_password_unvalid_exception(client: TestClient):
-    """ Test the exception that will get raised in case the user's
+    """Test the exception that will get raised in case the user's
     original password wich is `old_password` is not correct
     """
     old_password = "unvalid"
@@ -97,21 +90,18 @@ def test_users_password_unvalid_exception(client: TestClient):
     data = {
         "auth_token": ValueStorage.auth_token,
         "old_password": old_password,
-        "new_password": "123456789"
+        "new_password": "123456789",
     }
 
     response = client.put(route, params=data)
 
     assert response.status_code == 401
-    assert response.json() == {
-        "error": "Invalid password. Please try again later."
-    }
+    assert response.json() == {"error": "Invalid password. Please try again later."}
+
 
 def test_auth_token_bad_format(client: TestClient):
-    """ Tests the exceptions raised when the given auth_token have a bad format """
-    data = {
-        "auth_token": ValueStorage.bad_formated_auth_token
-    }
+    """Tests the exceptions raised when the given auth_token have a bad format"""
+    data = {"auth_token": ValueStorage.bad_formated_auth_token}
 
     response = client.put(route, params=data)
 
@@ -120,11 +110,12 @@ def test_auth_token_bad_format(client: TestClient):
         "error": "Bad auth_token format. Please check your auth_token and try again."
     }
 
+
 def test_user_not_found(client: TestClient):
-    """ Tests the exceptions that will get raised due the false auth_token passed """
+    """Tests the exceptions that will get raised due the false auth_token passed"""
     data = {
         "auth_token": ValueStorage.moke_auth_token,
-        "status": "online" # As if the request is made to change the user's status
+        "status": "online",  # As if the request is made to change the user's status
     }
 
     response = client.put(route, params=data)
@@ -134,11 +125,10 @@ def test_user_not_found(client: TestClient):
         "error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
     }
 
+
 def test_empty_auth_token(client: TestClient):
-    """ Tests pydantic validation for empty auth_token """
-    data = {
-        "auth_token": ""
-    }
+    """Tests pydantic validation for empty auth_token"""
+    data = {"auth_token": ""}
 
     response = client.put(route, params=data)
 

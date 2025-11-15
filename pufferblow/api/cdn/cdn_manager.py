@@ -1,12 +1,11 @@
-import os
-import uuid
-import mimetypes
 import hashlib
+import mimetypes
+import uuid
 from pathlib import Path
-from typing import List, Optional, Tuple
+
 import magic  # python-magic for MIME detection
+from fastapi import HTTPException, UploadFile
 from PIL import Image
-from fastapi import UploadFile, HTTPException
 
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.models.config_model import Config
@@ -26,11 +25,11 @@ class CDNManager:
         self.mime_detector = magic.Magic(mime=True)
 
         # File type validation - defaults, will be updated from server settings
-        self.IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp']
-        self.STICKER_EXTENSIONS = ['png', 'gif']
-        self.GIF_EXTENSIONS = ['gif']
-        self.VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi']
-        self.DOCUMENT_EXTENSIONS = ['pdf', 'doc', 'docx', 'txt', 'zip']
+        self.IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"]
+        self.STICKER_EXTENSIONS = ["png", "gif"]
+        self.GIF_EXTENSIONS = ["gif"]
+        self.VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi"]
+        self.DOCUMENT_EXTENSIONS = ["pdf", "doc", "docx", "txt", "zip"]
         self.MAX_IMAGE_SIZE_MB = 5  # Default, will be updated from server settings
         self.MAX_VIDEO_SIZE_MB = 50
         self.MAX_STICKER_SIZE_MB = 5
@@ -60,15 +59,17 @@ class CDNManager:
         Returns:
             Appropriate subdirectory name for the file type
         """
-        extension = filename.split('.')[-1].lower() if '.' in filename else ""
+        extension = filename.split(".")[-1].lower() if "." in filename else ""
 
         # Categorize based on MIME type and extension priority
-        if mime_type.startswith('image/'):
+        if mime_type.startswith("image/"):
             # Special handling for GIFs
             if extension in self.GIF_EXTENSIONS:
                 return "gifs"
             # Special handling for stickers (typically smaller PNG/GIF files)
-            elif extension in self.STICKER_EXTENSIONS and "_sticker" in filename.lower():
+            elif (
+                extension in self.STICKER_EXTENSIONS and "_sticker" in filename.lower()
+            ):
                 return "stickers"
             # Avatar and banner images
             elif "_avatar" in filename.lower():
@@ -79,24 +80,30 @@ class CDNManager:
                 # General images
                 return "images"
 
-        elif mime_type.startswith('video/'):
+        elif mime_type.startswith("video/"):
             return "videos"
 
-        elif mime_type.startswith('audio/'):
+        elif mime_type.startswith("audio/"):
             return "audio"
 
-        elif mime_type in ['application/pdf', 'application/msword',
-                          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                          'text/plain', 'application/zip']:
+        elif mime_type in [
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
+            "application/zip",
+        ]:
             return "documents"
 
-        elif extension in ['json', 'xml', 'yaml', 'yml']:
+        elif extension in ["json", "xml", "yaml", "yml"]:
             return "config"
 
         else:
             return "files"
 
-    def find_duplicate_by_hash(self, file_hash: str, subdirectory: str) -> Optional[str]:
+    def find_duplicate_by_hash(
+        self, file_hash: str, subdirectory: str
+    ) -> str | None:
         """
         Check if a file with the same hash already exists in the subdirectory
 
@@ -132,8 +139,8 @@ class CDNManager:
         file: UploadFile,
         user_id: str,
         check_duplicates: bool = True,
-        force_category: Optional[str] = None
-    ) -> Tuple[str, bool]:
+        force_category: str | None = None,
+    ) -> tuple[str, bool]:
         """
         Validate and save an uploaded file with automatic categorization based on file type
 
@@ -152,7 +159,7 @@ class CDNManager:
         # Check file size first (use content to determine limits)
         content = file.file.read()
         filename = file.filename or "unknown"
-        extension = filename.split('.')[-1].lower() if '.' in filename else ""
+        extension = filename.split(".")[-1].lower() if "." in filename else ""
 
         # Detect MIME type
         mime_type = self.mime_detector.from_buffer(content)
@@ -160,7 +167,11 @@ class CDNManager:
             raise HTTPException(status_code=400, detail="Cannot determine file type")
 
         # Determine category and limits
-        category = force_category if force_category else self.categorize_file(filename, mime_type)
+        category = (
+            force_category
+            if force_category
+            else self.categorize_file(filename, mime_type)
+        )
 
         # Set appropriate limits based on category
         if category == "images":
@@ -186,7 +197,7 @@ class CDNManager:
             allowed_extensions = self.DOCUMENT_EXTENSIONS
         else:
             max_size_mb = 10  # Default 10MB for unknown types
-            allowed_extensions = [extension] if extension else ['*']
+            allowed_extensions = [extension] if extension else ["*"]
 
         # Reset file pointer for validation
         file.file.seek(0)
@@ -198,7 +209,7 @@ class CDNManager:
             max_size_mb=max_size_mb,
             allowed_extensions=allowed_extensions,
             subdirectory=category,
-            check_duplicates=check_duplicates
+            check_duplicates=check_duplicates,
         )
 
     def validate_and_save_file(
@@ -206,10 +217,10 @@ class CDNManager:
         file: UploadFile,
         user_id: str,
         max_size_mb: int,
-        allowed_extensions: List[str],
+        allowed_extensions: list[str],
         subdirectory: str = "files",
-        check_duplicates: bool = True
-    ) -> Tuple[str, bool]:
+        check_duplicates: bool = True,
+    ) -> tuple[str, bool]:
         """
         Validate and save an uploaded file, with optional duplicate checking
 
@@ -227,15 +238,13 @@ class CDNManager:
         Raises:
             HTTPException: If validation fails
         """
-        import hashlib
         from pathlib import Path
 
         # Check file size
         content = file.file.read()
         if len(content) > max_size_mb * 1024 * 1024:
             raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds maximum of {max_size_mb}MB"
+                status_code=400, detail=f"File size exceeds maximum of {max_size_mb}MB"
             )
 
         # Detect MIME type from content
@@ -245,32 +254,32 @@ class CDNManager:
 
         # Validate extension
         filename = file.filename or "unknown"
-        extension = filename.split('.')[-1].lower() if '.' in filename else ""
+        extension = filename.split(".")[-1].lower() if "." in filename else ""
         if extension not in allowed_extensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"File extension '{extension}' not allowed. Allowed: {', '.join(allowed_extensions)}"
+                detail=f"File extension '{extension}' not allowed. Allowed: {', '.join(allowed_extensions)}",
             )
 
         # Additional validation for documents (PDFs, Office docs)
         if extension in self.DOCUMENT_EXTENSIONS:
             # For documents, just check basic MIME type matching
             expected_mime = {
-                'pdf': 'application/pdf',
-                'doc': 'application/msword',
-                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'txt': 'text/plain',
-                'zip': 'application/zip'
+                "pdf": "application/pdf",
+                "doc": "application/msword",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "txt": "text/plain",
+                "zip": "application/zip",
             }.get(extension)
 
-            if expected_mime and not mime_type.startswith(expected_mime.split('/')[0]):
+            if expected_mime and not mime_type.startswith(expected_mime.split("/")[0]):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"File content doesn't match extension. Expected {expected_mime}, got {mime_type}"
+                    detail=f"File content doesn't match extension. Expected {expected_mime}, got {mime_type}",
                 )
 
         # For image files, validate dimensions and format
-        if extension in self.IMAGE_EXTENSIONS and mime_type.startswith('image/'):
+        if extension in self.IMAGE_EXTENSIONS and mime_type.startswith("image/"):
             try:
                 image = Image.open(file.file)
                 image.verify()  # Verify it's a valid image
@@ -278,7 +287,7 @@ class CDNManager:
                 if image.size[0] > max_dimension or image.size[1] > max_dimension:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Image dimensions too large. Max allowed: {max_dimension}x{max_dimension}"
+                        detail=f"Image dimensions too large. Max allowed: {max_dimension}x{max_dimension}",
                     )
                 # Reset file pointer
                 file.file.seek(0)
@@ -318,6 +327,7 @@ class CDNManager:
         # We'll use a reference type of 'cdn_upload' for CDN management
         try:
             from pufferblow.api_initializer import api_initializer
+
             if file_hash == "":
                 file_hash = self.compute_file_hash(content)
 
@@ -328,7 +338,7 @@ class CDNManager:
                 file_path=f"{subdirectory}/{new_filename}",
                 file_size=len(content),
                 mime_type=mime_type,
-                verification_status="verified"
+                verification_status="verified",
             )
 
             # Create file reference for this upload
@@ -337,10 +347,10 @@ class CDNManager:
                 reference_id=reference_id,
                 file_hash=file_hash,
                 reference_type="cdn_upload",
-                reference_entity_id=user_id  # Owner of the upload
+                reference_entity_id=user_id,  # Owner of the upload
             )
 
-        except Exception as e:
+        except Exception:
             # Log error but don't fail the upload (file is saved, just not tracked)
             # TODO: Add proper logging
             pass
@@ -358,7 +368,7 @@ class CDNManager:
             True if deleted, False if not found
         """
         # Convert URL to file path
-        relative_path = file_url[len(self.config.CDN_BASE_URL):].lstrip('/')
+        relative_path = file_url[len(self.config.CDN_BASE_URL) :].lstrip("/")
         file_path = Path(self.config.CDN_STORAGE_PATH) / relative_path
 
         if file_path.exists():
@@ -366,7 +376,7 @@ class CDNManager:
             return True
         return False
 
-    def get_file_info(self, file_url: str) -> Optional[dict]:
+    def get_file_info(self, file_url: str) -> dict | None:
         """
         Get file information by URL
 
@@ -376,7 +386,7 @@ class CDNManager:
         Returns:
             Dict with file info or None if not found
         """
-        relative_path = file_url[len(self.config.CDN_BASE_URL):].lstrip('/')
+        relative_path = file_url[len(self.config.CDN_BASE_URL) :].lstrip("/")
         file_path = Path(self.config.CDN_STORAGE_PATH) / relative_path
 
         if not file_path.exists():
@@ -390,10 +400,10 @@ class CDNManager:
             "size": stat.st_size,
             "mime_type": mime_type,
             "created": stat.st_ctime,
-            "modified": stat.st_mtime
+            "modified": stat.st_mtime,
         }
 
-    def cleanup_orphaned_files(self, db_files: List[str], subdirectory: str = "files"):
+    def cleanup_orphaned_files(self, db_files: list[str], subdirectory: str = "files"):
         """
         Remove files that are no longer referenced in database
 
@@ -421,12 +431,31 @@ class CDNManager:
                 self.MAX_VIDEO_SIZE_MB = server_settings.max_video_size or 50
                 self.MAX_STICKER_SIZE_MB = server_settings.max_sticker_size or 5
                 self.MAX_GIF_SIZE_MB = server_settings.max_gif_size or 10
-                self.MAX_DOCUMENT_SIZE_MB = server_settings.max_message_length // 1000 or 10  # Rough estimate
-                self.IMAGE_EXTENSIONS = server_settings.allowed_images_extensions or ['png', 'jpg', 'jpeg', 'gif', 'webp']
-                self.STICKER_EXTENSIONS = server_settings.allowed_stickers_extensions or ['png', 'gif']
-                self.GIF_EXTENSIONS = server_settings.allowed_gif_extensions or ['gif']
-                self.VIDEO_EXTENSIONS = server_settings.allowed_videos_extensions or ['mp4', 'webm']
-                self.DOCUMENT_EXTENSIONS = server_settings.allowed_doc_extensions or ['pdf', 'doc', 'docx', 'txt', 'zip']
+                self.MAX_DOCUMENT_SIZE_MB = (
+                    server_settings.max_message_length // 1000 or 10
+                )  # Rough estimate
+                self.IMAGE_EXTENSIONS = server_settings.allowed_images_extensions or [
+                    "png",
+                    "jpg",
+                    "jpeg",
+                    "gif",
+                    "webp",
+                ]
+                self.STICKER_EXTENSIONS = (
+                    server_settings.allowed_stickers_extensions or ["png", "gif"]
+                )
+                self.GIF_EXTENSIONS = server_settings.allowed_gif_extensions or ["gif"]
+                self.VIDEO_EXTENSIONS = server_settings.allowed_videos_extensions or [
+                    "mp4",
+                    "webm",
+                ]
+                self.DOCUMENT_EXTENSIONS = server_settings.allowed_doc_extensions or [
+                    "pdf",
+                    "doc",
+                    "docx",
+                    "txt",
+                    "zip",
+                ]
         except Exception:
             # Use defaults if DB not available
             pass

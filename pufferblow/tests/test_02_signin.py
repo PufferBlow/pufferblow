@@ -4,69 +4,59 @@ from pufferblow.tests.conftest import ValueStorage
 
 route = "/api/v1/users/signin"
 
+
 def test_user_signin(client: TestClient):
     """
     Test signin to a user account
     """
-    params =  {
-        "username": ValueStorage.username,
-        "password": ValueStorage.password
-    } 
-    
+    params = {"username": ValueStorage.username, "password": ValueStorage.password}
+
     response = client.get(route, params=params)
-    
+
     auth_token = response.json()["auth_token"]
-    
+
     assert response.status_code == 200
     assert auth_token == ValueStorage.auth_token
+
 
 def test_username_not_found(client: TestClient):
     """
     Test username not found when singin up.
     """
-    params =  {
-        "username": ValueStorage.new_username,
-        "password": ValueStorage.password
-    }
-    
+    params = {"username": ValueStorage.new_username, "password": ValueStorage.password}
+
     response = client.get(route, params=params)
-    
+
     assert response.status_code == 404
+
 
 def test_password_is_incorrect(client: TestClient):
     """
     Test password is incorrect
     """
-    params =  {
-        "username": ValueStorage.username,
-        "password": ValueStorage.new_password
-    }
+    params = {"username": ValueStorage.username, "password": ValueStorage.new_password}
 
     response = client.get(route, params=params)
 
     assert response.status_code == 401
 
+
 def test_empty_username(client: TestClient):
     """
     Test empty username causes pydantic validation error
     """
-    params =  {
-        "username": "",
-        "password": ValueStorage.password
-    }
+    params = {"username": "", "password": ValueStorage.password}
 
     response = client.get(route, params=params)
 
     assert response.status_code == 422  # Pydantic validation error for min_length
 
+
 def test_empty_password(client: TestClient):
     """
     Test empty password causes pydantic validation error
     """
-    params =  {
-        "username": ValueStorage.username,
-        "password": ""
-    }
+    params = {"username": ValueStorage.username, "password": ""}
 
     response = client.get(route, params=params)
 

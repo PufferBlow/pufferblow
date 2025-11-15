@@ -6,18 +6,19 @@ including local storage, AWS S3, and other cloud storage providers.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, BinaryIO
-from pathlib import Path
+from typing import Any
 
 
 class StorageBackend(ABC):
     """Abstract base class for storage backends"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
 
     @abstractmethod
-    async def upload_file(self, content: bytes, path: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def upload_file(
+        self, content: bytes, path: str, metadata: dict[str, Any] | None = None
+    ) -> str:
         """
         Upload a file to storage
 
@@ -71,7 +72,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_file_url(self, path: str, expires_in: Optional[int] = None) -> str:
+    async def get_file_url(self, path: str, expires_in: int | None = None) -> str:
         """
         Get a public URL for the file
 
@@ -85,7 +86,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def list_files(self, prefix: str = "") -> List[str]:
+    async def list_files(self, prefix: str = "") -> list[str]:
         """
         List files with given prefix
 
@@ -98,7 +99,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_storage_info(self) -> Dict[str, Any]:
+    async def get_storage_info(self) -> dict[str, Any]:
         """
         Get storage backend information and stats
 

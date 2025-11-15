@@ -6,34 +6,30 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'pufferblow'
-copyright = '2025, ramsy0dev'
-author = 'ramsy0dev'
-release = '0.0.1-beta'
+project = "pufferblow"
+copyright = "2025, ramsy0dev"
+author = "ramsy0dev"
+release = "0.0.1-beta"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = [
-    "sphinx_favicon"
-]
+extensions = ["sphinx_favicon"]
 
-templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'sphinx_book_theme'
-html_css_files = [
-    "css/styles.css"
-]
-html_static_path = ['_static']
+html_theme = "sphinx_book_theme"
+html_css_files = ["css/styles.css"]
+html_static_path = ["_static"]
 
 html_title = "pufferblow"
 html_favicon = "_static/favicon.ico"
 html_theme_options = {
-    "use_download_button": True, # Allow users to download the current page in different formats
+    "use_download_button": True,  # Allow users to download the current page in different formats
     "icon_links": [
         {
             "name": "GitHub",

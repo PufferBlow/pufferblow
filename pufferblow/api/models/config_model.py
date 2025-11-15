@@ -1,62 +1,64 @@
 from pufferblow import constants
 
+
 class Config:
-    """ config model class """ 
+    """config model class"""
+
     # API related parameters
-    API_HOST                :       str     =       "127.0.0.1"
-    API_PORT                :       int     =       7575
-    LOGS_PATH               :       str     =       f"{constants.HOME}/.pufferblow/logs/pufferblow.log"     
-    WORKERS                 :       int     =       7
-    RATE_LIMIT_DURATION     :       int     =       5
-    MAX_RATE_LIMIT_REQUESTS :       int     =       6000
-    MAX_RATE_LIMIT_WARNINGS :       int     =       15
+    API_HOST: str = "127.0.0.1"
+    API_PORT: int = 7575
+    LOGS_PATH: str = f"{constants.HOME}/.pufferblow/logs/pufferblow.log"
+    WORKERS: int = 7
+    RATE_LIMIT_DURATION: int = 5
+    MAX_RATE_LIMIT_REQUESTS: int = 6000
+    MAX_RATE_LIMIT_WARNINGS: int = 15
 
     # PostgreSQL Database
-    DATABASE_NAME           :       str
-    USERNAME                :       str
-    DATABASE_PASSWORD       :       str
-    DATABASE_HOST           :       str
-    DATABASE_PORT           :       int
-    DATABASE_SSL_MODE       :       str     =       "prefer"
-    DATABASE_SSL_CERT       :       str | None = None
-    DATABASE_SSL_KEY        :       str | None = None
-    DATABASE_SSL_ROOT_CERT  :       str | None = None
+    DATABASE_NAME: str
+    USERNAME: str
+    DATABASE_PASSWORD: str
+    DATABASE_HOST: str
+    DATABASE_PORT: int
+    DATABASE_SSL_MODE: str = "prefer"
+    DATABASE_SSL_CERT: str | None = None
+    DATABASE_SSL_KEY: str | None = None
+    DATABASE_SSL_ROOT_CERT: str | None = None
 
     # Encryption
-    DERIVED_KEY_BYTES       :       int     =       56
-    DERIVED_KEY_ROUNDS      :       int     =       100
-    
+    DERIVED_KEY_BYTES: int = 56
+    DERIVED_KEY_ROUNDS: int = 100
+
     # Messages related parameters
-    MAX_MESSAGE_SIZE        :       int     =       1024
-    MAX_MESSAGES_PER_PAGE   :       int     =       50
-    MIN_MESSAGES_PER_PAGE   :       int     =       20
+    MAX_MESSAGE_SIZE: int = 1024
+    MAX_MESSAGES_PER_PAGE: int = 50
+    MIN_MESSAGES_PER_PAGE: int = 20
 
     # Storage related parameters (replaces CDN)
-    STORAGE_PROVIDER        :       str     =       "local"
-    STORAGE_PATH            :       str     =       f"{constants.HOME}/.pufferblow/storage"
-    STORAGE_BASE_URL        :       str     =       "/storage"
-    STORAGE_ALLOCATED_GB    :       int     =       10  # Default 10GB for local storage
+    STORAGE_PROVIDER: str = "local"
+    STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/storage"
+    STORAGE_BASE_URL: str = "/storage"
+    STORAGE_ALLOCATED_GB: int = 10  # Default 10GB for local storage
 
     # AWS S3 configuration (when provider = "s3")
-    S3_BUCKET_NAME          :       str | None = None
-    S3_REGION               :       str     =       "us-east-1"
-    S3_ACCESS_KEY           :       str | None = None
-    S3_SECRET_KEY           :       str | None = None
-    S3_ENDPOINT_URL         :       str | None = None  # For custom S3-compatible services
+    S3_BUCKET_NAME: str | None = None
+    S3_REGION: str = "us-east-1"
+    S3_ACCESS_KEY: str | None = None
+    S3_SECRET_KEY: str | None = None
+    S3_ENDPOINT_URL: str | None = None  # For custom S3-compatible services
 
     # Legacy CDN parameters (for backward compatibility)
-    CDN_STORAGE_PATH        :       str     =       f"{constants.HOME}/.pufferblow/cdn"
-    CDN_BASE_URL            :       str     =       "/cdn"
-    CDN_CACHE_MAX_AGE       :       int     =       86400  # 24 hours in seconds
-   
+    CDN_STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/cdn"
+    CDN_BASE_URL: str = "/cdn"
+    CDN_CACHE_MAX_AGE: int = 86400  # 24 hours in seconds
+
     def __init__(self, config: dict | None = None) -> None:
-        if config is not None:    
+        if config is not None:
             self.set_attr_from_config(config)
 
     def set_attr_from_config(self, config: dict) -> None:
         """
         Sets the attributes values from the config file
-        
+
         Args:
             config (dict): The config file data.
 
@@ -64,60 +66,62 @@ class Config:
             None.
         """
         # API related parameters
-        self.API_HOST                   =   config["api"]["host"]
-        self.API_PORT                   =   config["api"]["port"]
-        self.LOGS_PATH                  =   config["api"]["logs_path"]
-        self.WORKERS                    =   config["api"]["workers"]
-        self.RATE_LIMIT_DURATION        =   config["api"]["rate_limit_duration"]
-        self.MAX_RATE_LIMIT_REQUESTS    =   config["api"]["max_rate_limit_requests"]
-        self.MAX_RATE_LIMIT_WARNINGS    =   config["api"]["max_rate_limit_warnings"]
-    
+        self.API_HOST = config["api"]["host"]
+        self.API_PORT = config["api"]["port"]
+        self.LOGS_PATH = config["api"]["logs_path"]
+        self.WORKERS = config["api"]["workers"]
+        self.RATE_LIMIT_DURATION = config["api"]["rate_limit_duration"]
+        self.MAX_RATE_LIMIT_REQUESTS = config["api"]["max_rate_limit_requests"]
+        self.MAX_RATE_LIMIT_WARNINGS = config["api"]["max_rate_limit_warnings"]
+
         # PostgreSQL Database - support for both postregsql (legacy) and postgresql
         db_section = config.get("postgresql") or config.get("postregsql")
         if not db_section:
             # If neither section exists, raise error
-            raise KeyError("Neither 'postgresql' nor 'postregsql' section found in config")
+            raise KeyError(
+                "Neither 'postgresql' nor 'postregsql' section found in config"
+            )
 
-        self.DATABASE_NAME        =   db_section["database_name"]
-        self.USERNAME             =   db_section["username"]
-        self.DATABASE_PASSWORD    =   db_section["password"]
-        self.DATABASE_HOST        =   db_section["host"]
-        self.DATABASE_PORT        =   db_section["port"]
-        self.DATABASE_SSL_MODE    =   db_section.get("ssl_mode", "prefer")
-        self.DATABASE_SSL_CERT    =   db_section.get("ssl_cert")
-        self.DATABASE_SSL_KEY     =   db_section.get("ssl_key")
+        self.DATABASE_NAME = db_section["database_name"]
+        self.USERNAME = db_section["username"]
+        self.DATABASE_PASSWORD = db_section["password"]
+        self.DATABASE_HOST = db_section["host"]
+        self.DATABASE_PORT = db_section["port"]
+        self.DATABASE_SSL_MODE = db_section.get("ssl_mode", "prefer")
+        self.DATABASE_SSL_CERT = db_section.get("ssl_cert")
+        self.DATABASE_SSL_KEY = db_section.get("ssl_key")
         self.DATABASE_SSL_ROOT_CERT = db_section.get("ssl_root_cert")
 
         # Encryption
-        self.DERIVED_KEY_BYTES     =   config["encryption"]["derived_key_bytes"]
-        self.DERIVED_KEY_ROUNDS    =   config["encryption"]["derived_key_rounds"]
+        self.DERIVED_KEY_BYTES = config["encryption"]["derived_key_bytes"]
+        self.DERIVED_KEY_ROUNDS = config["encryption"]["derived_key_rounds"]
 
         # Messages related parameters
-        self.MAX_MESSAGE_SIZE        =   config["messages"]["max_message_size"]
-        self.MAX_MESSAGES_PER_PAGE   =   config["messages"]["max_messages_per_page"]
-        self.MIN_MESSAGES_PER_PAGE   =   config["messages"]["min_messages_per_page"]
+        self.MAX_MESSAGE_SIZE = config["messages"]["max_message_size"]
+        self.MAX_MESSAGES_PER_PAGE = config["messages"]["max_messages_per_page"]
+        self.MIN_MESSAGES_PER_PAGE = config["messages"]["min_messages_per_page"]
 
         # Storage related parameters
         if "storage" in config:
-            self.STORAGE_PROVIDER        =   config["storage"]["provider"]
-            self.STORAGE_PATH            =   config["storage"]["storage_path"]
-            self.STORAGE_BASE_URL        =   config["storage"]["base_url"]
-            self.STORAGE_ALLOCATED_GB    =   config["storage"]["allocated_gb"]
+            self.STORAGE_PROVIDER = config["storage"]["provider"]
+            self.STORAGE_PATH = config["storage"]["storage_path"]
+            self.STORAGE_BASE_URL = config["storage"]["base_url"]
+            self.STORAGE_ALLOCATED_GB = config["storage"]["allocated_gb"]
 
             # S3 configuration
             if "s3" in config["storage"]:
-                self.S3_BUCKET_NAME      =   config["storage"]["s3"]["bucket_name"]
-                self.S3_REGION           =   config["storage"]["s3"]["region"]
-                self.S3_ACCESS_KEY       =   config["storage"]["s3"]["access_key"]
-                self.S3_SECRET_KEY       =   config["storage"]["s3"]["secret_key"]
-                self.S3_ENDPOINT_URL     =   config["storage"]["s3"].get("endpoint_url")
+                self.S3_BUCKET_NAME = config["storage"]["s3"]["bucket_name"]
+                self.S3_REGION = config["storage"]["s3"]["region"]
+                self.S3_ACCESS_KEY = config["storage"]["s3"]["access_key"]
+                self.S3_SECRET_KEY = config["storage"]["s3"]["secret_key"]
+                self.S3_ENDPOINT_URL = config["storage"]["s3"].get("endpoint_url")
 
         # Legacy CDN related parameters (for backward compatibility)
         if "cdn" in config:
-            self.CDN_STORAGE_PATH        =   config["cdn"]["storage_path"]
-            self.CDN_BASE_URL            =   config["cdn"]["base_url"]
-            self.CDN_CACHE_MAX_AGE       =   config["cdn"]["cache_max_age"]
-   
+            self.CDN_STORAGE_PATH = config["cdn"]["storage_path"]
+            self.CDN_BASE_URL = config["cdn"]["base_url"]
+            self.CDN_CACHE_MAX_AGE = config["cdn"]["cache_max_age"]
+
     def export_toml(self) -> str:
         """
         Exports the attributes into a toml format.
@@ -180,6 +184,6 @@ base_url = "{self.CDN_BASE_URL}" # This defines the base URL path for serving fi
 cache_max_age = {self.CDN_CACHE_MAX_AGE} # This defines the maximum age (in seconds) for caching file responses. A value of 86400 (24 hours) is recommended for good performance.
 """
         return config
-    
+
     def __repr__(self) -> str:
         return f"Config(API_HOST={self.API_HOST!r}, API_PORT={self.API_PORT!r}, WORKERS={self.WORKERS!r}, LOGS_PATH={self.LOGS_PATH!r}, RATE_LIMIT_DURATION={self.RATE_LIMIT_DURATION!r}, MAX_RATE_LIMIT_REQUESTS={self.MAX_RATE_LIMIT_REQUESTS!r}, MAX_RATE_LIMIT_WARNINGS={self.MAX_RATE_LIMIT_WARNINGS!r})"

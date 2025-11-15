@@ -1,16 +1,19 @@
-from typing import Dict
+
 from fastapi import WebSocket
 from loguru import logger
 
+
 class WebSocketsManager:
-    """ WebSocketManager class is responsible for managing websockets """
+    """WebSocketManager class is responsible for managing websockets"""
 
     def __init__(self):
         # Active connections now store user permissions
         # Format: {websocket: {"user_id": str, "auth_token": str, "accessible_channels": list[str]}}
-        self.active_connections: Dict[WebSocket, dict] = {}
+        self.active_connections: dict[WebSocket, dict] = {}
 
-    async def connect(self, websocket: WebSocket, auth_token: str, channel_id: str) -> None:
+    async def connect(
+        self, websocket: WebSocket, auth_token: str, channel_id: str
+    ) -> None:
         """
         Accept connections from a client, and stores the corresponding auth_token
         and channel_id of this clients in `active_connections`
@@ -28,14 +31,20 @@ class WebSocketsManager:
             self.active_connections[websocket] = [auth_token, channel_id]
 
             # Extract user ID from auth token for logging (first part of JWT-like token)
-            user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token[:8]
+            user_id = auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
 
-            logger.info(f"WebSocket connected | User: {user_id} | Channel: {channel_id} | Total connections: {len(self.active_connections)}")
+            logger.info(
+                f"WebSocket connected | User: {user_id} | Channel: {channel_id} | Total connections: {len(self.active_connections)}"
+            )
         except Exception as e:
-            logger.error(f"WebSocket connection failed | Auth: {auth_token[:8]}... | Channel: {channel_id} | Error: {str(e)}")
+            logger.error(
+                f"WebSocket connection failed | Auth: {auth_token[:8]}... | Channel: {channel_id} | Error: {str(e)}"
+            )
             raise
 
-    async def connect_global(self, websocket: WebSocket, auth_token: str, accessible_channels: list[str]) -> None:
+    async def connect_global(
+        self, websocket: WebSocket, auth_token: str, accessible_channels: list[str]
+    ) -> None:
         """
         Accept global WebSocket connections from a client that can receive updates
         from all accessible channels.
@@ -53,17 +62,21 @@ class WebSocketsManager:
 
             # Extract user_id from auth_token
             # auth_token is in format "user_id.encrypted_token"
-            user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token
+            user_id = auth_token.split(".")[0] if "." in auth_token else auth_token
 
             self.active_connections[websocket] = {
                 "user_id": user_id,
                 "auth_token": auth_token,
-                "accessible_channels": accessible_channels
+                "accessible_channels": accessible_channels,
             }
 
-            logger.info(f"Global WebSocket connected | User: {user_id} | Accessible channels: {len(accessible_channels)} | Total connections: {len(self.active_connections)}")
+            logger.info(
+                f"Global WebSocket connected | User: {user_id} | Accessible channels: {len(accessible_channels)} | Total connections: {len(self.active_connections)}"
+            )
         except Exception as e:
-            logger.error(f"Global WebSocket connection failed | Auth: {auth_token[:8]}... | Error: {str(e)}")
+            logger.error(
+                f"Global WebSocket connection failed | Auth: {auth_token[:8]}... | Error: {str(e)}"
+            )
             raise
 
     async def disconnect(self, websocket: WebSocket) -> None:
@@ -86,8 +99,12 @@ class WebSocketsManager:
             if connection_info:
                 auth_token = connection_info[0]
                 channel_id = connection_info[1]
-                user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token[:8]
-                logger.info(f"WebSocket disconnected | User: {user_id} | Channel: {channel_id} | Remaining connections: {len(self.active_connections) - 1}")
+                user_id = (
+                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
+                )
+                logger.info(
+                    f"WebSocket disconnected | User: {user_id} | Channel: {channel_id} | Remaining connections: {len(self.active_connections) - 1}"
+                )
 
             # Remove from active connections
             if websocket in self.active_connections:
@@ -99,7 +116,12 @@ class WebSocketsManager:
             if websocket in self.active_connections:
                 del self.active_connections[websocket]
 
-    async def send_message(self, message: str, websocket: WebSocket, message_type: str | None = "plain-text") -> None:
+    async def send_message(
+        self,
+        message: str,
+        websocket: WebSocket,
+        message_type: str | None = "plain-text",
+    ) -> None:
         """
         Send a message to a client using his `websocket` object
 
@@ -118,11 +140,17 @@ class WebSocketsManager:
             if connection_info:
                 auth_token = connection_info[0]
                 channel_id = connection_info[1]
-                user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token[:8]
+                user_id = (
+                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
+                )
 
-            message_preview = str(message)[:50] + "..." if len(str(message)) > 50 else str(message)
+            message_preview = (
+                str(message)[:50] + "..." if len(str(message)) > 50 else str(message)
+            )
 
-            logger.debug(f"WebSocket send_message | User: {user_id} | Channel: {channel_id} | Type: {message_type} | Content: {message_preview}")
+            logger.debug(
+                f"WebSocket send_message | User: {user_id} | Channel: {channel_id} | Type: {message_type} | Content: {message_preview}"
+            )
 
             if message_type == "json":
                 await websocket.send_json(message)
@@ -148,7 +176,9 @@ class WebSocketsManager:
         total_connections = len(self.active_connections)
         message_preview = message[:50] + "..." if len(message) > 50 else message
 
-        logger.info(f"Broadcasting to all clients | Recipients: {total_connections} | Content: {message_preview}")
+        logger.info(
+            f"Broadcasting to all clients | Recipients: {total_connections} | Content: {message_preview}"
+        )
 
         sent_count = 0
         failed_count = 0
@@ -161,7 +191,9 @@ class WebSocketsManager:
                 logger.error(f"Broadcast failed for one client: {str(e)}")
                 failed_count += 1
 
-        logger.info(f"Broadcast completed | Sent: {sent_count} | Failed: {failed_count}")
+        logger.info(
+            f"Broadcast completed | Sent: {sent_count} | Failed: {failed_count}"
+        )
 
     async def broadcast_to_channel(self, channel_id: str, message: dict) -> None:
         """
@@ -178,18 +210,30 @@ class WebSocketsManager:
         active_connections_copy = self.active_connections.copy()
 
         # Count recipients first
-        recipients = [(ws, auth_token) for ws, (auth_token, ws_channel_id) in active_connections_copy.items() if ws_channel_id == channel_id]
+        recipients = [
+            (ws, auth_token)
+            for ws, (auth_token, ws_channel_id) in active_connections_copy.items()
+            if ws_channel_id == channel_id
+        ]
         total_recipients = len(recipients)
 
         # Get message type info for logging
-        message_type = message.get('type', 'unknown')
-        message_id = message.get('message_id', 'unknown')
-        content_preview = message.get('content', '')[:50] + "..." if len(message.get('content', '')) > 50 else message.get('content', '')
+        message_type = message.get("type", "unknown")
+        message_id = message.get("message_id", "unknown")
+        content_preview = (
+            message.get("content", "")[:50] + "..."
+            if len(message.get("content", "")) > 50
+            else message.get("content", "")
+        )
 
-        logger.info(f"Channel broadcast | Channel: {channel_id} | Recipients: {total_recipients} | Message-Type: {message_type} | ID: {message_id} | Content: {content_preview}")
+        logger.info(
+            f"Channel broadcast | Channel: {channel_id} | Recipients: {total_recipients} | Message-Type: {message_type} | ID: {message_id} | Content: {content_preview}"
+        )
 
         if total_recipients == 0:
-            logger.warning(f"Channel broadcast attempted but no clients connected to channel {channel_id}")
+            logger.warning(
+                f"Channel broadcast attempted but no clients connected to channel {channel_id}"
+            )
             return
 
         sent_count = 0
@@ -197,16 +241,24 @@ class WebSocketsManager:
 
         for websocket, auth_token in recipients:
             try:
-                user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token[:8]
-                logger.debug(f"Sending message to user {user_id} in channel {channel_id}")
+                user_id = (
+                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
+                )
+                logger.debug(
+                    f"Sending message to user {user_id} in channel {channel_id}"
+                )
 
                 await websocket.send_json(message)
                 sent_count += 1
             except Exception as e:
-                logger.error(f"Channel broadcast failed for one client in channel {channel_id}: {str(e)}")
+                logger.error(
+                    f"Channel broadcast failed for one client in channel {channel_id}: {str(e)}"
+                )
                 failed_count += 1
 
-        logger.info(f"Channel broadcast completed | Channel: {channel_id} | Sent: {sent_count} | Failed: {failed_count} | Total recipients: {total_recipients}")
+        logger.info(
+            f"Channel broadcast completed | Channel: {channel_id} | Sent: {sent_count} | Failed: {failed_count} | Total recipients: {total_recipients}"
+        )
 
     async def send_personal_message(self, websocket: WebSocket, message: dict) -> None:
         """
@@ -222,7 +274,9 @@ class WebSocketsManager:
         try:
             # Check if websocket is still connected before sending
             if websocket.client_state != 1:  # 1 = OPEN
-                logger.warning(f"Cannot send personal message - websocket not in OPEN state: {websocket.client_state}")
+                logger.warning(
+                    f"Cannot send personal message - websocket not in OPEN state: {websocket.client_state}"
+                )
                 return
 
             # Get user info for logging
@@ -232,12 +286,18 @@ class WebSocketsManager:
             if connection_info:
                 auth_token = connection_info[0]
                 channel_id = connection_info[1]
-                user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token[:8]
+                user_id = (
+                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
+                )
 
-            message_type = message.get('type', 'unknown')
-            message_preview = str(message)[:50] + "..." if len(str(message)) > 50 else str(message)
+            message_type = message.get("type", "unknown")
+            message_preview = (
+                str(message)[:50] + "..." if len(str(message)) > 50 else str(message)
+            )
 
-            logger.debug(f"Personal message | User: {user_id} | Channel: {channel_id} | Type: {message_type} | Content: {message_preview}")
+            logger.debug(
+                f"Personal message | User: {user_id} | Channel: {channel_id} | Type: {message_type} | Content: {message_preview}"
+            )
 
             await websocket.send_json(message)
 
@@ -247,7 +307,9 @@ class WebSocketsManager:
             user_id = "unknown"
             if connection_info:
                 auth_token = connection_info[0]
-                user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token[:8]
+                user_id = (
+                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
+                )
 
             logger.error(f"Personal message failed | User: {user_id} | Error: {str(e)}")
 
@@ -255,8 +317,9 @@ class WebSocketsManager:
             if websocket in self.active_connections:
                 await self.disconnect(websocket)
 
-
-    async def broadcast_to_eligible_users(self, channel_id: str, message: dict, database_handler=None) -> None:
+    async def broadcast_to_eligible_users(
+        self, channel_id: str, message: dict, database_handler=None
+    ) -> None:
         """
         Broadcast a message to all connected users who have permission to access the specified channel.
         This is the core method for global websocket message distribution.
@@ -273,9 +336,13 @@ class WebSocketsManager:
         active_connections_copy = self.active_connections.copy()
 
         # Get message type info for logging
-        message_type = message.get('type', 'unknown')
-        message_id = message.get('message_id', 'unknown')
-        content_preview = message.get('content', '')[:50] + "..." if len(message.get('content', '')) > 50 else message.get('content', '')
+        message_type = message.get("type", "unknown")
+        message_id = message.get("message_id", "unknown")
+        content_preview = (
+            message.get("content", "")[:50] + "..."
+            if len(message.get("content", "")) > 50
+            else message.get("content", "")
+        )
 
         # Count recipients and determine accessibility
         recipients = []
@@ -293,19 +360,30 @@ class WebSocketsManager:
             # Handle legacy connections (old format for backwards compatibility)
             elif isinstance(connection_info, list) and len(connection_info) >= 2:
                 total_legacy_connections += 1
-                auth_token, connected_channel_id = connection_info[0], connection_info[1]
-                user_id = auth_token.split('.')[0] if '.' in auth_token else auth_token[:8]
+                auth_token, connected_channel_id = (
+                    connection_info[0],
+                    connection_info[1],
+                )
+                user_id = (
+                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
+                )
                 # Legacy connections only receive messages for their specific channel
                 if connected_channel_id == channel_id:
                     recipients.append((websocket, user_id, "legacy"))
 
         total_recipients = len(recipients)
 
-        logger.info(f"Global broadcast | Channel: {channel_id} | Recipients: {total_recipients} | Message-Type: {message_type} | ID: {message_id} | Content: {content_preview}")
-        logger.debug(f"Connection types: {total_global_connections} global, {total_legacy_connections} legacy")
+        logger.info(
+            f"Global broadcast | Channel: {channel_id} | Recipients: {total_recipients} | Message-Type: {message_type} | ID: {message_id} | Content: {content_preview}"
+        )
+        logger.debug(
+            f"Connection types: {total_global_connections} global, {total_legacy_connections} legacy"
+        )
 
         if total_recipients == 0:
-            logger.warning(f"Global broadcast attempted but no eligible users connected for channel {channel_id}")
+            logger.warning(
+                f"Global broadcast attempted but no eligible users connected for channel {channel_id}"
+            )
             return
 
         sent_count = 0
@@ -313,15 +391,21 @@ class WebSocketsManager:
 
         for websocket, user_id, connection_type in recipients:
             try:
-                logger.debug(f"Sending message to user {user_id} (via {connection_type} connection) for channel {channel_id}")
+                logger.debug(
+                    f"Sending message to user {user_id} (via {connection_type} connection) for channel {channel_id}"
+                )
 
                 await websocket.send_json(message)
                 sent_count += 1
             except Exception as e:
-                logger.error(f"Global broadcast failed for one client in channel {channel_id}: {str(e)}")
+                logger.error(
+                    f"Global broadcast failed for one client in channel {channel_id}: {str(e)}"
+                )
                 failed_count += 1
 
-        logger.info(f"Global broadcast completed | Channel: {channel_id} | Sent: {sent_count} | Failed: {failed_count} | Total recipients: {total_recipients}")
+        logger.info(
+            f"Global broadcast completed | Channel: {channel_id} | Sent: {sent_count} | Failed: {failed_count} | Total recipients: {total_recipients}"
+        )
 
     def get_user_accessible_channels(self, user_id: str, database_handler) -> list[str]:
         """
@@ -343,16 +427,20 @@ class WebSocketsManager:
             # Extract channel IDs from the results
             accessible_channel_ids = []
             for channel_data in channels_data:
-                if channel_data and hasattr(channel_data, 'channel_id'):
+                if channel_data and hasattr(channel_data, "channel_id"):
                     accessible_channel_ids.append(channel_data[0].channel_id)
                 elif isinstance(channel_data, tuple) and len(channel_data) > 0:
                     channel_obj = channel_data[0]
-                    if hasattr(channel_obj, 'channel_id'):
+                    if hasattr(channel_obj, "channel_id"):
                         accessible_channel_ids.append(channel_obj.channel_id)
 
-            logger.debug(f"User {user_id} has access to {len(accessible_channel_ids)} channels")
+            logger.debug(
+                f"User {user_id} has access to {len(accessible_channel_ids)} channels"
+            )
             return accessible_channel_ids
 
         except Exception as e:
-            logger.error(f"Failed to get accessible channels for user {user_id}: {str(e)}")
+            logger.error(
+                f"Failed to get accessible channels for user {user_id}: {str(e)}"
+            )
             return []

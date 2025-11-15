@@ -1,7 +1,7 @@
-import uuid
-import string
-import random
 import hashlib
+import random
+import string
+import uuid
 
 # Database handler
 from pufferblow.api.database.database_handler import DatabaseHandler
@@ -9,14 +9,21 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 # Tables
 from pufferblow.api.database.tables.server import Server
 
+
 class ServerManager:
     """
     the server manager class
     """
+
     def __init__(self, database_handler: DatabaseHandler) -> None:
         self.database_handler = database_handler
 
-    def create_server(self, server_name: str, server_welcome_message: str,  description: str | None = None) -> None:
+    def create_server(
+        self,
+        server_name: str,
+        server_welcome_message: str,
+        description: str | None = None,
+    ) -> None:
         """
         Creates a server which will contain all
         of the info about the server and initializes default roles, privileges, and settings.
@@ -49,25 +56,30 @@ class ServerManager:
         # Skip for SQLite tests since roles/privileges use ARRAY type not supported by SQLite
         # For SQLite, the database URI starts with 'sqlite://'
         database_uri = str(self.database_handler.database_engine.url)
-        if not database_uri.startswith('sqlite://'):
+        if not database_uri.startswith("sqlite://"):
             self.database_handler.initialize_default_data()
 
-    def update_server(self, server_name: str, server_welcome_message: str, description: str | None = None) -> None:
+    def update_server(
+        self,
+        server_name: str,
+        server_welcome_message: str,
+        description: str | None = None,
+    ) -> None:
         """
         Update the server's info.
-        
+
         Args:
             sever_name (str): The server's name.
             server_description (str, default: None, Optional): The server's description.
             server_welcome_message (str): The server's welcome for new members.
-        
+
         Returns:
             None.
         """
         self.database_handler.update_server_values(
             server_name=server_name,
             description=description,
-            server_welcome_message=server_welcome_message
+            server_welcome_message=server_welcome_message,
         )
 
     def check_server_exists(self) -> bool:
@@ -83,7 +95,7 @@ class ServerManager:
         """
         # Skip server checks for SQLite tests since the server table is excluded
         database_uri = str(self.database_handler.database_engine.url)
-        if database_uri.startswith('sqlite://'):
+        if database_uri.startswith("sqlite://"):
             return False
 
         server = self.database_handler.get_server()
@@ -93,10 +105,10 @@ class ServerManager:
     def _generate_user_id(self, server_name: str) -> str:
         """
         Generate a unique `server_id` based of the server's name.
-        
+
         Args:
             server_name (str): The server's name.
-        
+
         Returns:
             str: The generated id.
         """

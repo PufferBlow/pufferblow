@@ -1,10 +1,16 @@
 from rich import print
 from rich.prompt import Prompt
 
-def ask_prompt(prompt: str, name: str, default: str | int | None = None, password: bool | None = False) -> str | int:
+
+def ask_prompt(
+    prompt: str,
+    name: str,
+    default: str | int | None = None,
+    password: bool | None = False,
+) -> str | int:
     """
     Asks a prompt and makes sure the user answers it.
-    
+
     Args:
         prompt (str): The prompt to ask.
         name (str): The prompt's name.
@@ -17,12 +23,11 @@ def ask_prompt(prompt: str, name: str, default: str | int | None = None, passwor
 
     while True:
         answer = Prompt.ask(prompt, default=default, password=password)
-        
+
         if answer is None:
             print(f"[bold red]{name} shouldn't be empty[reset]")
             continue
-        
+
         break
 
     return answer
-

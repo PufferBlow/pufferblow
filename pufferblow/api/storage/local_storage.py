@@ -4,11 +4,10 @@ Local Storage Backend for Pufferblow
 Provides local file system storage with space allocation and monitoring.
 """
 
-import os
-import shutil
-import psutil
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
+
+import psutil
 from fastapi import HTTPException
 
 from .storage_backend import StorageBackend
@@ -17,11 +16,13 @@ from .storage_backend import StorageBackend
 class LocalStorageBackend(StorageBackend):
     """Local file system storage backend with space allocation"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
 
         # Storage configuration
-        self.storage_path = Path(config.get("storage_path", "~/.pufferblow/storage")).expanduser()
+        self.storage_path = Path(
+            config.get("storage_path", "~/.pufferblow/storage")
+        ).expanduser()
         self.allocated_space_gb = config.get("allocated_space_gb", 10)  # Default 10GB
         self.base_url = config.get("base_url", "/storage")
         self.api_host = config.get("api_host", "127.0.0.1")
@@ -33,7 +34,9 @@ class LocalStorageBackend(StorageBackend):
         # Calculate allocated bytes
         self.allocated_bytes = self.allocated_space_gb * 1024 * 1024 * 1024
 
-    async def upload_file(self, content: bytes, path: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def upload_file(
+        self, content: bytes, path: str, metadata: dict[str, Any] | None = None
+    ) -> str:
         """Upload file to local storage"""
         file_size = len(content)
 
@@ -42,7 +45,7 @@ class LocalStorageBackend(StorageBackend):
             raise HTTPException(
                 status_code=507,  # Insufficient Storage
                 detail=f"Insufficient storage space. Allocated: {self.allocated_space_gb}GB, "
-                       f"Used: {await self._get_used_space_gb():.2f}GB"
+                f"Used: {await self._get_used_space_gb():.2f}GB",
             )
 
         # Create full file path
@@ -80,11 +83,11 @@ class LocalStorageBackend(StorageBackend):
         full_path = self.storage_path / path
         return full_path.exists()
 
-    async def get_file_url(self, path: str, expires_in: Optional[int] = None) -> str:
+    async def get_file_url(self, path: str, expires_in: int | None = None) -> str:
         """Get file URL (local files don't expire)"""
         return f"http://{self.api_host}:{self.api_port}{self.base_url}/{path}"
 
-    async def list_files(self, prefix: str = "") -> List[str]:
+    async def list_files(self, prefix: str = "") -> list[str]:
         """List files with prefix"""
         search_path = self.storage_path / prefix if prefix else self.storage_path
 
@@ -101,7 +104,7 @@ class LocalStorageBackend(StorageBackend):
 
         return files
 
-    async def get_storage_info(self) -> Dict[str, Any]:
+    async def get_storage_info(self) -> dict[str, Any]:
         """Get storage information"""
         used_bytes = await self._get_used_space_bytes()
         disk_usage = psutil.disk_usage(str(self.storage_path))
@@ -111,10 +114,14 @@ class LocalStorageBackend(StorageBackend):
             "storage_path": str(self.storage_path),
             "allocated_gb": self.allocated_space_gb,
             "used_gb": used_bytes / (1024**3),
-            "used_percentage": (used_bytes / self.allocated_bytes) * 100 if self.allocated_bytes > 0 else 0,
+            "used_percentage": (
+                (used_bytes / self.allocated_bytes) * 100
+                if self.allocated_bytes > 0
+                else 0
+            ),
             "disk_free_gb": disk_usage.free / (1024**3),
             "disk_total_gb": disk_usage.total / (1024**3),
-            "files_count": await self._count_files()
+            "files_count": await self._count_files(),
         }
 
     async def check_space_available(self, size_bytes: int) -> bool:
@@ -141,7 +148,7 @@ class LocalStorageBackend(StorageBackend):
             count += 1
         return count
 
-    async def cleanup_orphaned_files(self, valid_files: List[str]) -> int:
+    async def cleanup_orphaned_files(self, valid_files: list[str]) -> int:
         """
         Remove files not in the valid_files list
 

@@ -3,35 +3,41 @@
 Simple test script for storage backends
 """
 
-import sys
-import os
-from pathlib import Path
 import asyncio
+import sys
+from pathlib import Path
 
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
 
 def test_storage_imports():
     """Test that storage modules can be imported"""
     try:
         # Import storage modules directly
-        sys.path.insert(0, str(Path(__file__).parent.parent / "pufferblow" / "api" / "storage"))
+        sys.path.insert(
+            0, str(Path(__file__).parent.parent / "pufferblow" / "api" / "storage")
+        )
 
-        from pufferblow.api.storage.storage_backend import StorageBackend
         from pufferblow.api.storage.local_storage import LocalStorageBackend
         from pufferblow.api.storage.s3_storage import S3StorageBackend
+        from pufferblow.api.storage.storage_backend import StorageBackend
         from pufferblow.api.storage.storage_manager import StorageManager
+
         print("✓ All storage modules imported successfully")
         return True
     except ImportError as e:
         print(f"✗ Import failed: {e}")
         return False
 
+
 async def test_storage_manager():
     """Test storage manager initialization"""
     try:
         # Import storage modules directly
-        sys.path.insert(0, str(Path(__file__).parent.parent / "pufferblow" / "api" / "storage"))
+        sys.path.insert(
+            0, str(Path(__file__).parent.parent / "pufferblow" / "api" / "storage")
+        )
 
         from storage_manager import StorageManager
 
@@ -40,7 +46,7 @@ async def test_storage_manager():
             "provider": "local",
             "storage_path": "./test_storage",
             "base_url": "http://localhost:8080/storage",
-            "max_size_gb": 10
+            "max_size_gb": 10,
         }
 
         manager = StorageManager(local_config)
@@ -70,8 +76,10 @@ async def test_storage_manager():
     except Exception as e:
         print(f"✗ StorageManager test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
+
 
 async def main():
     print("Testing storage backends...")
@@ -86,6 +94,7 @@ async def main():
     else:
         print("\n✗ Some tests failed!")
         return 1
+
 
 if __name__ == "__main__":
     exit_code = asyncio.run(main())

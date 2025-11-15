@@ -1,15 +1,15 @@
 import asyncio
-import json
-import uuid
 import logging
-from typing import Dict, List, Optional, Set
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Optional
 
 try:
     import aiortc
-    from aiortc import RTCPeerConnection, RTCIceServer, RTCConfiguration
+    from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection
     from aiortc.contrib.media import MediaRelay
+
     AIORTC_AVAILABLE = True
 except ImportError:
     AIORTC_AVAILABLE = False
@@ -21,26 +21,30 @@ from loguru import logger
 # Database utils
 from pufferblow.api.database.database_handler import DatabaseHandler
 
+
 @dataclass
 class Participant:
     """Represents a voice channel participant"""
+
     user_id: str
     username: str
-    pc: Optional['RTCPeerConnection'] = None  # Type hint for aiortc
+    pc: Optional["RTCPeerConnection"] = None  # Type hint for aiortc
     is_muted: bool = False
     is_deafened: bool = False
     joined_at: datetime = None
-    websocket_connection_id: Optional[str] = None
+    websocket_connection_id: str | None = None
 
     def __post_init__(self):
         if self.joined_at is None:
             self.joined_at = datetime.now()
 
+
 @dataclass
 class VoiceChannel:
     """Represents a voice channel with multiple participants"""
+
     channel_id: str
-    participants: Dict[str, Participant] = None
+    participants: dict[str, Participant] = None
     created_at: datetime = None
     max_participants: int = 50  # Default limit for scalability
 
@@ -49,6 +53,7 @@ class VoiceChannel:
             self.participants = {}
         if self.created_at is None:
             self.created_at = datetime.now()
+
 
 class WebRTCManager:
     """
@@ -60,14 +65,14 @@ class WebRTCManager:
 
     def __init__(self, database_handler: DatabaseHandler):
         self.database_handler = database_handler
-        self.voice_channels: Dict[str, VoiceChannel] = {}
+        self.voice_channels: dict[str, VoiceChannel] = {}
         self.media_relay = MediaRelay() if AIORTC_AVAILABLE else None
 
         # STUN servers for WebRTC (Google's public STUN servers)
         self.stun_servers = [
             "stun:stun.l.google.com:19302",
             "stun:stun1.l.google.com:19302",
-            "stun:stun2.l.google.com:19302"
+            "stun:stun2.l.google.com:19302",
         ]
 
         # ICE configuration
@@ -97,7 +102,9 @@ class WebRTCManager:
         cleanup_interval = 60  # 60 seconds
         disconnection_timeout = 300  # 5 minutes timeout
 
-        logger.info(f"Starting WebRTC cleanup task with {cleanup_interval}s interval and {disconnection_timeout}s timeout")
+        logger.info(
+            f"Starting WebRTC cleanup task with {cleanup_interval}s interval and {disconnection_timeout}s timeout"
+        )
         cleanup_cycle = 0
 
         while True:
@@ -106,7 +113,9 @@ class WebRTCManager:
                 cleanup_cycle += 1
                 current_time = datetime.now()
 
-                logger.debug(f"Cleanup cycle {cleanup_cycle}: Checking {len(self.voice_channels)} active channels")
+                logger.debug(
+                    f"Cleanup cycle {cleanup_cycle}: Checking {len(self.voice_channels)} active channels"
+                )
 
                 channels_to_cleanup = []
                 total_participants_removed = 0
@@ -115,36 +124,67 @@ class WebRTCManager:
                     participants_to_remove = []
                     channel_participants = len(channel.participants)
 
-                    logger.debug(f"Checking channel {channel_id} with {channel_participants} participants")
+                    logger.debug(
+                        f"Checking channel {channel_id} with {channel_participants} participants"
+                    )
 
                     for user_id, participant in channel.participants.items():
                         # Check if participant has been inactive too long
-                        if participant.pc and hasattr(participant.pc, 'connectionState'):
+                        if participant.pc and hasattr(
+                            participant.pc, "connectionState"
+                        ):
                             connection_state = participant.pc.connectionState
-                            logger.debug(f"Participant {user_id} in channel {channel_id} has connection state: {connection_state}")
+                            logger.debug(
+                                f"Participant {user_id} in channel {channel_id} has connection state: {connection_state}"
+                            )
 
-                            if connection_state == "closed" or connection_state == "failed":
-                                participants_to_remove.append((user_id, "connection_state"))
-                                logger.warning(f"Removing disconnected participant {user_id} from channel {channel_id} (state: {connection_state})")
-                            elif current_time - participant.joined_at > timedelta(seconds=disconnection_timeout):
+                            if (
+                                connection_state == "closed"
+                                or connection_state == "failed"
+                            ):
+                                participants_to_remove.append(
+                                    (user_id, "connection_state")
+                                )
+                                logger.warning(
+                                    f"Removing disconnected participant {user_id} from channel {channel_id} (state: {connection_state})"
+                                )
+                            elif current_time - participant.joined_at > timedelta(
+                                seconds=disconnection_timeout
+                            ):
                                 # Check if WebSocket connection is still alive via database lookup
-                                websocket_active = self._is_websocket_connection_active(participant.websocket_connection_id)
-                                logger.debug(f"WebSocket check for {user_id}: active={websocket_active}")
+                                websocket_active = self._is_websocket_connection_active(
+                                    participant.websocket_connection_id
+                                )
+                                logger.debug(
+                                    f"WebSocket check for {user_id}: active={websocket_active}"
+                                )
 
                                 if not websocket_active:
-                                    participants_to_remove.append((user_id, "websocket_timeout"))
-                                    logger.warning(f"Removing timed out participant {user_id} from channel {channel_id} (joined: {participant.joined_at}, timeout: {disconnection_timeout}s)")
+                                    participants_to_remove.append(
+                                        (user_id, "websocket_timeout")
+                                    )
+                                    logger.warning(
+                                        f"Removing timed out participant {user_id} from channel {channel_id} (joined: {participant.joined_at}, timeout: {disconnection_timeout}s)"
+                                    )
                         else:
                             # Check timeout even for connections without state
-                            if current_time - participant.joined_at > timedelta(seconds=disconnection_timeout):
-                                participants_to_remove.append((user_id, "general_timeout"))
-                                logger.warning(f"Removing generally timed out participant {user_id} from channel {channel_id}")
+                            if current_time - participant.joined_at > timedelta(
+                                seconds=disconnection_timeout
+                            ):
+                                participants_to_remove.append(
+                                    (user_id, "general_timeout")
+                                )
+                                logger.warning(
+                                    f"Removing generally timed out participant {user_id} from channel {channel_id}"
+                                )
 
                     # Actually remove participants
                     for user_id, reason in participants_to_remove:
                         await self._remove_participant(channel_id, user_id)
                         total_participants_removed += 1
-                        logger.info(f"Removed participant {user_id} from channel {channel_id} (reason: {reason})")
+                        logger.info(
+                            f"Removed participant {user_id} from channel {channel_id} (reason: {reason})"
+                        )
 
                     # If channel is empty, mark for cleanup
                     remaining_participants = len(channel.participants)
@@ -158,19 +198,28 @@ class WebRTCManager:
                     logger.info(f"Cleaned up empty voice channel {channel_id}")
 
                 if total_participants_removed > 0 or len(channels_to_cleanup) > 0:
-                    logger.info(f"Cleanup cycle {cleanup_cycle} completed: removed {total_participants_removed} participants, cleaned {len(channels_to_cleanup)} empty channels")
+                    logger.info(
+                        f"Cleanup cycle {cleanup_cycle} completed: removed {total_participants_removed} participants, cleaned {len(channels_to_cleanup)} empty channels"
+                    )
 
                 # Periodic status report
                 if cleanup_cycle % 10 == 0:  # Every 10 minutes (10 * 60s)
                     active_channels = len(self.voice_channels)
-                    total_participants = sum(len(ch.participants) for ch in self.voice_channels.values())
-                    logger.info(f"WebRTC status: {active_channels} active channels, {total_participants} total participants")
+                    total_participants = sum(
+                        len(ch.participants) for ch in self.voice_channels.values()
+                    )
+                    logger.info(
+                        f"WebRTC status: {active_channels} active channels, {total_participants} total participants"
+                    )
 
             except Exception as e:
-                logger.error(f"Error during cleanup cycle {cleanup_cycle}: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Error during cleanup cycle {cleanup_cycle}: {str(e)}",
+                    exc_info=True,
+                )
                 # Continue cleanup loop even after errors
 
-    def _is_websocket_connection_active(self, connection_id: Optional[str]) -> bool:
+    def _is_websocket_connection_active(self, connection_id: str | None) -> bool:
         """
         Check if WebSocket connection is still active.
 
@@ -182,7 +231,7 @@ class WebRTCManager:
         # TODO: Implement proper WebSocket connection tracking
         return True
 
-    def get_user_current_channel(self, user_id: str) -> Optional[str]:
+    def get_user_current_channel(self, user_id: str) -> str | None:
         """
         Get the current voice channel ID for a user.
         Returns None if the user is not in any voice channel.
@@ -198,7 +247,9 @@ class WebRTCManager:
                 return channel_id
         return None
 
-    async def join_voice_channel(self, user_id: str, channel_id: str, websocket_connection_id: str = None) -> dict:
+    async def join_voice_channel(
+        self, user_id: str, channel_id: str, websocket_connection_id: str = None
+    ) -> dict:
         """
         Join a user to a voice channel.
 
@@ -218,7 +269,7 @@ class WebRTCManager:
         if not channel_data:
             return {"error": "Channel not found"}
 
-        if not (channel_data.channel_type in ["voice", "mixed"]):
+        if channel_data.channel_type not in ["voice", "mixed"]:
             return {"error": "Channel does not support voice"}
 
         # Get user info
@@ -236,22 +287,28 @@ class WebRTCManager:
 
         # Check participant limit
         if len(voice_channel.participants) >= voice_channel.max_participants:
-            return {"error": f"Voice channel is full (max {voice_channel.max_participants} participants)"}
+            return {
+                "error": f"Voice channel is full (max {voice_channel.max_participants} participants)"
+            }
 
         # Check if user is already in channel
         if user_id in voice_channel.participants:
             logger.info(f"User {user_id} rejoining voice channel {channel_id}")
         else:
-            logger.info(f"User {user_id} ({username}) joining voice channel {channel_id}")
+            logger.info(
+                f"User {user_id} ({username}) joining voice channel {channel_id}"
+            )
 
         # Create WebRTC peer connection
         try:
-            pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=self.ice_servers))
+            pc = RTCPeerConnection(
+                configuration=RTCConfiguration(iceServers=self.ice_servers)
+            )
             participant = Participant(
                 user_id=user_id,
                 username=username,
                 pc=pc,
-                websocket_connection_id=websocket_connection_id or str(uuid.uuid4())
+                websocket_connection_id=websocket_connection_id or str(uuid.uuid4()),
             )
 
             voice_channel.participants[user_id] = participant
@@ -261,11 +318,15 @@ class WebRTCManager:
             async def on_connection_state_change():
                 logger.info(f"PC connection state for {user_id}: {pc.connectionState}")
                 if pc.connectionState == "connected":
-                    logger.info(f"WebRTC connection established for user {user_id} in channel {channel_id}")
+                    logger.info(
+                        f"WebRTC connection established for user {user_id} in channel {channel_id}"
+                    )
 
                 # Update database with participant list
                 current_participants = list(voice_channel.participants.keys())
-                self.database_handler.update_channel_participants(channel_id, current_participants)
+                self.database_handler.update_channel_participants(
+                    channel_id, current_participants
+                )
 
             @pc.on("icecandidate")
             async def on_ice_candidate(candidate):
@@ -285,12 +346,14 @@ class WebRTCManager:
                 "webrtc_config": {
                     "ice_servers": self.stun_servers,
                     "channel_type": channel_data.channel_type,
-                    "max_participants": voice_channel.max_participants
-                }
+                    "max_participants": voice_channel.max_participants,
+                },
             }
 
         except Exception as e:
-            logger.error(f"Failed to create WebRTC connection for user {user_id}: {str(e)}")
+            logger.error(
+                f"Failed to create WebRTC connection for user {user_id}: {str(e)}"
+            )
             # Clean up on error
             if user_id in voice_channel.participants:
                 voice_channel.participants.pop(user_id)
@@ -321,18 +384,28 @@ class WebRTCManager:
         # Remove participant
         participant = voice_channel.participants.pop(user_id)
 
-        logger.info(f"User {user_id} ({participant.username}) left voice channel {channel_id}")
+        logger.info(
+            f"User {user_id} ({participant.username}) left voice channel {channel_id}"
+        )
 
         try:
             # Close WebRTC connection gracefully
             if participant.pc:
                 await participant.pc.close()
         except Exception as e:
-            logger.warning(f"Error closing WebRTC connection for user {user_id}: {str(e)}")
+            logger.warning(
+                f"Error closing WebRTC connection for user {user_id}: {str(e)}"
+            )
 
         # Update database
-        current_participants = list(voice_channel.participants.keys()) if voice_channel.participants else []
-        self.database_handler.update_channel_participants(channel_id, current_participants)
+        current_participants = (
+            list(voice_channel.participants.keys())
+            if voice_channel.participants
+            else []
+        )
+        self.database_handler.update_channel_participants(
+            channel_id, current_participants
+        )
 
         # Clean up empty channels
         if not voice_channel.participants:
@@ -342,7 +415,7 @@ class WebRTCManager:
         return {
             "status": "left",
             "channel_id": channel_id,
-            "participant_count": len(voice_channel.participants)
+            "participant_count": len(voice_channel.participants),
         }
 
     def get_voice_channel_status(self, channel_id: str) -> dict:
@@ -363,7 +436,7 @@ class WebRTCManager:
                 "channel_id": channel_id,
                 "participants": [],
                 "participant_count": 0,
-                "error": "No active voice channel"
+                "error": "No active voice channel",
             }
 
         voice_channel = self.voice_channels[channel_id]
@@ -371,21 +444,31 @@ class WebRTCManager:
         # Build participant info
         participants = []
         for user_id, participant in voice_channel.participants.items():
-            participants.append({
-                "user_id": user_id,
-                "username": participant.username,
-                "is_muted": participant.is_muted,
-                "is_deafened": participant.is_deafened,
-                "joined_at": participant.joined_at.isoformat() if participant.joined_at else None,
-                "connection_state": participant.pc.connectionState if participant.pc and hasattr(participant.pc, 'connectionState') else "unknown"
-            })
+            participants.append(
+                {
+                    "user_id": user_id,
+                    "username": participant.username,
+                    "is_muted": participant.is_muted,
+                    "is_deafened": participant.is_deafened,
+                    "joined_at": (
+                        participant.joined_at.isoformat()
+                        if participant.joined_at
+                        else None
+                    ),
+                    "connection_state": (
+                        participant.pc.connectionState
+                        if participant.pc and hasattr(participant.pc, "connectionState")
+                        else "unknown"
+                    ),
+                }
+            )
 
         return {
             "channel_id": channel_id,
             "participants": participants,
             "participant_count": len(participants),
             "max_participants": voice_channel.max_participants,
-            "created_at": voice_channel.created_at.isoformat()
+            "created_at": voice_channel.created_at.isoformat(),
         }
 
     async def _remove_participant(self, channel_id: str, user_id: str):
@@ -408,11 +491,15 @@ class WebRTCManager:
 
         # Update database participant list
         current_participants = list(voice_channel.participants.keys())
-        self.database_handler.update_channel_participants(channel_id, current_participants)
+        self.database_handler.update_channel_participants(
+            channel_id, current_participants
+        )
 
         logger.info(f"Removed participant {user_id} from voice channel {channel_id}")
 
-    async def mute_participant(self, channel_id: str, user_id: str, muted: bool) -> dict:
+    async def mute_participant(
+        self, channel_id: str, user_id: str, muted: bool
+    ) -> dict:
         """Mute or unmute a participant"""
         if not AIORTC_AVAILABLE:
             return {"error": "Voice channels are not available"}
@@ -427,16 +514,18 @@ class WebRTCManager:
         participant = voice_channel.participants[user_id]
         participant.is_muted = muted
 
-        logger.info(f"User {user_id} {'muted' if muted else 'unmuted'} in channel {channel_id}")
+        logger.info(
+            f"User {user_id} {'muted' if muted else 'unmuted'} in channel {channel_id}"
+        )
 
         return {
             "status": "success",
             "user_id": user_id,
             "channel_id": channel_id,
-            "is_muted": muted
+            "is_muted": muted,
         }
 
-    def get_channel_participants(self, channel_id: str) -> List[dict]:
+    def get_channel_participants(self, channel_id: str) -> list[dict]:
         """Get list of participants in a channel"""
         if channel_id not in self.voice_channels:
             return []
@@ -445,13 +534,19 @@ class WebRTCManager:
         participants = []
 
         for user_id, participant in voice_channel.participants.items():
-            participants.append({
-                "user_id": user_id,
-                "username": participant.username,
-                "is_muted": participant.is_muted,
-                "is_deafened": participant.is_deafened,
-                "joined_at": participant.joined_at.isoformat() if participant.joined_at else None
-            })
+            participants.append(
+                {
+                    "user_id": user_id,
+                    "username": participant.username,
+                    "is_muted": participant.is_muted,
+                    "is_deafened": participant.is_deafened,
+                    "joined_at": (
+                        participant.joined_at.isoformat()
+                        if participant.joined_at
+                        else None
+                    ),
+                }
+            )
 
         return participants
 
@@ -467,7 +562,7 @@ class WebRTCManager:
             "bundle_policy": "balanced",
             "rtcp_mux_policy": "require",
             # Signaling will be handled via WebSockets
-            "signaling_method": "websocket_mesh"
+            "signaling_method": "websocket_mesh",
         }
 
     async def shutdown(self):
@@ -495,12 +590,15 @@ class WebRTCManager:
 
         logger.info("WebRTC manager shutdown complete")
 
+
 # Singleton instance
 webrtc_manager = WebRTCManager(None)  # Will be initialized with database handler
+
 
 def get_webrtc_manager() -> WebRTCManager:
     """Get the global WebRTC manager instance"""
     return webrtc_manager
+
 
 def initialize_webrtc_manager(database_handler: DatabaseHandler):
     """Initialize the WebRTC manager with database handler"""
@@ -518,9 +616,15 @@ def initialize_webrtc_manager(database_handler: DatabaseHandler):
 
     webrtc_manager = new_manager
 
+
 # Export for import
 if AIORTC_AVAILABLE:
-    __all__ = ['WebRTCManager', 'get_webrtc_manager', 'initialize_webrtc_manager', 'AIORTC_AVAILABLE']
+    __all__ = [
+        "WebRTCManager",
+        "get_webrtc_manager",
+        "initialize_webrtc_manager",
+        "AIORTC_AVAILABLE",
+    ]
 else:
-    __all__ = ['WebRTCManager', 'get_webrtc_manager', 'initialize_webrtc_manager']
+    __all__ = ["WebRTCManager", "get_webrtc_manager", "initialize_webrtc_manager"]
     logger.warning("aiortc not available - WebRTC voice channels will be disabled")

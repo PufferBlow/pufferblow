@@ -1,13 +1,10 @@
-import pytest
-import pytest_asyncio
 import json
-from fastapi.testclient import TestClient
-from fastapi.websockets import WebSocket
 from unittest.mock import MagicMock
 
-from pufferblow.api.api import api
-from pufferblow.tests.conftest import ValueStorage
+import pytest
+
 from pufferblow.api_initializer import api_initializer
+from pufferblow.tests.conftest import ValueStorage
 
 
 class TestWebSocketReadMessages:
@@ -25,7 +22,7 @@ class TestWebSocketReadMessages:
         # Mock a websocket message
         read_confirmation_message = {
             "type": "read_confirmation",
-            "message_id": "test-message-123"
+            "message_id": "test-message-123",
         }
 
         # Verify the message structure that the client should send
@@ -53,11 +50,10 @@ class TestWebSocketReadMessages:
         # The method should work (we can't fully test async in this context)
         # But we can verify it exists and has the right signature
 
-        import asyncio
-        from pufferblow.api.websocket.websocket_manager import WebSocketsManager
+
 
         # Check that the method exists
-        assert hasattr(ws_manager, 'send_personal_message')
+        assert hasattr(ws_manager, "send_personal_message")
 
     def test_read_confirmation_processing_logic(self):
         """Test the logic for processing read confirmations in websocket"""
@@ -67,10 +63,7 @@ class TestWebSocketReadMessages:
         unconfirmed_messages = {"msg-1": True, "msg-2": True, "msg-3": True}
 
         # Simulate receiving a read confirmation for msg-2
-        incoming_data = json.dumps({
-            "type": "read_confirmation",
-            "message_id": "msg-2"
-        })
+        incoming_data = json.dumps({"type": "read_confirmation", "message_id": "msg-2"})
 
         message_data = json.loads(incoming_data)
 
@@ -97,7 +90,7 @@ class TestWebSocketReadMessages:
         messages_to_send = [
             {"message_id": "msg-a", "content": "Hello"},
             {"message_id": "msg-b", "content": "World"},
-            {"message_id": "msg-c", "content": "!"}
+            {"message_id": "msg-c", "content": "!"},
         ]
 
         for message in messages_to_send:
@@ -130,17 +123,17 @@ class TestWebSocketReadMessages:
         # Verify that the messages_manager has the necessary methods
         msg_manager = api_initializer.messages_manager
 
-        assert hasattr(msg_manager, 'mark_message_as_read')
-        assert hasattr(msg_manager, 'send_message')
-        assert hasattr(msg_manager, 'load_messages')
+        assert hasattr(msg_manager, "mark_message_as_read")
+        assert hasattr(msg_manager, "send_message")
+        assert hasattr(msg_manager, "load_messages")
 
     def test_database_handler_supports_message_read_tracking(self):
         """Test that database_handler supports marking messages as read"""
         db_handler = api_initializer.database_handler
 
         # Check that the method exists
-        assert hasattr(db_handler, 'add_message_to_read_history')
-        assert hasattr(db_handler, 'get_user_read_messages_ids')
+        assert hasattr(db_handler, "add_message_to_read_history")
+        assert hasattr(db_handler, "get_user_read_messages_ids")
 
     def test_websocket_json_message_format(self):
         """Test the expected JSON message format for websocket communication"""
@@ -151,7 +144,7 @@ class TestWebSocketReadMessages:
             "channel_id": "channel-abc123",
             "raw_message": "This is a test message",
             "username": "testuser",
-            "sent_at": "2025-10-17T19:57:37.000000"
+            "sent_at": "2025-10-17T19:57:37.000000",
         }
 
         # Should be valid JSON
@@ -162,10 +155,7 @@ class TestWebSocketReadMessages:
         assert parsed_back["channel_id"] == "channel-abc123"
 
         # Test read confirmation message sent from client to server
-        client_message = {
-            "type": "read_confirmation",
-            "message_id": "msg-12345"
-        }
+        client_message = {"type": "read_confirmation", "message_id": "msg-12345"}
 
         json_str = json.dumps(client_message)
         parsed_back = json.loads(json_str)

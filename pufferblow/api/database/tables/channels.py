@@ -1,24 +1,34 @@
 from __future__ import annotations
-from dataclasses import dataclass
+
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import String, Boolean, DateTime, ARRAY
+
+from sqlalchemy import ARRAY, Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
+
 from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.utils.current_date import date_in_gmt
 
 
 class Channels(Base):
     """Channels table"""
+
     __tablename__ = "channels"
 
     channel_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
     channel_name: Mapped[str] = mapped_column(String, nullable=False)
-    channel_type: Mapped[str] = mapped_column(String, default="text")  # text, voice, mixed
-    messages_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), default=list)
+    channel_type: Mapped[str] = mapped_column(
+        String, default="text"
+    )  # text, voice, mixed
+    messages_ids: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), default=list
+    )
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
-    allowed_users: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), default=list)
-    participant_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), default=list)  # Active voice participants
+    allowed_users: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), default=list
+    )
+    participant_ids: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), default=list
+    )  # Active voice participants
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: date_in_gmt("%Y-%m-%d %H:%M:%S"),
@@ -34,17 +44,17 @@ class Channels(Base):
             f"allowed_users={self.allowed_users!r}, "
             f"created_at={self.created_at!r})"
         )
-    
+
     def to_dict(self) -> dict:
         return {
-            "channel_id"       :   self.channel_id,
-            "channel_name"     :   self.channel_name,
-            "channel_type"     :   self.channel_type,
-            "messages_ids"     :   self.messages_ids,
-            "is_private"       :   self.is_private,
-            "allowed_users"    :   self.allowed_users,
-            "participant_ids"  :   self.participant_ids,
-            "created_at"       :   self.created_at
+            "channel_id": self.channel_id,
+            "channel_name": self.channel_name,
+            "channel_type": self.channel_type,
+            "messages_ids": self.messages_ids,
+            "is_private": self.is_private,
+            "allowed_users": self.allowed_users,
+            "participant_ids": self.participant_ids,
+            "created_at": self.created_at,
         }
 
 

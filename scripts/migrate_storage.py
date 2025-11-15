@@ -6,28 +6,31 @@ Migrates files between different storage backends (local to S3, S3 to local, etc
 """
 
 import asyncio
-import sys
 import os
+import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-import shutil
-import logging
+from typing import Any
 
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pufferblow.api_initializer import APIInitializer
-from pufferblow.api.storage.storage_backend import StorageBackend
+from loguru import logger
+
 from pufferblow.api.storage.local_storage import LocalStorageBackend
 from pufferblow.api.storage.s3_storage import S3StorageBackend
-from loguru import logger
+from pufferblow.api.storage.storage_backend import StorageBackend
+from pufferblow.api_initializer import APIInitializer
 
 
 class StorageMigrator:
     """Handles migration between storage backends"""
 
-    def __init__(self, source_config: Dict[str, Any], target_config: Dict[str, Any],
-                 database_handler):
+    def __init__(
+        self,
+        source_config: dict[str, Any],
+        target_config: dict[str, Any],
+        database_handler,
+    ):
         self.source_config = source_config
         self.target_config = target_config
         self.database_handler = database_handler
@@ -37,15 +40,15 @@ class StorageMigrator:
 
         # Migration stats
         self.stats = {
-            'total_files': 0,
-            'migrated_files': 0,
-            'failed_files': 0,
-            'skipped_files': 0,
-            'total_size': 0,
-            'migrated_size': 0
+            "total_files": 0,
+            "migrated_files": 0,
+            "failed_files": 0,
+            "skipped_files": 0,
+            "total_size": 0,
+            "migrated_size": 0,
         }
 
-    def _create_backend(self, config: Dict[str, Any]) -> StorageBackend:
+    def _create_backend(self, config: dict[str, Any]) -> StorageBackend:
         """Create storage backend from config"""
         provider = config.get("provider", "local")
 
@@ -56,7 +59,9 @@ class StorageMigrator:
         else:
             raise ValueError(f"Unsupported storage provider: {provider}")
 
-    async def migrate_all_files(self, batch_size: int = 10, dry_run: bool = False) -> Dict[str, Any]:
+    async def migrate_all_files(
+        self, batch_size: int = 10, dry_run: bool = False
+    ) -> dict[str, Any]:
         """
         Migrate all files from source to target backend
 
@@ -75,7 +80,7 @@ class StorageMigrator:
         try:
             # Get all files from database
             all_files = await self._get_all_files_from_database()
-            self.stats['total_files'] = len(all_files)
+            self.stats["total_files"] = len(all_files)
 
             logger.info(f"Found {len(all_files)} files to migrate")
 
@@ -87,7 +92,7 @@ class StorageMigrator:
 
             # Migrate files in batches
             for i in range(0, len(all_files), batch_size):
-                batch = all_files[i:i + batch_size]
+                batch = all_files[i : i + batch_size]
                 await self._migrate_batch(batch)
 
                 # Log progress
@@ -106,7 +111,7 @@ class StorageMigrator:
             logger.error(f"Migration failed: {str(e)}")
             raise
 
-    async def _get_all_files_from_database(self) -> List[Dict[str, Any]]:
+    async def _get_all_files_from_database(self) -> list[dict[str, Any]]:
         """Get all file records from database"""
         try:
             with self.database_handler.database_session() as session:
@@ -117,12 +122,14 @@ class StorageMigrator:
 
                 file_list = []
                 for file_obj in files:
-                    file_list.append({
-                        'file_hash': file_obj.file_hash,
-                        'file_path': file_obj.file_path,
-                        'file_size': file_obj.file_size,
-                        'mime_type': file_obj.mime_type
-                    })
+                    file_list.append(
+                        {
+                            "file_hash": file_obj.file_hash,
+                            "file_path": file_obj.file_path,
+                            "file_size": file_obj.file_size,
+                            "mime_type": file_obj.mime_type,
+                        }
+                    )
 
                 return file_list
 
@@ -130,25 +137,25 @@ class StorageMigrator:
             logger.error(f"Failed to get files from database: {str(e)}")
             return []
 
-    async def _analyze_files(self, files: List[Dict[str, Any]]):
+    async def _analyze_files(self, files: list[dict[str, Any]]):
         """Analyze files for dry run"""
         for file_info in files:
-            self.stats['total_size'] += file_info.get('file_size', 0)
+            self.stats["total_size"] += file_info.get("file_size", 0)
 
         logger.info(f"Total files: {len(files)}")
         logger.info(f"Total size: {self.stats['total_size'] / (1024**3):.2f} GB")
 
-    async def _migrate_batch(self, batch: List[Dict[str, Any]]):
+    async def _migrate_batch(self, batch: list[dict[str, Any]]):
         """Migrate a batch of files"""
         for file_info in batch:
             try:
-                file_path = file_info['file_path']
-                file_size = file_info.get('file_size', 0)
+                file_path = file_info["file_path"]
+                file_size = file_info.get("file_size", 0)
 
                 # Check if file exists in source
                 if not await self.source_backend.file_exists(file_path):
                     logger.warning(f"Source file not found: {file_path}")
-                    self.stats['skipped_files'] += 1
+                    self.stats["skipped_files"] += 1
                     continue
 
                 # Download from source
@@ -156,26 +163,32 @@ class StorageMigrator:
 
                 # Verify content size
                 if len(content) != file_size:
-                    logger.warning(f"Size mismatch for {file_path}: expected {file_size}, got {len(content)}")
+                    logger.warning(
+                        f"Size mismatch for {file_path}: expected {file_size}, got {len(content)}"
+                    )
 
                 # Upload to target
                 await self.target_backend.upload_file(content, file_path)
 
                 # Update stats
-                self.stats['migrated_files'] += 1
-                self.stats['migrated_size'] += len(content)
+                self.stats["migrated_files"] += 1
+                self.stats["migrated_size"] += len(content)
 
                 logger.debug(f"Migrated: {file_path}")
 
             except Exception as e:
-                logger.error(f"Failed to migrate {file_info.get('file_path', 'unknown')}: {str(e)}")
-                self.stats['failed_files'] += 1
+                logger.error(
+                    f"Failed to migrate {file_info.get('file_path', 'unknown')}: {str(e)}"
+                )
+                self.stats["failed_files"] += 1
 
     async def _update_database_references(self):
         """Update database to reflect new storage backend"""
         # This is a simplified implementation
         # In a production system, you might want to update file URLs or add migration metadata
-        logger.info("Database references updated (no changes needed for current implementation)")
+        logger.info(
+            "Database references updated (no changes needed for current implementation)"
+        )
 
 
 async def main():
@@ -183,18 +196,30 @@ async def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Migrate Pufferblow storage backend")
-    parser.add_argument("--source-provider", required=True,
-                       choices=["local", "s3"], help="Source storage provider")
-    parser.add_argument("--target-provider", required=True,
-                       choices=["local", "s3"], help="Target storage provider")
+    parser.add_argument(
+        "--source-provider",
+        required=True,
+        choices=["local", "s3"],
+        help="Source storage provider",
+    )
+    parser.add_argument(
+        "--target-provider",
+        required=True,
+        choices=["local", "s3"],
+        help="Target storage provider",
+    )
     parser.add_argument("--source-path", help="Source storage path (for local)")
     parser.add_argument("--target-path", help="Target storage path (for local)")
     parser.add_argument("--source-bucket", help="Source S3 bucket name")
     parser.add_argument("--target-bucket", help="Target S3 bucket name")
     parser.add_argument("--source-region", default="us-east-1", help="Source S3 region")
     parser.add_argument("--target-region", default="us-east-1", help="Target S3 region")
-    parser.add_argument("--batch-size", type=int, default=10, help="Batch size for migration")
-    parser.add_argument("--dry-run", action="store_true", help="Analyze without migrating")
+    parser.add_argument(
+        "--batch-size", type=int, default=10, help="Batch size for migration"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Analyze without migrating"
+    )
     parser.add_argument("--config", help="Path to config file")
 
     args = parser.parse_args()
@@ -204,7 +229,7 @@ async def main():
 
     # Override config if specified
     if args.config:
-        os.environ['PUFFERBLOW_CONFIG'] = args.config
+        os.environ["PUFFERBLOW_CONFIG"] = args.config
 
     api_init.load_objects()
 
@@ -217,7 +242,7 @@ async def main():
         "region": args.source_region or api_init.config.S3_REGION,
         "access_key": api_init.config.S3_ACCESS_KEY,
         "secret_key": api_init.config.S3_SECRET_KEY,
-        "endpoint_url": api_init.config.S3_ENDPOINT_URL
+        "endpoint_url": api_init.config.S3_ENDPOINT_URL,
     }
 
     # Create target config
@@ -229,20 +254,19 @@ async def main():
         "region": args.target_region or api_init.config.S3_REGION,
         "access_key": api_init.config.S3_ACCESS_KEY,
         "secret_key": api_init.config.S3_SECRET_KEY,
-        "endpoint_url": api_init.config.S3_ENDPOINT_URL
+        "endpoint_url": api_init.config.S3_ENDPOINT_URL,
     }
 
     # Create migrator
     migrator = StorageMigrator(
         source_config=source_config,
         target_config=target_config,
-        database_handler=api_init.database_handler
+        database_handler=api_init.database_handler,
     )
 
     # Run migration
     stats = await migrator.migrate_all_files(
-        batch_size=args.batch_size,
-        dry_run=args.dry_run
+        batch_size=args.batch_size, dry_run=args.dry_run
     )
 
     # Print final stats

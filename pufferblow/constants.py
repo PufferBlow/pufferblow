@@ -4,11 +4,11 @@ import platform
 from rich import print
 
 # Package info
-PACKAGE_NAME    =   "pufferblow"
-VERSION         =   "0.0.1-beta"
-AUTHOR          =   "ramsy0dev"
-ORG_GITHUB      =   "https://github.com/pufferblow"
-REPO_GITHUB     =   "https://github.com/pufferblow/pufferblow"
+PACKAGE_NAME = "pufferblow"
+VERSION = "0.0.1-beta"
+AUTHOR = "ramsy0dev"
+ORG_GITHUB = "https://github.com/pufferblow"
+REPO_GITHUB = "https://github.com/pufferblow/pufferblow"
 
 BANNER = f"""
                   ___  ___            _     _
@@ -22,7 +22,10 @@ BANNER = f"""
         - Escape [bold red]surveillance[reset] and gain [bold green]anonymity[reset] -
 """
 
-def banner() -> None: print(BANNER)
+
+def banner() -> None:
+    print(BANNER)
+
 
 CURRENT_PLATFORM = platform.system()
 
