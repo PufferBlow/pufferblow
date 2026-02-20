@@ -1,6 +1,7 @@
 import asyncio
 import re
 import uuid
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
 from fastapi.responses import ORJSONResponse
@@ -73,24 +74,24 @@ class MessageOperationsQuery(BaseModel):
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
     """
-    Basic rate limiting middleware with thread-safe operations
+    Sliding-window rate limiting middleware with endpoint tiers and cooldowns.
     """
 
     def __init__(self, app):
         super().__init__(app)
-        self.request_count_per_ip = {}
+        self.request_timestamps_per_ip = defaultdict(deque)
+        self.cooldowns_per_ip = {}
+        self.warning_counts_per_ip = defaultdict(int)
         self.rate_limit_lock = asyncio.Lock()
 
     async def dispatch(self, request, call_next):
-        # Skip rate limiting for test environments
         if request.client is None:
-            response = await call_next(request)
-            return response
+            return await call_next(request)
 
-        # Get the client's IP address
-        client_ip = request.client.host
+        client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if not client_ip:
+            client_ip = request.client.host
 
-        # Check if IP is already blocked
         if api_initializer.database_handler.check_is_ip_blocked(ip=client_ip):
             return ORJSONResponse(
                 status_code=403,
@@ -99,97 +100,117 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # Get current server settings
         server_settings = api_initializer.database_handler.get_server_settings()
         if server_settings is None:
-            # Fallback to config if settings not found
-            rate_limit_duration = timedelta(
-                minutes=api_initializer.config.RATE_LIMIT_DURATION
-            )
-            max_rate_limit_requests = api_initializer.config.MAX_RATE_LIMIT_REQUESTS
+            base_window_minutes = api_initializer.config.RATE_LIMIT_DURATION
+            base_max_requests = api_initializer.config.MAX_RATE_LIMIT_REQUESTS
             max_rate_limit_warnings = api_initializer.config.MAX_RATE_LIMIT_WARNINGS
         else:
-            rate_limit_duration = timedelta(minutes=server_settings.rate_limit_duration)
-            max_rate_limit_requests = server_settings.max_rate_limit_requests
+            base_window_minutes = server_settings.rate_limit_duration
+            base_max_requests = server_settings.max_rate_limit_requests
             max_rate_limit_warnings = server_settings.max_rate_limit_warnings
 
-        # Thread-safe rate limiting logic
+        endpoint_bucket = self._get_bucket(request.url.path)
+        bucket_multiplier = {
+            "auth": 0.2,
+            "uploads": 0.15,
+            "messages": 0.5,
+            "default": 1.0,
+        }.get(endpoint_bucket, 1.0)
+
+        window = timedelta(minutes=max(base_window_minutes, 1))
+        max_requests = max(5, int(base_max_requests * bucket_multiplier))
+
         async with self.rate_limit_lock:
-            # Get current IP stats
-            request_count, warnings_count, last_request = self.request_count_per_ip.get(
-                client_ip, (0, 0, datetime.min)
-            )
+            now = datetime.now()
+            warnings_count = self.warning_counts_per_ip[client_ip]
 
-            # Calculate elapsed time since last request
-            elapsed_time = datetime.now() - last_request
+            cooldown_until = self.cooldowns_per_ip.get(client_ip)
+            if cooldown_until and now < cooldown_until:
+                retry_after_seconds = int((cooldown_until - now).total_seconds())
+                return ORJSONResponse(
+                    status_code=429,
+                    headers={"Retry-After": str(max(retry_after_seconds, 1))},
+                    content={
+                        "message": "Rate limit exceeded. Cooldown active.",
+                        "retry_after_seconds": retry_after_seconds,
+                    },
+                )
 
-            # Reset counts if time window has expired
-            if elapsed_time > rate_limit_duration:
-                request_count = 0  # Will be incremented to 1
-                warnings_count = 0  # Reset warnings
+            timestamps = self.request_timestamps_per_ip[client_ip]
+            window_start = now - window
+            while timestamps and timestamps[0] < window_start:
+                timestamps.popleft()
 
-            # Check if request limit exceeded
-            if request_count >= max_rate_limit_requests:
-                # Increment warnings and log the violation
-                warnings_count += 1
+            if len(timestamps) >= max_requests:
+                self.warning_counts_per_ip[client_ip] += 1
+                warnings_count = self.warning_counts_per_ip[client_ip]
                 logger.warning(
                     warnings.IP_REACHED_RATE_LIMIT(
                         ip=client_ip,
-                        request_count=request_count,
+                        request_count=len(timestamps),
                         rate_limit_warnings=warnings_count,
                     )
                 )
-                self.request_count_per_ip[client_ip] = (
-                    request_count,
-                    warnings_count,
-                    datetime.now(),
-                )
+
+                if warnings_count > max_rate_limit_warnings:
+                    logger.info(
+                        info.CLIENT_IP_BLOCKED(
+                            client_ip=client_ip,
+                            requests_count=len(timestamps),
+                            rate_limit_warnings=warnings_count,
+                        )
+                    )
+
+                    blocked_ip = BlockedIPS(
+                        ip=client_ip,
+                        block_reason="The IP has exceeded the rate limit warnings threshold, indicating potential DDOS attack.",
+                        ip_id=str(uuid.uuid4()),
+                    )
+
+                    api_initializer.database_handler.save_blocked_ip_to_blocked_ips(
+                        blocked_ip=blocked_ip
+                    )
+
+                    return ORJSONResponse(
+                        status_code=403,
+                        content={
+                            "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
+                        },
+                    )
+
+                if warnings_count >= 2 and warnings_count <= max_rate_limit_warnings:
+                    cooldown_seconds = min(300, 30 * warnings_count)
+                    self.cooldowns_per_ip[client_ip] = now + timedelta(
+                        seconds=cooldown_seconds
+                    )
+                    return ORJSONResponse(
+                        status_code=429,
+                        headers={"Retry-After": str(cooldown_seconds)},
+                        content={
+                            "message": "Rate limit exceeded. Please try again later.",
+                            "retry_after_seconds": cooldown_seconds,
+                        },
+                    )
 
                 return ORJSONResponse(
                     status_code=429,
                     content={"message": "Rate limit exceeded. Please try again later."},
                 )
-            else:
-                # Increment request count
-                request_count += 1
 
-            # Update IP stats
-            self.request_count_per_ip[client_ip] = (
-                request_count,
-                warnings_count,
-                datetime.now(),
-            )
+            timestamps.append(now)
 
-            # Check if warnings exceed threshold (block permanently)
-            if warnings_count > max_rate_limit_warnings:
-                logger.info(
-                    info.CLIENT_IP_BLOCKED(
-                        client_ip=client_ip,
-                        requests_count=request_count,
-                        rate_limit_warnings=warnings_count,
-                    )
-                )
+        return await call_next(request)
 
-                blocked_ip = BlockedIPS(
-                    ip=client_ip,
-                    block_reason="The IP has exceeded the rate limit warnings threshold, indicating potential DDOS attack.",
-                    ip_id=str(uuid.uuid4()),
-                )
-
-                api_initializer.database_handler.save_blocked_ip_to_blocked_ips(
-                    blocked_ip=blocked_ip
-                )
-
-                return ORJSONResponse(
-                    status_code=403,
-                    content={
-                        "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
-                    },
-                )
-
-        # Process the request
-        response = await call_next(request)
-        return response
+    @staticmethod
+    def _get_bucket(path: str) -> str:
+        if "/signin" in path or "/signup" in path or "/auth/" in path:
+            return "auth"
+        if "/upload" in path or "/storage/" in path or "/cdn/" in path:
+            return "uploads"
+        if "/send_message" in path or "/load_messages" in path or "/ws" in path:
+            return "messages"
+        return "default"
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):

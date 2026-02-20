@@ -16,13 +16,13 @@ class ActivityAudit(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     activity_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, unique=True
+        String(36), nullable=False, unique=True, index=True
     )  # UUID as string
     activity_type: Mapped[str] = mapped_column(
-        String(50), nullable=False
+        String(50), nullable=False, index=True
     )  # 'file_upload', 'user_joined', 'channel_created', etc.
     user_id: Mapped[str] = mapped_column(
-        String(36), nullable=False
+        String(36), nullable=False, index=True
     )  # User who performed the activity
 
     # Activity details
@@ -38,10 +38,10 @@ class ActivityAudit(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=date_in_gmt, nullable=False
+        DateTime(timezone=True), default=date_in_gmt, nullable=False, index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=date_in_gmt, onupdate=date_in_gmt, nullable=False
+        DateTime(timezone=True), default=date_in_gmt, onupdate=date_in_gmt, nullable=False
     )
 
     def __repr__(self) -> str:

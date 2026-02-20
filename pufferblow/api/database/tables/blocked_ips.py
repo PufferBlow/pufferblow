@@ -15,10 +15,13 @@ class BlockedIPS(Base):
     __tablename__ = "blocked_ips"
 
     ip_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
-    ip: Mapped[str] = mapped_column(String, nullable=False)
+    ip: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     block_reason: Mapped[str] = mapped_column(String, nullable=False)
     blocked_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: date_in_gmt("%Y-%m-%d %H:%M:%S"), nullable=False
+        DateTime(timezone=True),
+        default=lambda: date_in_gmt("%Y-%m-%d %H:%M:%S"),
+        nullable=False,
+        index=True,
     )
 
     def __repr__(self):

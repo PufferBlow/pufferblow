@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy import ARRAY, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID as SA_UUID
@@ -20,19 +21,24 @@ class Messages(Base):
     hashed_message: Mapped[str] = mapped_column(String, nullable=False)
     raw_message: str | None = None
 
-    sender_id: Mapped[str] = mapped_column(
+    sender_id: Mapped[UUID] = mapped_column(
         SA_UUID(as_uuid=True),
         ForeignKey("users.user_id", ondelete="CASCADE"),
+        index=True,
         nullable=False,
     )
     channel_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("channels.channel_id", ondelete="CASCADE"), nullable=True
+        String,
+        ForeignKey("channels.channel_id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
     )
-    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     sent_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         default=lambda: date_in_gmt(format="%Y-%m-%d %H:%M:%S"),
+        index=True,
     )
 
     attachments: Mapped[list[str] | None] = mapped_column(

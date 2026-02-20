@@ -111,7 +111,9 @@ class UserManager:
 
         return new_user
 
-    def sign_in(self, username: str, password: str) -> tuple[Users | None, bool]:
+    def sign_in(
+        self, username: str, password: str
+    ) -> tuple[Users | None, bool, str | None]:
         """
         Sign in a user
 
@@ -120,7 +122,7 @@ class UserManager:
             password (str): The account's password.
 
         Returns:
-            tuple: A tuple of (user, success) where user is a Users object or None, and success is a bool.
+            tuple: (user, success, failure_reason)
         """
         user = self.database_handler.get_user(username=username)
 
@@ -132,10 +134,14 @@ class UserManager:
             user_id=user.user_id, data=user.password, associated_to="password"
         )
 
-        if password == user_password:
-            return (user, True)
+        current_instance = f"{self.config.API_HOST}:{self.config.API_PORT}"
+        if str(user.origin_server) != current_instance:
+            return (None, False, "instance_mismatch")
 
-        return (None, False)
+        if password == user_password:
+            return (user, True, None)
+
+        return (None, False, "invalid_password")
 
     def list_users(self, viewer_user_id: str, auth_token: str) -> list[dict]:
         """

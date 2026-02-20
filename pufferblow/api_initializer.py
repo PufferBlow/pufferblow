@@ -1,7 +1,10 @@
+import sys
+
 from loguru import logger
 
 # Authentification token manager
 from pufferblow.api.auth.auth_token_manager import AuthTokenManager
+from pufferblow.api.auth.decentralized_auth_manager import DecentralizedAuthManager
 
 # Channels manager
 from pufferblow.api.channels.channels_manager import ChannelsManager
@@ -34,8 +37,8 @@ try:
 
     STORAGE_AVAILABLE = True
 except ImportError:
-    CDN_AVAILABLE = False
-    CDNManager = None
+    STORAGE_AVAILABLE = False
+    StorageManager = None
 
 # Background tasks manager
 from pufferblow.api.background_tasks import BackgroundTasksManager
@@ -80,11 +83,16 @@ class APIInitializer:
     storage_manager: StorageManager = None
     background_tasks_manager: BackgroundTasksManager = None
     security_checks_handler: SecurityChecksHandler = None
+    decentralized_auth_manager: DecentralizedAuthManager = None
 
     is_loaded: bool = False
 
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def _is_cli_setup_mode() -> bool:
+        return len(sys.argv) > 1 and "setup" in sys.argv
 
     def load_objects(self, database_uri: str | None = None) -> None:
         """
@@ -158,6 +166,8 @@ class APIInitializer:
                 "allocated_space_gb": self.config.STORAGE_ALLOCATED_GB,
                 "api_host": self.config.API_HOST,
                 "api_port": self.config.API_PORT,
+                "sse_enabled": self.config.STORAGE_SSE_ENABLED,
+                "sse_key": self.config.STORAGE_SSE_KEY,
                 "bucket_name": self.config.S3_BUCKET_NAME,
                 "region": self.config.S3_REGION,
                 "access_key": self.config.S3_ACCESS_KEY,
@@ -184,8 +194,6 @@ class APIInitializer:
         )
 
         # Register background tasks (but don't start the scheduler in CLI)
-        import sys
-
         is_cli = len(sys.argv) > 1 and sys.argv[1] in ["version", "setup", "serve"]
         if not is_cli or (is_cli and len(sys.argv) > 1 and sys.argv[1] == "serve"):
             # Only register/start background tasks in server mode
@@ -197,6 +205,11 @@ class APIInitializer:
             user_manager=self.user_manager,
             channels_manager=self.channels_manager,
             auth_token_manager=self.auth_token_manager,
+        )
+
+        # Init decentralized auth manager for node-aware authentication flow
+        self.decentralized_auth_manager = DecentralizedAuthManager(
+            database_handler=self.database_handler
         )
 
         # Init WebRTC manager
@@ -282,9 +295,7 @@ class APIInitializer:
 
         if not self.config_handler.check_config():
             # During setup, missing config is expected - don't log error
-            import sys
-
-            if len(sys.argv) > 1 and "setup" in sys.argv:
+            if self._is_cli_setup_mode():
                 pass  # Silently skip error during setup
             else:
                 logger.error(
@@ -302,9 +313,7 @@ class APIInitializer:
                 self.config = Config(config=config)
         except FileNotFoundError:
             # Config might not exist during setup - create empty config
-            import sys
-
-            if len(sys.argv) > 1 and "setup" in sys.argv:
+            if self._is_cli_setup_mode():
                 self.config = Config()  # Use defaults during setup
             else:
                 logger.error("Configuration file not found and not in setup mode")

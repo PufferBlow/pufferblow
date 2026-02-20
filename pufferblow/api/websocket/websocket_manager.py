@@ -1,6 +1,7 @@
 
 from fastapi import WebSocket
 from loguru import logger
+from pufferblow.api.utils.extract_user_id import extract_user_id
 
 
 class WebSocketsManager:
@@ -10,6 +11,25 @@ class WebSocketsManager:
         # Active connections now store user permissions
         # Format: {websocket: {"user_id": str, "auth_token": str, "accessible_channels": list[str]}}
         self.active_connections: dict[WebSocket, dict] = {}
+
+    @staticmethod
+    def _connection_context(connection_info) -> tuple[str, str]:
+        """
+        Normalize connection metadata for both legacy(list) and global(dict) formats.
+        Returns (user_id, channel_id_or_scope).
+        """
+        if isinstance(connection_info, dict):
+            return (
+                str(connection_info.get("user_id", "unknown")),
+                "global",
+            )
+        if isinstance(connection_info, list) and len(connection_info) >= 2:
+            auth_token, channel_id = connection_info[0], connection_info[1]
+            try:
+                return extract_user_id(auth_token), str(channel_id)
+            except Exception:
+                return ("unknown", str(channel_id))
+        return ("unknown", "unknown")
 
     async def connect(
         self, websocket: WebSocket, auth_token: str, channel_id: str
@@ -30,8 +50,10 @@ class WebSocketsManager:
             await websocket.accept()
             self.active_connections[websocket] = [auth_token, channel_id]
 
-            # Extract user ID from auth token for logging (first part of JWT-like token)
-            user_id = auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
+            try:
+                user_id = extract_user_id(auth_token)
+            except Exception:
+                user_id = auth_token[:8]
 
             logger.info(
                 f"WebSocket connected | User: {user_id} | Channel: {channel_id} | Total connections: {len(self.active_connections)}"
@@ -60,9 +82,10 @@ class WebSocketsManager:
         try:
             await websocket.accept()
 
-            # Extract user_id from auth_token
-            # auth_token is in format "user_id.encrypted_token"
-            user_id = auth_token.split(".")[0] if "." in auth_token else auth_token
+            try:
+                user_id = extract_user_id(auth_token)
+            except Exception:
+                user_id = auth_token[:8]
 
             self.active_connections[websocket] = {
                 "user_id": user_id,
@@ -97,11 +120,7 @@ class WebSocketsManager:
             # Get connection info before removing from active connections
             connection_info = self.active_connections.get(websocket)
             if connection_info:
-                auth_token = connection_info[0]
-                channel_id = connection_info[1]
-                user_id = (
-                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
-                )
+                user_id, channel_id = self._connection_context(connection_info)
                 logger.info(
                     f"WebSocket disconnected | User: {user_id} | Channel: {channel_id} | Remaining connections: {len(self.active_connections) - 1}"
                 )
@@ -138,11 +157,7 @@ class WebSocketsManager:
             user_id = "unknown"
             channel_id = "unknown"
             if connection_info:
-                auth_token = connection_info[0]
-                channel_id = connection_info[1]
-                user_id = (
-                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
-                )
+                user_id, channel_id = self._connection_context(connection_info)
 
             message_preview = (
                 str(message)[:50] + "..." if len(str(message)) > 50 else str(message)
@@ -210,11 +225,12 @@ class WebSocketsManager:
         active_connections_copy = self.active_connections.copy()
 
         # Count recipients first
-        recipients = [
-            (ws, auth_token)
-            for ws, (auth_token, ws_channel_id) in active_connections_copy.items()
-            if ws_channel_id == channel_id
-        ]
+        recipients = []
+        for ws, connection_info in active_connections_copy.items():
+            if isinstance(connection_info, list) and len(connection_info) >= 2:
+                auth_token, ws_channel_id = connection_info[0], connection_info[1]
+                if ws_channel_id == channel_id:
+                    recipients.append((ws, auth_token))
         total_recipients = len(recipients)
 
         # Get message type info for logging
@@ -284,11 +300,7 @@ class WebSocketsManager:
             user_id = "unknown"
             channel_id = "unknown"
             if connection_info:
-                auth_token = connection_info[0]
-                channel_id = connection_info[1]
-                user_id = (
-                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
-                )
+                user_id, channel_id = self._connection_context(connection_info)
 
             message_type = message.get("type", "unknown")
             message_preview = (
@@ -306,10 +318,7 @@ class WebSocketsManager:
             connection_info = self.active_connections.get(websocket)
             user_id = "unknown"
             if connection_info:
-                auth_token = connection_info[0]
-                user_id = (
-                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
-                )
+                user_id, _ = self._connection_context(connection_info)
 
             logger.error(f"Personal message failed | User: {user_id} | Error: {str(e)}")
 
@@ -427,8 +436,8 @@ class WebSocketsManager:
             # Extract channel IDs from the results
             accessible_channel_ids = []
             for channel_data in channels_data:
-                if channel_data and hasattr(channel_data, "channel_id"):
-                    accessible_channel_ids.append(channel_data[0].channel_id)
+                if hasattr(channel_data, "channel_id"):
+                    accessible_channel_ids.append(channel_data.channel_id)
                 elif isinstance(channel_data, tuple) and len(channel_data) > 0:
                     channel_obj = channel_data[0]
                     if hasattr(channel_obj, "channel_id"):

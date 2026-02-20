@@ -53,6 +53,27 @@ cli.add_typer(
 # Init console
 console = Console()
 
+INFORMATIVE_LOG_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | "
+    "request_id={extra[request_id]} | method={extra[method]} | path={extra[path]} | "
+    "status={extra[status_code]} | duration_ms={extra[duration_ms]} | client_ip={extra[client_ip]} | "
+    "{name}:{function}:{line} | {message}"
+)
+
+
+def _enrich_log_record(record: dict) -> None:
+    """
+    Ensure commonly used structured fields always exist in log records.
+    """
+    extra = record["extra"]
+    extra.setdefault("request_id", "-")
+    extra.setdefault("method", "-")
+    extra.setdefault("path", "-")
+    extra.setdefault("status_code", "-")
+    extra.setdefault("duration_ms", "-")
+    extra.setdefault("client_ip", "-")
+
+
 # Config is loaded per-command as needed to avoid import-time issues
 
 
@@ -240,6 +261,171 @@ def setup_server(is_update: bool | None = False) -> None:
     )
 
 
+def _launch_textual_setup(has_existing_config: bool):
+    """
+    Launch the Textual setup wizard.
+
+    Returns:
+        tuple[str, object | None]:
+            - ("ok", payload) when setup input is collected.
+            - ("cancelled", None) when user cancels.
+            - ("missing_dependency", None) when Textual is not installed.
+    """
+    try:
+        from pufferblow.cli.textual_setup import SetupWizardApp
+    except ImportError:
+        return ("missing_dependency", None)
+
+    app = SetupWizardApp(has_existing_config=has_existing_config)
+    app.run()
+    if app.result is None:
+        return ("cancelled", None)
+    return ("ok", app.result)
+
+
+def _apply_server_configuration(
+    *,
+    is_update: bool,
+    server_name: str,
+    server_description: str,
+    server_welcome_message: str,
+) -> None:
+    if is_update:
+        api_initializer.server_manager.update_server(
+            server_name=server_name,
+            description=server_description,
+            server_welcome_message=server_welcome_message,
+        )
+        return
+
+    api_initializer.server_manager.create_server(
+        server_name=server_name,
+        description=server_description,
+        server_welcome_message=server_welcome_message,
+    )
+
+
+def _run_textual_setup_payload(payload, config_handler: ConfigHandler) -> None:
+    """
+    Execute setup workflow from Textual payload.
+    """
+    if payload.mode in ("server_only", "server_update"):
+        if not config_handler.check_config():
+            logger.error(
+                "No config file found. Run full setup first to initialize the server."
+            )
+            raise typer.Exit(code=1)
+
+        config = Config(config=config_handler.load_config())
+        database_uri = Database._create_database_uri(
+            username=config.USERNAME,
+            password=config.DATABASE_PASSWORD,
+            host=config.DATABASE_HOST,
+            port=config.DATABASE_PORT,
+            database_name=config.DATABASE_NAME,
+        )
+
+        if not Database.check_database_existense(database_uri):
+            logger.error(
+                "Configured database is unreachable. Fix config and rerun setup."
+            )
+            raise typer.Exit(code=1)
+
+        api_initializer.load_objects(database_uri)
+
+        if (
+            payload.mode == "server_only"
+            and api_initializer.server_manager.check_server_exists()
+        ):
+            logger.error(
+                "Server already exists. Use update mode to modify server information."
+            )
+            raise typer.Exit(code=1)
+
+        _apply_server_configuration(
+            is_update=payload.mode == "server_update",
+            server_name=payload.server_name,
+            server_description=payload.server_description,
+            server_welcome_message=payload.server_welcome_message,
+        )
+        logger.info("Server setup completed via Textual wizard.")
+        raise typer.Exit(code=0)
+
+    config = Config()
+    database_uri = Database._create_database_uri(
+        username=payload.database_username,
+        password=payload.database_password,
+        host=payload.database_host,
+        port=int(payload.database_port),
+        database_name=payload.database_name,
+    )
+
+    if not Database.check_database_existense(database_uri):
+        logger.error(
+            "The specified database does not exist. Verify credentials and rerun setup."
+        )
+        raise typer.Exit(code=1)
+
+    config.DATABASE_NAME = payload.database_name
+    config.USERNAME = payload.database_username
+    config.DATABASE_PASSWORD = payload.database_password
+    config.DATABASE_HOST = payload.database_host
+    config.DATABASE_PORT = payload.database_port
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console,
+    ) as progress:
+        overall_task = progress.add_task("Setting up PufferBlow...", total=3)
+        progress.update(
+            overall_task, advance=1, description="Initializing system components..."
+        )
+        api_initializer.load_objects(database_uri)
+
+        if api_initializer.server_manager.check_server_exists():
+            logger.error(
+                "Server already exists. Use update mode instead of full setup."
+            )
+            raise typer.Exit(code=1)
+
+        progress.update(
+            overall_task,
+            advance=1,
+            description="Creating server and owner account...",
+        )
+        api_initializer.database_handler.initialize_default_data()
+        _apply_server_configuration(
+            is_update=False,
+            server_name=payload.server_name,
+            server_description=payload.server_description,
+            server_welcome_message=payload.server_welcome_message,
+        )
+        auth_token = api_initializer.user_manager.sign_up(
+            username=payload.owner_username,
+            password=payload.owner_password,
+            is_admin=True,
+            is_owner=True,
+        ).raw_auth_token
+
+        progress.update(overall_task, advance=1, description="Saving configuration...")
+        config_handler.write_config(config=config.export_toml())
+        progress.update(overall_task, completed=3)
+
+    console.print("[green]DONE Setup completed successfully![/green]")
+    auth_panel = Panel.fit(
+        f"[bold green]{auth_token}[/bold green]\n\n[bold red]DO NOT SHARE THIS TOKEN![/bold red]",
+        title="[bold yellow]Your Server Auth Token[/bold yellow]",
+        border_style="blue",
+    )
+    console.print(auth_panel)
+    console.print(
+        f"[green]DONE Configuration saved to '{config_handler.config_file_path}'[/green]"
+    )
+    raise typer.Exit(code=0)
+
+
 @cli.command()
 def version():
     """pufferblow's current version"""
@@ -258,27 +444,32 @@ def setup(
     ),
 ):
     """setup pufferblow"""
-    # Handle legacy flag-based setup (backwards compatibility)
-    if is_setup_server or is_update_server:
-        config_handler = ConfigHandler()
-        is_config_present = config_handler.check_config()
-
-    # Interactive setup wizard for new users
     config_handler = ConfigHandler()
     is_config_present = config_handler.check_config()
 
     if not is_setup_server and not is_update_server:
+        setup_state, payload = _launch_textual_setup(
+            has_existing_config=is_config_present
+        )
+        if setup_state == "ok":
+            _run_textual_setup_payload(payload, config_handler=config_handler)
+            return
+        if setup_state == "cancelled":
+            console.print("[dim]Setup cancelled. Goodbye!\n[/dim]")
+            raise typer.Exit(code=0)
+
+        logger.warning(
+            "Textual is not installed. Falling back to legacy prompt-based setup."
+        )
         display_setup_welcome()
         setup_choice = choose_setup_mode()
-
-        if setup_choice == "4":  # Cancel
+        if setup_choice == "4":
             console.print("[dim]Setup cancelled. Goodbye!\n[/dim]")
-            exit(0)
-        elif setup_choice == "2":  # Server Configuration Only
+            raise typer.Exit(code=0)
+        if setup_choice == "2":
             is_setup_server = True
-        elif setup_choice == "3":  # Update Existing Server
+        elif setup_choice == "3":
             is_update_server = True
-        # setup_choice == "1" falls through to full setup (current default behavior)
 
     # Handle flag-based setup (legacy or interactive selection results)
     if is_setup_server or is_update_server:
@@ -547,6 +738,7 @@ def serve(
     api_initializer.database_handler.setup_tables(Base)
 
     log_level_str = LOG_LEVEL_MAP[log_level]
+    logger.configure(patcher=_enrich_log_record)
 
     INTERCEPT_HANDLER = InterceptHandler()
     logging.basicConfig(handlers=[INTERCEPT_HANDLER], level=log_level_str)
@@ -570,7 +762,12 @@ def serve(
             logging.getLogger(name).handlers = [INTERCEPT_HANDLER]
 
     # Always configure loguru to write to the config-defined log file, regardless of development/production mode
-    logger.add(config.LOGS_PATH, rotation="10 MB", level=log_level_str)
+    logger.add(
+        config.LOGS_PATH,
+        rotation="10 MB",
+        level=log_level_str,
+        format=INFORMATIVE_LOG_FORMAT,
+    )
 
     # Check if in development mode (hot reload)
     if dev:
@@ -595,7 +792,16 @@ def serve(
             dev = False
 
     if not dev:
-        logger.configure(handlers=[{"sink": sys.stdout}])
+        logger.configure(
+            patcher=_enrich_log_record,
+            handlers=[
+                {
+                    "sink": sys.stdout,
+                    "level": log_level_str,
+                    "format": INFORMATIVE_LOG_FORMAT,
+                }
+            ],
+        )
 
         StubbedGunicornLogger.log_level = log_level_str
 

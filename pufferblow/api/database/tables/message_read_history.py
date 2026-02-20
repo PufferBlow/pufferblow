@@ -26,9 +26,9 @@ class MessageReadHistory(Base):
         ARRAY(String), default=list, nullable=False  # Avoid mutable default
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=date_in_gmt, nullable=False
+        DateTime(timezone=True), default=date_in_gmt, nullable=False
     )
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (

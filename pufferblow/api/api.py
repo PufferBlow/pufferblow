@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import sys
+from time import perf_counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from fastapi import (
     Depends,
     FastAPI,
     Form,
+    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -19,9 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
-
-# TODO: BLock known IPs https://www.ipdeny.com/ipblocks/
-
+from pufferblow.api.schemas import UploadAuthForm
 
 # Pydantic models for request bodies and query parameters
 class SignupRequest(BaseModel):
@@ -32,6 +32,10 @@ class SignupRequest(BaseModel):
 class SigninRequest(BaseModel):
     username: str
     password: str
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
 
 
 class UserProfileRequest(BaseModel):
@@ -253,6 +257,13 @@ async def parse_send_message_form(
     return form_data, attachments
 
 
+# Dependency to parse auth token form data
+async def parse_upload_auth_form(
+    auth_token: str = Form(..., description="User's authentication token"),
+) -> UploadAuthForm:
+    return UploadAuthForm(auth_token=auth_token)
+
+
 class CDNFilesRequest(BaseModel):
     auth_token: str = Field(min_length=1)
     directory: str = Field(default="uploads", min_length=1)
@@ -312,6 +323,7 @@ from pufferblow.api_initializer import api_initializer
 
 # Middlewares
 from pufferblow.middlewares import RateLimitingMiddleware, SecurityMiddleware
+from pufferblow.api.routes.auth import router as decentralized_auth_router
 
 
 async def check_if_file_is_protected(file_url: str) -> bool:
@@ -358,8 +370,12 @@ async def check_if_file_is_protected(file_url: str) -> bool:
 @asynccontextmanager
 async def lifespan(api: FastAPI):
     """API startup handler"""
+    logger.info("API_STARTUP_BEGIN")
     if not api_initializer.is_loaded:
         api_initializer.load_objects()
+        logger.info("API_INITIALIZER_LOADED")
+    else:
+        logger.info("API_INITIALIZER_ALREADY_LOADED")
 
     # Start background tasks scheduler
     from pufferblow.api.background_tasks.background_tasks_manager import (
@@ -368,7 +384,9 @@ async def lifespan(api: FastAPI):
 
     # Use the background tasks lifespan context
     async with lifespan_background_tasks():
+        logger.info("API_STARTUP_COMPLETE")
         yield
+    logger.info("API_SHUTDOWN_COMPLETE")
 
 
 # Init the API
@@ -401,6 +419,55 @@ api.add_middleware(
 )
 api.add_middleware(SecurityMiddleware)
 api.add_middleware(RateLimitingMiddleware)
+api.include_router(decentralized_auth_router, tags=["decentralized-auth"])
+
+@api.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    started_at = perf_counter()
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if not client_ip and request.client:
+        client_ip = request.client.host
+
+    request_logger = logger.bind(
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        client_ip=client_ip or "<unknown>",
+    )
+    request_logger.info("REQUEST_START")
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = int((perf_counter() - started_at) * 1000)
+        request_logger.exception("REQUEST_FAILED duration_ms={duration_ms}", duration_ms=elapsed_ms)
+        raise
+
+    elapsed_ms = int((perf_counter() - started_at) * 1000)
+    status_code = response.status_code
+    response.headers["X-Request-ID"] = request_id
+
+    if status_code >= 500:
+        request_logger.error(
+            "REQUEST_END status_code={status_code} duration_ms={duration_ms}",
+            status_code=status_code,
+            duration_ms=elapsed_ms,
+        )
+    elif status_code >= 400:
+        request_logger.warning(
+            "REQUEST_END status_code={status_code} duration_ms={duration_ms}",
+            status_code=status_code,
+            duration_ms=elapsed_ms,
+        )
+    else:
+        request_logger.info(
+            "REQUEST_END status_code={status_code} duration_ms={duration_ms}",
+            status_code=status_code,
+            duration_ms=elapsed_ms,
+        )
+
+    return response
 
 
 @api.get("/")
@@ -475,11 +542,19 @@ async def signup_new_user(request: SignupRequest):
         )
     )
 
+    session_tokens = api_initializer.auth_token_manager.issue_session_tokens(
+        user_id=str(user_data.user_id),
+        origin_server=user_data.origin_server,
+    )
+
     return {
         "status_code": 201,
         "message": "Account created successfully",
-        "auth_token": user_data.raw_auth_token,
-        "auth_token_expire_time": user_data.auth_token_expire_time,
+        "auth_token": session_tokens["access_token"],
+        "refresh_token": session_tokens["refresh_token"],
+        "token_type": session_tokens["token_type"],
+        "auth_token_expire_time": session_tokens["access_token_expires_at"],
+        "refresh_token_expire_time": session_tokens["refresh_token_expires_at"],
     }
 
 
@@ -502,11 +577,16 @@ async def signin_user(query: SigninQuery = Depends()):
             detail="The provided username does not exist or could not be found. Please make sure you have entered a valid username and try again.",
         )
 
-    user, is_signin_successed = api_initializer.user_manager.sign_in(
+    user, is_signin_successful, failure_reason = api_initializer.user_manager.sign_in(
         username=query.username, password=query.password
     )
 
-    if not is_signin_successed:
+    if not is_signin_successful:
+        if failure_reason == "instance_mismatch":
+            raise exceptions.HTTPException(
+                status_code=403,
+                detail="This account belongs to a different instance and cannot sign in on this server.",
+            )
         raise exceptions.HTTPException(
             status_code=401,
             detail="The provided password is incorrect. Please try again.",
@@ -530,10 +610,66 @@ async def signin_user(query: SigninQuery = Depends()):
         )
     )
 
+    session_tokens = api_initializer.auth_token_manager.issue_session_tokens(
+        user_id=str(user.user_id),
+        origin_server=user.origin_server,
+    )
+
     return {
         "status_code": 200,
         "message": "Signin successfully",
-        "auth_token": user.auth_token,
+        "auth_token": session_tokens["access_token"],
+        "refresh_token": session_tokens["refresh_token"],
+        "token_type": session_tokens["token_type"],
+        "auth_token_expire_time": session_tokens["access_token_expires_at"],
+        "refresh_token_expire_time": session_tokens["refresh_token_expires_at"],
+    }
+
+
+@api.post("/api/v1/auth/refresh", status_code=200)
+async def refresh_auth_token(request: RefreshTokenRequest):
+    """
+    Refresh an access token using a valid refresh token.
+    """
+    try:
+        payload = api_initializer.auth_token_manager.validate_refresh_token(
+            refresh_token=request.refresh_token
+        )
+    except ValueError as exc:
+        raise exceptions.HTTPException(status_code=401, detail=str(exc))
+
+    user_id = str(payload["uid"])
+    user = api_initializer.database_handler.get_user(user_id=user_id)
+    if user is None:
+        raise exceptions.HTTPException(status_code=404, detail="User not found")
+
+    # Rotate refresh tokens on refresh for improved security.
+    api_initializer.auth_token_manager.revoke_refresh_token(request.refresh_token)
+    session_tokens = api_initializer.auth_token_manager.issue_session_tokens(
+        user_id=user_id,
+        origin_server=user.origin_server,
+    )
+
+    return {
+        "status_code": 200,
+        "message": "Token refreshed successfully",
+        "auth_token": session_tokens["access_token"],
+        "refresh_token": session_tokens["refresh_token"],
+        "token_type": session_tokens["token_type"],
+        "auth_token_expire_time": session_tokens["access_token_expires_at"],
+        "refresh_token_expire_time": session_tokens["refresh_token_expires_at"],
+    }
+
+
+@api.post("/api/v1/auth/revoke", status_code=200)
+async def revoke_refresh_token_route(request: RefreshTokenRequest):
+    """
+    Revoke a refresh token (logout session).
+    """
+    api_initializer.auth_token_manager.revoke_refresh_token(request.refresh_token)
+    return {
+        "status_code": 200,
+        "message": "Refresh token revoked successfully",
     }
 
 
@@ -762,30 +898,20 @@ async def reset_users_auth_token_route(request: ResetTokenRequest):
                 status_code=403,
             )
 
-    new_auth_token = f"{user_id}.{api_initializer.auth_token_manager.create_token()}"
-
-    ciphered_auth_token, key = api_initializer.hasher.encrypt(data=new_auth_token)
-    ciphered_auth_token = base64.b64encode(ciphered_auth_token).decode("ascii")
-
-    key.user_id = user_id
-    key.associated_to = "auth_token"
-
-    api_initializer.database_handler.update_key(key)
-    new_auth_token_expire_time = (
-        api_initializer.auth_token_manager.create_auth_token_expire_time()
-    )
-
-    api_initializer.database_handler.update_auth_token(
+    user = api_initializer.database_handler.get_user(user_id=user_id)
+    session_tokens = api_initializer.auth_token_manager.issue_session_tokens(
         user_id=user_id,
-        new_auth_token=ciphered_auth_token,
-        new_auth_token_expire_time=new_auth_token_expire_time,
+        origin_server=user.origin_server,
     )
 
     return {
         "status_code": 200,
         "message": "auth_token reset successfully",
-        "auth_token": new_auth_token,
-        "auth_token_expire_time": new_auth_token_expire_time,
+        "auth_token": session_tokens["access_token"],
+        "refresh_token": session_tokens["refresh_token"],
+        "token_type": session_tokens["token_type"],
+        "auth_token_expire_time": session_tokens["access_token_expires_at"],
+        "refresh_token_expire_time": session_tokens["refresh_token_expires_at"],
     }
 
 
@@ -1026,6 +1152,8 @@ async def join_voice_channel_route(auth_token: str, channel_id: str):
                     status_code=409,
                     detail=f"You're already in voice channel {current_channel}. Leave it first or use client prompt to switch.",
                 )
+    except exceptions.HTTPException:
+        raise
     except Exception as e:
         logger.debug(f"Single channel check failed | User: {user_id} | Error: {str(e)}")
 
@@ -1035,7 +1163,7 @@ async def join_voice_channel_route(auth_token: str, channel_id: str):
 
     # WebRTC approach - provide direct WebRTC configuration
     try:
-        result = api_initializer.channels_manager.join_voice_channel(
+        result = await api_initializer.channels_manager.join_voice_channel(
             user_id, channel_id
         )
         logger.debug(
@@ -1119,7 +1247,9 @@ async def leave_voice_channel_route(auth_token: str, channel_id: str):
         f"Voice channel proxy leave attempt | User: {user_id} | Channel: {channel_id}"
     )
 
-    result = api_initializer.channels_manager.leave_voice_channel(user_id, channel_id)
+    result = await api_initializer.channels_manager.leave_voice_channel(
+        user_id, channel_id
+    )
 
     if "error" in result:
         logger.warning(
@@ -3070,7 +3200,7 @@ async def update_server_info_route(request: ServerSettingsRequest):
 
 @api.post("/api/v1/system/upload-avatar", status_code=201)
 async def upload_server_avatar_route(
-    auth_token: str = Form(..., description="User's authentication token"),
+    form_data: UploadAuthForm = Depends(parse_upload_auth_form),
     avatar: UploadFile = Form(..., description="Server avatar image file"),
 ):
     """
@@ -3087,6 +3217,7 @@ async def upload_server_avatar_route(
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
+    auth_token = form_data.auth_token
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if user is server owner
@@ -3228,7 +3359,7 @@ async def upload_server_avatar_route(
 
 @api.post("/api/v1/system/upload-banner", status_code=201)
 async def upload_server_banner_route(
-    auth_token: str = Form(..., description="User's authentication token"),
+    form_data: UploadAuthForm = Depends(parse_upload_auth_form),
     banner: UploadFile = Form(..., description="Server banner image file"),
 ):
     """
@@ -3245,6 +3376,7 @@ async def upload_server_banner_route(
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
+    auth_token = form_data.auth_token
     user_id = extract_user_id(auth_token=auth_token)
 
     # Check if user is server owner
@@ -4313,7 +4445,7 @@ async def channels_messages_websocket_legacy(
         )
 
     # Establish connection using legacy method for backwards compatibility
-    api_initializer.websockets_manager.connect(
+    await api_initializer.websockets_manager.connect(
         websocket=websocket, auth_token=auth_token, channel_id=channel_id
     )
 
@@ -4492,9 +4624,8 @@ async def serve_file_by_hash(file_hash: str):
         if not content_type:
             content_type = file_object.mime_type or "application/octet-stream"
 
-        # Read and return file
-        with open(storage_path, "rb") as f:
-            content = f.read()
+        # Read from storage manager to support transparent SSE decryption.
+        content = await api_initializer.storage_manager.read_file_content(file_path)
 
         return responses.Response(
             content=content,

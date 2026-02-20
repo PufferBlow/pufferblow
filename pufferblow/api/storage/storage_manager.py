@@ -4,11 +4,14 @@ Storage Manager for Pufferblow
 Manages different storage backends and provides unified file operations.
 """
 
+import base64
 import hashlib
+import os
 import uuid
 from typing import Any
 
 import magic  # python-magic for MIME detection
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException, UploadFile
 from loguru import logger
 from PIL import Image
@@ -23,11 +26,17 @@ from .storage_backend import StorageBackend
 class StorageManager:
     """Unified storage manager for different backends"""
 
+    SSE_MAGIC = b"PBSE1"
+    SSE_NONCE_SIZE = 12
+    SSE_KEY_SIZE = 32  # AES-256 key length
+
     def __init__(
         self, storage_config: dict[str, Any], database_handler: DatabaseHandler
     ):
         self.database_handler = database_handler
         self.config = storage_config
+        self.sse_enabled = bool(self.config.get("sse_enabled", False))
+        self.sse_key = self._load_sse_key() if self.sse_enabled else None
 
         # Initialize storage backend
         self.backend = self._create_backend()
@@ -46,6 +55,87 @@ class StorageManager:
         self.MAX_STICKER_SIZE_MB = 5
         self.MAX_GIF_SIZE_MB = 10
         self.MAX_DOCUMENT_SIZE_MB = 10
+
+    def _load_sse_key(self) -> bytes | None:
+        """
+        Load and normalize SSE key material to a 32-byte AES key.
+        """
+        configured_key = self.config.get("sse_key") or os.getenv(
+            "PUFFERBLOW_STORAGE_SSE_KEY"
+        )
+        if not configured_key:
+            logger.warning(
+                "Storage SSE requested but no key provided. Disabling storage SSE."
+            )
+            self.sse_enabled = False
+            return None
+
+        if isinstance(configured_key, bytes):
+            key_bytes = configured_key
+        else:
+            key_text = str(configured_key).strip()
+            if key_text.startswith("base64:"):
+                try:
+                    key_bytes = base64.b64decode(key_text[7:].encode("utf-8"))
+                except Exception:
+                    logger.warning(
+                        "Invalid base64 SSE key format. Falling back to SHA-256 derivation."
+                    )
+                    key_bytes = hashlib.sha256(key_text.encode("utf-8")).digest()
+            else:
+                key_bytes = hashlib.sha256(key_text.encode("utf-8")).digest()
+
+        if len(key_bytes) != self.SSE_KEY_SIZE:
+            key_bytes = hashlib.sha256(key_bytes).digest()
+
+        logger.info("Storage SSE enabled with AES-256 envelope encryption.")
+        return key_bytes
+
+    def _encrypt_for_storage(self, plain_content: bytes) -> bytes:
+        """
+        Encrypt file content before writing to storage backend.
+        """
+        if not self.sse_enabled or not self.sse_key:
+            return plain_content
+
+        nonce = os.urandom(self.SSE_NONCE_SIZE)
+        ciphertext = AESGCM(self.sse_key).encrypt(nonce, plain_content, None)
+        return self.SSE_MAGIC + nonce + ciphertext
+
+    def _decrypt_from_storage(self, stored_content: bytes) -> bytes:
+        """
+        Decrypt previously encrypted storage content.
+        If content is not in SSE envelope format, return as-is for backward compatibility.
+        """
+        if not self.sse_enabled or not self.sse_key:
+            return stored_content
+
+        if not stored_content.startswith(self.SSE_MAGIC):
+            # Backward compatibility for files stored before SSE was enabled.
+            return stored_content
+
+        prefix_len = len(self.SSE_MAGIC)
+        if len(stored_content) <= prefix_len + self.SSE_NONCE_SIZE:
+            raise HTTPException(status_code=500, detail="Corrupted encrypted file")
+
+        nonce_start = prefix_len
+        nonce_end = nonce_start + self.SSE_NONCE_SIZE
+        nonce = stored_content[nonce_start:nonce_end]
+        ciphertext = stored_content[nonce_end:]
+
+        try:
+            return AESGCM(self.sse_key).decrypt(nonce, ciphertext, None)
+        except Exception:
+            raise HTTPException(
+                status_code=500, detail="Failed to decrypt encrypted storage object"
+            )
+
+    async def read_file_content(self, file_path: str) -> bytes:
+        """
+        Read and transparently decrypt storage content.
+        """
+        stored_content = await self.backend.download_file(file_path)
+        return self._decrypt_from_storage(stored_content)
 
     def _create_backend(self) -> StorageBackend:
         """Create storage backend based on configuration"""
@@ -217,8 +307,9 @@ class StorageManager:
         new_filename = f"{file_id}.{extension}"
         storage_path = f"{subdirectory}/{new_filename}"
 
-        # Upload to storage backend
-        url_path = await self.backend.upload_file(content, storage_path)
+        # Encrypt content (if SSE enabled) before upload to storage backend
+        stored_content = self._encrypt_for_storage(content)
+        url_path = await self.backend.upload_file(stored_content, storage_path)
 
         # Register in database
         try:

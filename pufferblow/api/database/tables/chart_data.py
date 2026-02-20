@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String
+from sqlalchemy import JSON, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
@@ -13,6 +13,9 @@ class ChartData(Base):
     """Chart data metrics for server analytics"""
 
     __tablename__ = "chart_data"
+    __table_args__ = (
+        UniqueConstraint("chart_type", "period_type", "time_key", name="uq_chart_data_type_period_key"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chart_type: Mapped[str] = mapped_column(
@@ -25,10 +28,10 @@ class ChartData(Base):
         String(50), nullable=False, index=True
     )  # date/week/month/timestamp string
     time_start: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False
+        DateTime(timezone=True), nullable=False
     )  # Actual start datetime
     time_end: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False
+        DateTime(timezone=True), nullable=False
     )  # Actual end datetime
 
     # Metrics data stored as JSON
@@ -41,12 +44,12 @@ class ChartData(Base):
 
     # Metadata
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         default=lambda: date_in_gmt(format="%Y-%m-%d %H:%M:%S"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         default=lambda: date_in_gmt(format="%Y-%m-%d %H:%M:%S"),
         onupdate=lambda: date_in_gmt(format="%Y-%m-%d %H:%M:%S"),

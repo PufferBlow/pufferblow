@@ -10,12 +10,22 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.database.tables.activity_metrics import ActivityMetrics
+from pufferblow.api.database.tables.activitypub import (
+    ActivityPubActor,
+    ActivityPubFollow,
+    ActivityPubInboxActivity,
+    ActivityPubOutboxActivity,
+)
 from pufferblow.api.database.tables.auth_tokens import AuthTokens
 from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 from pufferblow.api.database.tables.channels import Channels
 from pufferblow.api.database.tables.chart_data import ChartData
 
 # Tables
+from pufferblow.api.database.tables.decentralized_sessions import (
+    DecentralizedAuthChallenge,
+    DecentralizedNodeSession,
+)
 from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
 from pufferblow.api.database.tables.keys import Keys
@@ -102,6 +112,12 @@ class DatabaseHandler:
                 "chart_data",
                 # Activity audit table uses UUID columns which SQLite doesn't support well for tests
                 "activity_audit",
+                "decentralized_auth_challenges",
+                "decentralized_node_sessions",
+                "activitypub_actors",
+                "activitypub_follows",
+                "activitypub_inbox_activities",
+                "activitypub_outbox_activities",
                 # Note: 'users' table is now included for basic user operations with datetime compatibility
                 # Note: 'blocked_ips' table is included for basic functionality
             }
@@ -133,274 +149,14 @@ class DatabaseHandler:
 
     def _create_tables_safely(self, base: DeclarativeBase) -> None:
         """
-        Safely create tables, handling schema evolution.
+        Create all declared tables in a single idempotent call.
         """
         try:
-            # Try creating all tables at once
             base.metadata.create_all(self.database_engine)
             logger.debug("Table creation completed successfully")
         except Exception as e:
             logger.error(f"Table creation failed: {str(e)}")
-            logger.info(
-                "If you have an existing database, you may need to manually update the schema."
-            )
-            logger.info(
-                "Please refer to the migration documentation for schema updates."
-            )
             raise
-
-    def _migrate_table_schema(self) -> None:
-        """
-        Handle schema migrations for existing databases.
-        """
-        try:
-            # Connect to the database
-            with self.database_engine.connect() as conn:
-                # Handle missing columns in server_settings table
-                self._add_missing_server_settings_columns(conn)
-
-                # Handle missing columns in file_objects table
-                self._add_missing_file_objects_columns(conn)
-
-                # Create any completely missing tables
-                from pufferblow.api.database.tables.declarative_base import Base
-
-                try:
-                    Base.metadata.create_all(self.database_engine)
-                    logger.info("Schema migration completed successfully")
-                except Exception as e:
-                    logger.error(
-                        f"Failed to create remaining tables after migration: {str(e)}"
-                    )
-                    raise
-
-        except Exception as e:
-            logger.error(f"Schema migration failed: {str(e)}")
-            raise
-
-    def _add_missing_server_settings_columns(self, conn) -> None:
-        """
-        Add any missing columns to the server_settings table.
-        """
-        # Check and add max_sticker_size column if missing
-        try:
-            result = conn.execute(
-                text(
-                    """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'server_settings' AND column_name = 'max_sticker_size'
-            """
-                )
-            )
-            if not result.fetchone():
-                logger.info("Adding missing max_sticker_size column to server_settings")
-                conn.execute(
-                    text(
-                        """
-                    ALTER TABLE server_settings ADD COLUMN max_sticker_size INTEGER DEFAULT 5
-                """
-                    )
-                )
-                conn.commit()
-                logger.info("Added max_sticker_size column successfully")
-        except Exception as e:
-            logger.warning(
-                f"Could not add max_sticker_size column (may already exist): {str(e)}"
-            )
-
-        # Check and add max_gif_size column if missing
-        try:
-            result = conn.execute(
-                text(
-                    """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'server_settings' AND column_name = 'max_gif_size'
-            """
-                )
-            )
-            if not result.fetchone():
-                logger.info("Adding missing max_gif_size column to server_settings")
-                conn.execute(
-                    text(
-                        """
-                    ALTER TABLE server_settings ADD COLUMN max_gif_size INTEGER DEFAULT 10
-                """
-                    )
-                )
-                conn.commit()
-                logger.info("Added max_gif_size column successfully")
-        except Exception as e:
-            logger.warning(
-                f"Could not add max_gif_size column (may already exist): {str(e)}"
-            )
-
-        # Check and add allowed_gif_extensions column if missing
-        try:
-            result = conn.execute(
-                text(
-                    """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'server_settings' AND column_name = 'allowed_gif_extensions'
-            """
-                )
-            )
-            if not result.fetchone():
-                logger.info(
-                    "Adding missing allowed_gif_extensions column to server_settings"
-                )
-                conn.execute(
-                    text(
-                        """
-                    ALTER TABLE server_settings ADD COLUMN allowed_gif_extensions VARCHAR[] DEFAULT ARRAY['gif']
-                """
-                    )
-                )
-                conn.commit()
-                logger.info("Added allowed_gif_extensions column successfully")
-        except Exception as e:
-            logger.warning(
-                f"Could not add allowed_gif_extensions column (may already exist): {str(e)}"
-            )
-
-        # Check and add rate_limit_duration column if missing
-        try:
-            result = conn.execute(
-                text(
-                    """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'server_settings' AND column_name = 'rate_limit_duration'
-            """
-                )
-            )
-            if not result.fetchone():
-                logger.info(
-                    "Adding missing rate_limit_duration column to server_settings"
-                )
-                conn.execute(
-                    text(
-                        """
-                    ALTER TABLE server_settings ADD COLUMN rate_limit_duration INTEGER DEFAULT 5
-                """
-                    )
-                )
-                conn.commit()
-                logger.info("Added rate_limit_duration column successfully")
-        except Exception as e:
-            logger.warning(
-                f"Could not add rate_limit_duration column (may already exist): {str(e)}"
-            )
-
-        # Check and add max_rate_limit_requests column if missing
-        try:
-            result = conn.execute(
-                text(
-                    """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'server_settings' AND column_name = 'max_rate_limit_requests'
-            """
-                )
-            )
-            if not result.fetchone():
-                logger.info(
-                    "Adding missing max_rate_limit_requests column to server_settings"
-                )
-                conn.execute(
-                    text(
-                        """
-                    ALTER TABLE server_settings ADD COLUMN max_rate_limit_requests INTEGER DEFAULT 6000
-                """
-                    )
-                )
-                conn.commit()
-                logger.info("Added max_rate_limit_requests column successfully")
-        except Exception as e:
-            logger.warning(
-                f"Could not add max_rate_limit_requests column (may already exist): {str(e)}"
-            )
-
-        # Check and add max_rate_limit_warnings column if missing
-        try:
-            result = conn.execute(
-                text(
-                    """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'server_settings' AND column_name = 'max_rate_limit_warnings'
-            """
-                )
-            )
-            if not result.fetchone():
-                logger.info(
-                    "Adding missing max_rate_limit_warnings column to server_settings"
-                )
-                conn.execute(
-                    text(
-                        """
-                    ALTER TABLE server_settings ADD COLUMN max_rate_limit_warnings INTEGER DEFAULT 15
-                """
-                    )
-                )
-                conn.commit()
-                logger.info("Added max_rate_limit_warnings column successfully")
-        except Exception as e:
-            logger.warning(
-                f"Could not add max_rate_limit_warnings column (may already exist): {str(e)}"
-            )
-
-        # Commit any pending changes
-        try:
-            conn.commit()
-        except:
-            pass  # Already committed or no changes to commit
-
-    def _add_missing_file_objects_columns(self, conn) -> None:
-        """
-        Add any missing columns to the file_objects table.
-        """
-        # Check and add filename column if missing
-        try:
-            result = conn.execute(
-                text(
-                    """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'file_objects' AND column_name = 'filename'
-            """
-                )
-            )
-            if not result.fetchone():
-                logger.info("Adding missing filename column to file_objects")
-                conn.execute(
-                    text(
-                        """
-                    ALTER TABLE file_objects ADD COLUMN filename VARCHAR(255)
-                """
-                    )
-                )
-                conn.commit()
-                logger.info("Added filename column successfully")
-        except Exception as e:
-            logger.warning(
-                f"Could not add filename column (may already exist): {str(e)}"
-            )
-
-        # Commit any pending changes
-        try:
-            conn.commit()
-        except:
-            pass  # Already committed or no changes to commit
-
-    def _add_missing_columns_to_existing_tables(self) -> None:
-        """
-        Check for and add any missing columns to existing tables.
-        Always run after table creation to ensure schema compatibility.
-        """
-        try:
-            with self.database_engine.connect() as conn:
-                # Add missing columns to server_settings table
-                self._add_missing_server_settings_columns(conn)
-
-        except Exception as e:
-            logger.warning(f"Schema migration failed: {str(e)}")
-            # This shouldn't prevent setup from continuing, just log warnings
 
     def _ensure_default_server_settings(self) -> None:
         """
@@ -663,6 +419,61 @@ class DatabaseHandler:
         logger.info(
             debug.DEBUG_NEW_AUTH_TOKEN_SAVED(auth_token=hashed_auth_token_value)
         )
+
+    def save_refresh_token(
+        self, user_id: str, token_hash: str, expires_at: datetime.datetime
+    ) -> None:
+        """
+        Persist a refresh token hash for a user.
+        """
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return
+
+        row = AuthTokens(
+            auth_token=f"refresh:{token_hash}",
+            auth_token_expire_time=expires_at,
+            user_id=uuid.UUID(str(user_id)),
+            updated_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+
+        with self.database_session() as session:
+            session.add(row)
+            session.commit()
+
+    def get_refresh_token(self, token_hash: str) -> AuthTokens | None:
+        """
+        Fetch a non-expired refresh token row by hash.
+        """
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return None
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.database_session() as session:
+            stmt = select(AuthTokens).where(
+                and_(
+                    AuthTokens.auth_token == f"refresh:{token_hash}",
+                    AuthTokens.auth_token_expire_time > now,
+                )
+            )
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def delete_refresh_token(self, token_hash: str) -> None:
+        """
+        Revoke a refresh token by deleting its row.
+        """
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return
+
+        with self.database_session() as session:
+            stmt = delete(AuthTokens).where(
+                AuthTokens.auth_token == f"refresh:{token_hash}"
+            )
+            session.execute(stmt)
+            session.commit()
 
     def update_auth_token(
         self, user_id: str, new_auth_token: str, new_auth_token_expire_time: str
@@ -1118,6 +929,348 @@ class DatabaseHandler:
 
         return is_valid
 
+    def create_decentralized_auth_challenge(
+        self,
+        user_id: str,
+        node_id: str,
+        challenge_nonce: str,
+        expires_at: datetime.datetime,
+    ) -> DecentralizedAuthChallenge:
+        """
+        Create a one-time decentralized auth challenge.
+        """
+        challenge = DecentralizedAuthChallenge(
+            user_id=uuid.UUID(str(user_id)),
+            node_id=node_id,
+            challenge_nonce=challenge_nonce,
+            expires_at=expires_at,
+        )
+
+        with self.database_session() as session:
+            session.add(challenge)
+            session.commit()
+            session.refresh(challenge)
+
+        return challenge
+
+    def get_decentralized_auth_challenge(
+        self, challenge_id: str
+    ) -> DecentralizedAuthChallenge | None:
+        """
+        Fetch a decentralized auth challenge by ID.
+        """
+        with self.database_session() as session:
+            stmt = select(DecentralizedAuthChallenge).where(
+                DecentralizedAuthChallenge.challenge_id == uuid.UUID(str(challenge_id))
+            )
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def consume_decentralized_auth_challenge(self, challenge_id: str) -> bool:
+        """
+        Mark a decentralized auth challenge as consumed.
+        """
+        with self.database_session() as session:
+            stmt = (
+                update(DecentralizedAuthChallenge)
+                .values(consumed=True)
+                .where(
+                    DecentralizedAuthChallenge.challenge_id
+                    == uuid.UUID(str(challenge_id))
+                )
+            )
+            result = session.execute(stmt)
+            session.commit()
+            return (result.rowcount or 0) > 0
+
+    def create_decentralized_node_session(
+        self,
+        user_id: str,
+        node_id: str,
+        node_public_key: str,
+        session_token_hash: str,
+        session_token_hint: str,
+        expires_at: datetime.datetime,
+        scopes: str = "chat:read,chat:write",
+    ) -> DecentralizedNodeSession:
+        """
+        Create a decentralized node-bound session.
+        """
+        session_obj = DecentralizedNodeSession(
+            user_id=uuid.UUID(str(user_id)),
+            node_id=node_id,
+            node_public_key=node_public_key,
+            session_token_hash=session_token_hash,
+            session_token_hint=session_token_hint,
+            scopes=scopes,
+            expires_at=expires_at,
+        )
+
+        with self.database_session() as session:
+            session.add(session_obj)
+            session.commit()
+            session.refresh(session_obj)
+
+        return session_obj
+
+    def get_decentralized_node_session_by_hash(
+        self, session_token_hash: str
+    ) -> DecentralizedNodeSession | None:
+        """
+        Fetch an active decentralized node session by token hash.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.database_session() as session:
+            stmt = select(DecentralizedNodeSession).where(
+                and_(
+                    DecentralizedNodeSession.session_token_hash == session_token_hash,
+                    DecentralizedNodeSession.revoked.is_(False),
+                    DecentralizedNodeSession.expires_at > now,
+                )
+            )
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def revoke_decentralized_node_session(self, session_id: str) -> bool:
+        """
+        Revoke a decentralized node session.
+        """
+        with self.database_session() as session:
+            stmt = (
+                update(DecentralizedNodeSession)
+                .values(revoked=True)
+                .where(DecentralizedNodeSession.session_id == uuid.UUID(str(session_id)))
+            )
+            result = session.execute(stmt)
+            session.commit()
+            return (result.rowcount or 0) > 0
+
+    def list_active_decentralized_node_sessions(
+        self, user_id: str
+    ) -> list[DecentralizedNodeSession]:
+        """
+        List active decentralized sessions for a user.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.database_session() as session:
+            stmt = select(DecentralizedNodeSession).where(
+                and_(
+                    DecentralizedNodeSession.user_id == uuid.UUID(str(user_id)),
+                    DecentralizedNodeSession.revoked.is_(False),
+                    DecentralizedNodeSession.expires_at > now,
+                )
+            )
+            result = session.execute(stmt).fetchall()
+            return [row[0] for row in result]
+
+    # ActivityPub
+
+    def upsert_activitypub_actor(
+        self,
+        actor_uri: str,
+        preferred_username: str,
+        inbox_uri: str,
+        outbox_uri: str,
+        public_key_pem: str,
+        is_local: bool,
+        user_id: str | None = None,
+        shared_inbox_uri: str | None = None,
+        private_key_pem: str | None = None,
+    ) -> ActivityPubActor:
+        with self.database_session() as session:
+            stmt = select(ActivityPubActor).where(ActivityPubActor.actor_uri == actor_uri)
+            existing = session.execute(stmt).fetchone()
+            actor = existing[0] if existing else None
+
+            if actor is None:
+                actor = ActivityPubActor(
+                    actor_uri=actor_uri,
+                    preferred_username=preferred_username,
+                    inbox_uri=inbox_uri,
+                    outbox_uri=outbox_uri,
+                    shared_inbox_uri=shared_inbox_uri,
+                    public_key_pem=public_key_pem,
+                    private_key_pem=private_key_pem,
+                    is_local=is_local,
+                    user_id=uuid.UUID(str(user_id)) if user_id else None,
+                    fetched_at=datetime.datetime.now(datetime.timezone.utc)
+                    if not is_local
+                    else None,
+                )
+                session.add(actor)
+            else:
+                actor.preferred_username = preferred_username
+                actor.inbox_uri = inbox_uri
+                actor.outbox_uri = outbox_uri
+                actor.shared_inbox_uri = shared_inbox_uri
+                actor.public_key_pem = public_key_pem
+                actor.is_local = is_local
+                if user_id:
+                    actor.user_id = uuid.UUID(str(user_id))
+                if private_key_pem:
+                    actor.private_key_pem = private_key_pem
+                if not is_local:
+                    actor.fetched_at = datetime.datetime.now(datetime.timezone.utc)
+                session.merge(actor)
+
+            session.commit()
+            session.refresh(actor)
+            return actor
+
+    def get_activitypub_actor_by_uri(self, actor_uri: str) -> ActivityPubActor | None:
+        with self.database_session() as session:
+            stmt = select(ActivityPubActor).where(ActivityPubActor.actor_uri == actor_uri)
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def get_activitypub_actor_by_user_id(self, user_id: str) -> ActivityPubActor | None:
+        with self.database_session() as session:
+            stmt = select(ActivityPubActor).where(
+                ActivityPubActor.user_id == uuid.UUID(str(user_id)),
+                ActivityPubActor.is_local.is_(True),
+            )
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def create_or_update_activitypub_follow(
+        self,
+        local_actor_uri: str,
+        remote_actor_uri: str,
+        follow_activity_uri: str | None = None,
+        accepted: bool = False,
+    ) -> ActivityPubFollow:
+        with self.database_session() as session:
+            stmt = select(ActivityPubFollow).where(
+                ActivityPubFollow.local_actor_uri == local_actor_uri,
+                ActivityPubFollow.remote_actor_uri == remote_actor_uri,
+            )
+            existing = session.execute(stmt).fetchone()
+            follow = existing[0] if existing else None
+
+            if follow is None:
+                follow = ActivityPubFollow(
+                    local_actor_uri=local_actor_uri,
+                    remote_actor_uri=remote_actor_uri,
+                    follow_activity_uri=follow_activity_uri,
+                    accepted=accepted,
+                )
+                session.add(follow)
+            else:
+                follow.accepted = accepted
+                if follow_activity_uri:
+                    follow.follow_activity_uri = follow_activity_uri
+                session.merge(follow)
+
+            session.commit()
+            session.refresh(follow)
+            return follow
+
+    def accept_activitypub_follow(
+        self, local_actor_uri: str, remote_actor_uri: str
+    ) -> bool:
+        with self.database_session() as session:
+            stmt = (
+                update(ActivityPubFollow)
+                .values(accepted=True)
+                .where(
+                    ActivityPubFollow.local_actor_uri == local_actor_uri,
+                    ActivityPubFollow.remote_actor_uri == remote_actor_uri,
+                )
+            )
+            result = session.execute(stmt)
+            session.commit()
+            return (result.rowcount or 0) > 0
+
+    def list_activitypub_followers(
+        self, local_actor_uri: str, accepted_only: bool = True
+    ) -> list[ActivityPubFollow]:
+        with self.database_session() as session:
+            stmt = select(ActivityPubFollow).where(
+                ActivityPubFollow.local_actor_uri == local_actor_uri
+            )
+            if accepted_only:
+                stmt = stmt.where(ActivityPubFollow.accepted.is_(True))
+            result = session.execute(stmt).fetchall()
+            return [row[0] for row in result]
+
+    def list_activitypub_following(self, remote_actor_uri: str) -> list[ActivityPubFollow]:
+        with self.database_session() as session:
+            stmt = select(ActivityPubFollow).where(
+                ActivityPubFollow.remote_actor_uri == remote_actor_uri
+            )
+            result = session.execute(stmt).fetchall()
+            return [row[0] for row in result]
+
+    def store_activitypub_inbox_activity(
+        self,
+        activity_uri: str,
+        activity_type: str,
+        actor_uri: str,
+        payload_json: str,
+        target_actor_uri: str | None = None,
+    ) -> ActivityPubInboxActivity:
+        with self.database_session() as session:
+            existing_stmt = select(ActivityPubInboxActivity).where(
+                ActivityPubInboxActivity.activity_uri == activity_uri
+            )
+            existing = session.execute(existing_stmt).fetchone()
+            if existing:
+                return existing[0]
+
+            activity = ActivityPubInboxActivity(
+                activity_uri=activity_uri,
+                activity_type=activity_type,
+                actor_uri=actor_uri,
+                payload_json=payload_json,
+                target_actor_uri=target_actor_uri,
+            )
+            session.add(activity)
+            session.commit()
+            session.refresh(activity)
+            return activity
+
+    def store_activitypub_outbox_activity(
+        self,
+        activity_uri: str,
+        activity_type: str,
+        actor_uri: str,
+        payload_json: str,
+        object_uri: str | None = None,
+    ) -> ActivityPubOutboxActivity:
+        with self.database_session() as session:
+            existing_stmt = select(ActivityPubOutboxActivity).where(
+                ActivityPubOutboxActivity.activity_uri == activity_uri
+            )
+            existing = session.execute(existing_stmt).fetchone()
+            if existing:
+                return existing[0]
+
+            activity = ActivityPubOutboxActivity(
+                activity_uri=activity_uri,
+                activity_type=activity_type,
+                actor_uri=actor_uri,
+                payload_json=payload_json,
+                object_uri=object_uri,
+            )
+            session.add(activity)
+            session.commit()
+            session.refresh(activity)
+            return activity
+
+    def get_activitypub_outbox_activities(
+        self, actor_uri: str, limit: int = 20, offset: int = 0
+    ) -> list[ActivityPubOutboxActivity]:
+        with self.database_session() as session:
+            stmt = (
+                select(ActivityPubOutboxActivity)
+                .where(ActivityPubOutboxActivity.actor_uri == actor_uri)
+                .order_by(ActivityPubOutboxActivity.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = session.execute(stmt).fetchall()
+            return [row[0] for row in result]
+
     def fetch_channels(self, user_id: str) -> list[tuple[Channels]]:
         """
         Fetch a list of all the available channels, which
@@ -1206,6 +1359,17 @@ class DatabaseHandler:
             channel_metadata = channel_metadata[0]
 
         return channel_metadata
+
+    def get_first_public_channel(self) -> Channels | None:
+        with self.database_session() as session:
+            stmt = (
+                select(Channels)
+                .where(Channels.is_private.is_(False))
+                .order_by(Channels.created_at.asc())
+                .limit(1)
+            )
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
 
     def delete_channel(self, channel_id: str) -> None:
         """
@@ -1317,7 +1481,7 @@ class DatabaseHandler:
 
     def fetch_unviewed_channel_messages(
         self, channel_id: str, viewed_messages_ids: list[str]
-    ) -> list[Messages]:
+    ) -> list[tuple[Messages, Users | None]]:
         """
         Fetch latest unviewed messages by this user from a server channel
 
@@ -1329,17 +1493,36 @@ class DatabaseHandler:
         Returns:
             list[Messages]: A list of `Messages` table object.
         """
-        messages: list[Messages] = None
+        messages_with_users: list[tuple[Messages, Users | None]] = []
 
         with self.database_session() as session:
-            stmt = select(Messages).where(
-                Messages.channel_id == channel_id,
-                Messages.message_id.not_in(viewed_messages_ids),
+            query = (
+                session.query(Messages, Users)
+                .join(Users, Messages.sender_id == Users.user_id, isouter=True)
+                .filter(Messages.channel_id == channel_id)
             )
 
-            messages = session.execute(stmt).all()
+            if viewed_messages_ids:
+                query = query.filter(Messages.message_id.not_in(viewed_messages_ids))
 
-        return messages
+            messages_with_users = query.order_by(Messages.sent_at).all()
+
+        return messages_with_users
+
+    def update_channel_participants(
+        self, channel_id: str, participant_ids: list[str]
+    ) -> None:
+        """
+        Update active voice participants for a channel.
+        """
+        with self.database_session() as session:
+            stmt = (
+                update(Channels)
+                .values(participant_ids=participant_ids)
+                .where(Channels.channel_id == channel_id)
+            )
+            session.execute(stmt)
+            session.commit()
 
     def save_message(self, message: Messages) -> None:
         """

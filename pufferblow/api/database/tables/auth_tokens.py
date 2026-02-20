@@ -17,14 +17,17 @@ class AuthTokens(Base):
 
     auth_token: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
     auth_token_expire_time: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True
+        DateTime(timezone=True), nullable=True, index=True
     )
     user_id: Mapped[UUID | None] = mapped_column(
         SA_UUID(as_uuid=True),
         ForeignKey("users.user_id", ondelete="CASCADE"),
+        index=True,
         nullable=True,
     )
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self):
         return (

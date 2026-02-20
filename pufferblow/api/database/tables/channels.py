@@ -15,14 +15,14 @@ class Channels(Base):
     __tablename__ = "channels"
 
     channel_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
-    channel_name: Mapped[str] = mapped_column(String, nullable=False)
+    channel_name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     channel_type: Mapped[str] = mapped_column(
-        String, default="text"
+        String(24), default="text", index=True
     )  # text, voice, mixed
     messages_ids: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), default=list
     )
-    is_private: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     allowed_users: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), default=list
     )
@@ -30,7 +30,7 @@ class Channels(Base):
         ARRAY(String), default=list
     )  # Active voice participants
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: date_in_gmt("%Y-%m-%d %H:%M:%S"),
         nullable=False,
     )

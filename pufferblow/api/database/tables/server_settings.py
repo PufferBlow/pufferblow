@@ -39,8 +39,8 @@ class ServerSettings(Base):
     rate_limit_duration = Column(Integer, default=5, nullable=False)  # In minutes
     max_rate_limit_requests = Column(Integer, default=6000, nullable=False)
     max_rate_limit_warnings = Column(Integer, default=15, nullable=False)
-    updated_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=date_in_gmt(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=date_in_gmt, nullable=False)
 
     def __repr__(self) -> str:
         return f"Server(server_settings_id={self.server_settings_id!r}, is_private={self.is_private!r}, max_message_length={self.max_message_length!r}, max_image_size={self.max_image_size!r}, max_video_size={self.max_video_size!r}, allowed_images_extensions={self.allowed_images_extensions!r}, allowed_videos_extensions={self.allowed_videos_extensions!r}, allowed_doc_extensions={self.allowed_doc_extensions!r}, updated_at={self.updated_at!r}, created_at={self.created_at!r})"

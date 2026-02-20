@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
@@ -13,15 +13,16 @@ class ActivityMetrics(Base):
     """Activity metrics table to track server liveness and popularity"""
 
     __tablename__ = "activity_metrics"
+    __table_args__ = (UniqueConstraint("period", "date", name="uq_activity_metrics_period_date"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Time period (daily, weekly, monthly)
     period: Mapped[str] = mapped_column(
-        String, nullable=False
+        String, nullable=False, index=True
     )  # 'daily', 'weekly', 'monthly'
     date: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )  # Start date of the period
 
     # User activity
@@ -68,7 +69,7 @@ class ActivityMetrics(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=date_in_gmt, nullable=False
+        DateTime(timezone=True), default=date_in_gmt, nullable=False
     )
 
     def __repr__(self) -> str:

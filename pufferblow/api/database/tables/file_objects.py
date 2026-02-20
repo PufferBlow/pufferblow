@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 # Base
@@ -39,15 +39,15 @@ class FileObjects(Base):
 
     file_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     ref_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    file_path: Mapped[str] = mapped_column(String, nullable=False)
+    file_path: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     last_referenced: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
     verification_status: Mapped[str] = mapped_column(String(50), default="unverified")
     integrity_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -88,11 +88,16 @@ class FileReferences(Base):
     __tablename__ = "file_references"
 
     reference_id: Mapped[str] = mapped_column(String, primary_key=True)
-    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    reference_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    reference_entity_id: Mapped[str] = mapped_column(String, nullable=False)
+    file_hash: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("file_objects.file_hash", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    reference_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    reference_entity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
     def __repr__(self) -> str:

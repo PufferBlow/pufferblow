@@ -1,6 +1,7 @@
 import hashlib
 import mimetypes
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 import magic  # python-magic for MIME detection
@@ -255,7 +256,7 @@ class CDNManager:
         # Validate extension
         filename = file.filename or "unknown"
         extension = filename.split(".")[-1].lower() if "." in filename else ""
-        if extension not in allowed_extensions:
+        if extension not in allowed_extensions and "*" not in allowed_extensions:
             raise HTTPException(
                 status_code=400,
                 detail=f"File extension '{extension}' not allowed. Allowed: {', '.join(allowed_extensions)}",
@@ -281,16 +282,15 @@ class CDNManager:
         # For image files, validate dimensions and format
         if extension in self.IMAGE_EXTENSIONS and mime_type.startswith("image/"):
             try:
-                image = Image.open(file.file)
+                image = Image.open(BytesIO(content))
                 image.verify()  # Verify it's a valid image
+                image = Image.open(BytesIO(content))
                 max_dimension = 2048  # Max width/height
                 if image.size[0] > max_dimension or image.size[1] > max_dimension:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Image dimensions too large. Max allowed: {max_dimension}x{max_dimension}",
                     )
-                # Reset file pointer
-                file.file.seek(0)
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid image file")
 
@@ -311,7 +311,7 @@ class CDNManager:
 
         # Create subdirectory path
         sub_dir = Path(self.config.CDN_STORAGE_PATH) / subdirectory
-        sub_dir.mkdir(exist_ok=True)
+        sub_dir.mkdir(parents=True, exist_ok=True)
 
         # Full file path
         file_path = sub_dir / new_filename
@@ -336,6 +336,7 @@ class CDNManager:
                 file_hash=file_hash,
                 ref_count=1,  # Initial reference count
                 file_path=f"{subdirectory}/{new_filename}",
+                filename=filename,
                 file_size=len(content),
                 mime_type=mime_type,
                 verification_status="verified",

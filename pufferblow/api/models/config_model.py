@@ -12,6 +12,9 @@ class Config:
     RATE_LIMIT_DURATION: int = 5
     MAX_RATE_LIMIT_REQUESTS: int = 6000
     MAX_RATE_LIMIT_WARNINGS: int = 15
+    JWT_SECRET: str = "change-this-jwt-secret-in-production"
+    JWT_ACCESS_TTL_MINUTES: int = 15
+    JWT_REFRESH_TTL_DAYS: int = 30
 
     # PostgreSQL Database
     DATABASE_NAME: str
@@ -38,6 +41,8 @@ class Config:
     STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/storage"
     STORAGE_BASE_URL: str = "/storage"
     STORAGE_ALLOCATED_GB: int = 10  # Default 10GB for local storage
+    STORAGE_SSE_ENABLED: bool = False
+    STORAGE_SSE_KEY: str | None = None
 
     # AWS S3 configuration (when provider = "s3")
     S3_BUCKET_NAME: str | None = None
@@ -73,6 +78,11 @@ class Config:
         self.RATE_LIMIT_DURATION = config["api"]["rate_limit_duration"]
         self.MAX_RATE_LIMIT_REQUESTS = config["api"]["max_rate_limit_requests"]
         self.MAX_RATE_LIMIT_WARNINGS = config["api"]["max_rate_limit_warnings"]
+        self.JWT_SECRET = config["api"].get(
+            "jwt_secret", "change-this-jwt-secret-in-production"
+        )
+        self.JWT_ACCESS_TTL_MINUTES = config["api"].get("jwt_access_ttl_minutes", 15)
+        self.JWT_REFRESH_TTL_DAYS = config["api"].get("jwt_refresh_ttl_days", 30)
 
         # PostgreSQL Database - support for both postregsql (legacy) and postgresql
         db_section = config.get("postgresql") or config.get("postregsql")
@@ -107,6 +117,8 @@ class Config:
             self.STORAGE_PATH = config["storage"]["storage_path"]
             self.STORAGE_BASE_URL = config["storage"]["base_url"]
             self.STORAGE_ALLOCATED_GB = config["storage"]["allocated_gb"]
+            self.STORAGE_SSE_ENABLED = config["storage"].get("sse_enabled", False)
+            self.STORAGE_SSE_KEY = config["storage"].get("sse_key")
 
             # S3 configuration
             if "s3" in config["storage"]:
@@ -144,6 +156,9 @@ workers = {self.WORKERS} # number of workers for the ASGI, the higher the better
 rate_limit_duration = {self.RATE_LIMIT_DURATION} # the duration of a rate limit of an IP address (in minutes)
 max_rate_limit_requests = {self.MAX_RATE_LIMIT_REQUESTS} # number of request before a rate limit warning
 max_rate_limit_warnings = {self.MAX_RATE_LIMIT_WARNINGS} # number of rate limit warnings before blocking the IP address
+jwt_secret = "{self.JWT_SECRET}" # JWT signing secret (change this in production)
+jwt_access_ttl_minutes = {self.JWT_ACCESS_TTL_MINUTES} # Access token lifetime in minutes
+jwt_refresh_ttl_days = {self.JWT_REFRESH_TTL_DAYS} # Refresh token lifetime in days
 
 [postgresql]
 database_name = "{self.DATABASE_NAME}"
@@ -170,6 +185,8 @@ provider = "{self.STORAGE_PROVIDER}" # Storage backend provider: "local" or "s3"
 storage_path = "{self.STORAGE_PATH}" # Local storage directory (for local provider)
 base_url = "{self.STORAGE_BASE_URL}" # Base URL for serving files
 allocated_gb = {self.STORAGE_ALLOCATED_GB} # Allocated storage space in GB (for local provider)
+sse_enabled = {str(self.STORAGE_SSE_ENABLED).lower()} # Enable AES-256 server-side encryption for stored files
+sse_key = "{self.STORAGE_SSE_KEY}" if self.STORAGE_SSE_KEY else "" # Encryption key or passphrase (recommended: set via env PUFFERBLOW_STORAGE_SSE_KEY)
 
 [storage.s3]
 bucket_name = "{self.S3_BUCKET_NAME}" if self.S3_BUCKET_NAME else "" # S3 bucket name (for s3 provider)

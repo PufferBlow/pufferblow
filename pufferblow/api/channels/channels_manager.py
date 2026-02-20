@@ -85,14 +85,9 @@ class ChannelsManager:
         channel.is_private = is_private
         channel.created_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
-        # For voice channels, generate a LiveKit room name
+        # For voice-capable channels, generate a deterministic room name.
         if channel_type in ["voice", "mixed"]:
-            from pufferblow.api_initializer import api_initializer
-
-            if api_initializer.config.get("livekit", {}).get(
-                "voice_channels_enabled", False
-            ):
-                channel.livekit_room_name = f"pufferblow_channel_{channel.channel_id}"
+            channel.livekit_room_name = f"pufferblow_channel_{channel.channel_id}"
 
         self.database_handler.create_new_channel(user_id=user_id, channel=channel)
 
@@ -217,7 +212,15 @@ class ChannelsManager:
         channel_type = self.get_channel_type(channel_id)
         return channel_type in ["voice", "mixed"]
 
-    def join_voice_channel(self, user_id: str, channel_id: str) -> dict:
+    def get_webrtc_manager_singleton(self):
+        """
+        Get the WebRTC manager singleton.
+        """
+        from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
+
+        return get_webrtc_manager()
+
+    async def join_voice_channel(self, user_id: str, channel_id: str) -> dict:
         """
         Join voice channel using aiortc WebRTC manager.
         Provides direct WebRTC configuration for clients.
@@ -230,12 +233,10 @@ class ChannelsManager:
             dict: Contains WebRTC configuration, or error message.
         """
         try:
-            from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
-
-            webrtc_manager = get_webrtc_manager()
+            webrtc_manager = self.get_webrtc_manager_singleton()
 
             # Join voice channel using WebRTC manager
-            result = asyncio.run(webrtc_manager.join_voice_channel(user_id, channel_id))
+            result = await webrtc_manager.join_voice_channel(user_id, channel_id)
 
             if "error" in result:
                 return {"error": result["error"]}
@@ -254,7 +255,7 @@ class ChannelsManager:
             )
             return {"error": f"Failed to join voice channel: {str(e)}"}
 
-    def leave_voice_channel(self, user_id: str, channel_id: str) -> dict:
+    async def leave_voice_channel(self, user_id: str, channel_id: str) -> dict:
         """
         Handle leaving a WebRTC voice channel
 
@@ -266,14 +267,10 @@ class ChannelsManager:
             dict: Success or error message.
         """
         try:
-            from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
-
-            webrtc_manager = get_webrtc_manager()
+            webrtc_manager = self.get_webrtc_manager_singleton()
 
             # Leave voice channel using WebRTC manager
-            result = asyncio.run(
-                webrtc_manager.leave_voice_channel(user_id, channel_id)
-            )
+            result = await webrtc_manager.leave_voice_channel(user_id, channel_id)
 
             if "error" in result:
                 return {"error": result["error"]}

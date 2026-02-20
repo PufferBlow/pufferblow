@@ -71,11 +71,20 @@ class MessagesManager:
             user_data = message_tuple[1]  # The Users object (can be None)
 
             # Decrypt the message
-            raw_message = self.decrypt_message(
-                user_id=str(message_data.sender_id),
-                message_id=message_data.message_id,
-                encrypted_message=base64.b64decode(message_data.hashed_message),
-            )
+            try:
+                raw_message = self.decrypt_message(
+                    user_id=str(message_data.sender_id),
+                    message_id=message_data.message_id,
+                    encrypted_message=base64.b64decode(message_data.hashed_message),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to decrypt message_id={message_id} sender_id={sender_id}: {error}",
+                    message_id=message_data.message_id,
+                    sender_id=message_data.sender_id,
+                    error=str(exc),
+                )
+                raw_message = "[message unavailable]"
 
             json_metadata_format = message_data.to_dict()
             # Replace the encrypted hashed_message with the decrypted message content
@@ -200,20 +209,19 @@ class MessagesManager:
         Returns:
             Messages: The message metadata object.
         """
-        # Check if channel is audio-only (prevents text messages in audio channels)
+        # Block text messages in voice-only channels.
         from pufferblow.api_initializer import api_initializer
 
         channel_type = api_initializer.channels_manager.get_channel_type(channel_id)
-        if channel_type == "audio":
+        if channel_type == "voice":
             from fastapi import exceptions
-            from loguru import logger
 
             logger.warning(
-                f"Attempted to send message to audio channel | User: {user_id} | Channel: {channel_id}"
+                f"Attempted to send text message to voice-only channel | User: {user_id} | Channel: {channel_id}"
             )
             raise exceptions.HTTPException(
                 status_code=400,
-                detail="Messages cannot be sent to audio-only channels. Audio channels are for voice communication only.",
+                detail="Messages cannot be sent to voice-only channels. Use a text or mixed channel.",
             )
 
         message_metadata = Messages()
@@ -354,6 +362,10 @@ class MessagesManager:
         key = self.database_handler.get_keys(
             user_id=user_id, associated_to="message", message_id=message_id
         )
+        if key is None:
+            raise ValueError(
+                f"Missing encryption key for message_id={message_id}, user_id={user_id}"
+            )
 
         decrypted_message = self.hasher.decrypt(
             ciphertext=encrypted_message, key=key.key_value, iv=key.iv

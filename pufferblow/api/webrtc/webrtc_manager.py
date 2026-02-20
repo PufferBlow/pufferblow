@@ -263,6 +263,8 @@ class WebRTCManager:
         """
         if not AIORTC_AVAILABLE:
             return {"error": "Voice channels are not available - aiortc not installed"}
+        if self.database_handler is None:
+            return {"error": "WebRTC manager is not initialized"}
 
         # Check if channel exists and supports voice
         channel_data = self.database_handler.get_channel_data(channel_id)
@@ -372,6 +374,8 @@ class WebRTCManager:
         """
         if not AIORTC_AVAILABLE:
             return {"error": "Voice channels are not available"}
+        if self.database_handler is None:
+            return {"error": "WebRTC manager is not initialized"}
 
         if channel_id not in self.voice_channels:
             return {"error": "Voice channel not found"}
@@ -430,6 +434,8 @@ class WebRTCManager:
         """
         if not AIORTC_AVAILABLE:
             return {"error": "Voice channels are not available"}
+        if self.database_handler is None:
+            return {"error": "WebRTC manager is not initialized"}
 
         if channel_id not in self.voice_channels:
             return {

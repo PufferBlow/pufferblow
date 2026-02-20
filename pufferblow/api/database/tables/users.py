@@ -48,7 +48,7 @@ class Users(Base):
     user_id: Mapped[UUID] = mapped_column(
         SA_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    username: Mapped[str] = mapped_column(String, nullable=False)
+    username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     password: Mapped[str] = mapped_column(String, default="")
     about: Mapped[str | None] = mapped_column(String, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -56,23 +56,23 @@ class Users(Base):
     inbox_id: Mapped[UUID | None] = mapped_column(
         SA_UUID(as_uuid=True), nullable=True
     )
-    origin_server: Mapped[str] = mapped_column(String, default="")
-    status: Mapped[str] = mapped_column(String, default="offline")
+    origin_server: Mapped[str] = mapped_column(String(255), default="", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="offline", index=True)
     roles_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     joined_servers_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
-    auth_token: Mapped[str] = mapped_column(String, default="")
+    auth_token: Mapped[str] = mapped_column(String, default="", index=True)
     raw_auth_token: str | None = None
     auth_token_expire_time: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     def __repr__(self) -> str:

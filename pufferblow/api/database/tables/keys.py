@@ -19,10 +19,14 @@ class Keys(Base):
     user_id: Mapped[UUID | None] = mapped_column(
         SA_UUID(as_uuid=True),
         ForeignKey("users.user_id", ondelete="CASCADE"),
+        index=True,
         nullable=True,
     )
     message_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("messages.message_id", ondelete="CASCADE"), nullable=True
+        String,
+        ForeignKey("messages.message_id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

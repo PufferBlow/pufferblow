@@ -16,7 +16,7 @@ class Server(Base):
 
     server_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
     server_name: Mapped[str] = mapped_column(String, nullable=False)
-    host_port: Mapped[str] = mapped_column(String, nullable=False)
+    host_port: Mapped[str] = mapped_column(String, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     banner_url: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -26,9 +26,11 @@ class Server(Base):
     # Server stats
     stats_id: Mapped[str] = mapped_column(String, nullable=False)
 
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=date_in_gmt, nullable=False
+        DateTime(timezone=True), default=date_in_gmt, nullable=False
     )
 
     def __repr__(self) -> str:

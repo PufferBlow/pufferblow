@@ -16,18 +16,18 @@ class ServerStickers(Base):
     __tablename__ = "server_stickers"
 
     sticker_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
-    sticker_url: Mapped[str] = mapped_column(String, nullable=False)
+    sticker_url: Mapped[str] = mapped_column(String, nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String, nullable=False)
-    uploaded_by: Mapped[UUID] = mapped_column(SA_UUID(as_uuid=True), nullable=False)
-    usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    uploaded_by: Mapped[UUID] = mapped_column(SA_UUID(as_uuid=True), nullable=False, index=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     def __repr__(self) -> str:
@@ -45,18 +45,18 @@ class ServerGIFs(Base):
     __tablename__ = "server_gifs"
 
     gif_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
-    gif_url: Mapped[str] = mapped_column(String, nullable=False)
+    gif_url: Mapped[str] = mapped_column(String, nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String, nullable=False)
-    uploaded_by: Mapped[UUID] = mapped_column(SA_UUID(as_uuid=True), nullable=False)
-    usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    uploaded_by: Mapped[UUID] = mapped_column(SA_UUID(as_uuid=True), nullable=False, index=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     def __repr__(self) -> str:

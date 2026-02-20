@@ -36,7 +36,10 @@ class ServerManager:
         Returns:
             None.
         """
-        host_port = "127.0.0.1:8000"
+        host_port = (
+            f"{self.database_handler.config.API_HOST}:"
+            f"{self.database_handler.config.API_PORT}"
+        )
         server_id = str(uuid.uuid4())
         stats_id = str(uuid.uuid4())
 
@@ -100,7 +103,7 @@ class ServerManager:
 
         server = self.database_handler.get_server()
 
-        return not (server == None)
+        return server is not None
 
     def _generate_user_id(self, server_name: str) -> str:
         """
