@@ -1,14 +1,22 @@
 from fastapi import FastAPI
 
-from pufferblow.api.routes.admin import router as admin_router, set_api_initializer as set_admin_initializer
-from pufferblow.api.routes.auth import router as decentralized_auth_router
 from pufferblow.api.routes.activitypub import router as activitypub_router
+from pufferblow.api.routes.admin import (
+    router as admin_router,
+    set_api_initializer as set_admin_initializer,
+)
+from pufferblow.api.routes.auth import router as decentralized_auth_router
 from pufferblow.api.routes.channels import router as channels_router
 from pufferblow.api.routes.core import router as core_router
+from pufferblow.api.routes.internal_voice import router as internal_voice_router
 from pufferblow.api.routes.messages import router as messages_router
-from pufferblow.api.routes.storage import router as storage_router, set_api_initializer as set_storage_initializer
+from pufferblow.api.routes.storage import (
+    router as storage_router,
+    set_api_initializer as set_storage_initializer,
+)
 from pufferblow.api.routes.system import router as system_router
 from pufferblow.api.routes.users import router as users_router
+from pufferblow.api.routes.voice_v2 import router as voice_v2_router
 from pufferblow.api.routes.websocket import router as websocket_router
 from pufferblow.core.bootstrap import api_initializer
 
@@ -30,3 +38,7 @@ def register_routers(api: FastAPI) -> None:
     api.include_router(decentralized_auth_router, tags=["decentralized-auth"])
     api.include_router(activitypub_router, tags=["activitypub"])
     api.include_router(websocket_router, tags=["websocket"])
+
+    # New SFU voice control plane and internal callbacks
+    api.include_router(voice_v2_router, tags=["voice-v2"])
+    api.include_router(internal_voice_router, tags=["voice-internal"])

@@ -5,14 +5,15 @@ from __future__ import annotations
 import typer
 from loguru import logger
 
+from pufferblow.api.config.config_handler import ConfigHandler
 from pufferblow.cli.common import (
-    build_database_uri_from_config,
     configure_structured_logging,
     ensure_database_exists,
     load_config_or_exit,
     load_runtime,
     run_gunicorn_server,
 )
+from pufferblow.core.bootstrap import api_initializer
 
 
 def serve_command(
@@ -32,10 +33,15 @@ def serve_command(
     if debug:
         log_level = 1
 
+    config_handler = ConfigHandler()
     config = load_config_or_exit()
-    database_uri = build_database_uri_from_config(config)
+    database_uri = config_handler.resolve_database_uri()
+    if not database_uri:
+        logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
+        raise typer.Exit(code=1)
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri, setup_tables=True)
+    config = api_initializer.config
 
     log_level_name = configure_structured_logging(
         config=config,
@@ -67,4 +73,3 @@ def serve_command(
     from pufferblow.server.app import api
 
     run_gunicorn_server(app=api, config=config, log_level_name=log_level_name)
-

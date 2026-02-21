@@ -8,15 +8,55 @@ services:
     ports:
       - "7575:7575"
     environment:
-      PUFFERBLOW_JWT_SECRET: ${PUFFERBLOW_JWT_SECRET}
-      PUFFERBLOW_JWT_ACCESS_TTL_MINUTES: ${PUFFERBLOW_JWT_ACCESS_TTL_MINUTES:-15}
-      PUFFERBLOW_JWT_REFRESH_TTL_DAYS: ${PUFFERBLOW_JWT_REFRESH_TTL_DAYS:-30}
-      PUFFERBLOW_STORAGE_SSE_KEY: ${PUFFERBLOW_STORAGE_SSE_KEY}
+      PUFFERBLOW_DATABASE_URI: ${PUFFERBLOW_DATABASE_URI:-}
+      PUFFERBLOW_API_HOST: ${PUFFERBLOW_API_HOST:-0.0.0.0}
+      PUFFERBLOW_API_PORT: ${PUFFERBLOW_API_PORT:-7575}
     volumes:
       - pufferblow_data:/root/.pufferblow
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - pufferblow-server-net
+
+  media-sfu:
+    build:
+      context: ${MEDIA_SFU_GIT_CONTEXT:-https://github.com/pufferblow/media-sfu.git}
+      dockerfile: Dockerfile
+    container_name: pufferblow-media-sfu
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+      - "${RTC_UDP_PORT_MIN:-50000}-${RTC_UDP_PORT_MAX:-50199}:${RTC_UDP_PORT_MIN:-50000}-${RTC_UDP_PORT_MAX:-50199}/udp"
+    environment:
+      RTC_BIND_ADDR: ":8787"
+      RTC_BOOTSTRAP_CONFIG_URL: http://pufferblow-server:7575/api/internal/v1/voice/bootstrap-config
+      RTC_BOOTSTRAP_SECRET: ${RTC_BOOTSTRAP_SECRET}
+      RTC_BOOTSTRAP_HTTP_TIMEOUT: ${RTC_BOOTSTRAP_HTTP_TIMEOUT:-5s}
+    depends_on:
+      - pufferblow-server
+    networks:
+      - pufferblow-server-net
+
+  coturn:
+    image: instrumentisto/coturn:4.6.3
+    container_name: pufferblow-coturn
+    restart: unless-stopped
+    command: >
+      -n
+      --log-file=stdout
+      --listening-port=3478
+      --realm=${TURN_REALM:-pufferblow.space}
+      --user=${PUFFERBLOW_TURN_USERNAME:-pufferblow}:${PUFFERBLOW_TURN_PASSWORD}
+      --fingerprint
+      --lt-cred-mech
+      --no-multicast-peers
+      --min-port=49160
+      --max-port=49200
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
     networks:
       - pufferblow-server-net
 

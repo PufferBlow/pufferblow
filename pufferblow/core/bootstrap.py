@@ -13,13 +13,12 @@ from pufferblow.api.config.config_handler import ConfigHandler
 from pufferblow.api.database.database import Database
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.encrypt.encrypt import Encrypt
-from pufferblow.api.logger.msgs import errors
 from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.api.models.config_model import Config
 from pufferblow.api.security.security_checks_handler import SecurityChecksHandler
 from pufferblow.api.server.server_manager import ServerManager
 from pufferblow.api.user.user_manager import UserManager
-from pufferblow.api.webrtc.webrtc_manager import initialize_webrtc_manager
+from pufferblow.api.voice import VoiceSessionManager
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
 try:
@@ -49,6 +48,7 @@ class APIInitializer:
     channels_manager: ChannelsManager = None
     messages_manager: MessagesManager = None
     websockets_manager: WebSocketsManager = None
+    voice_session_manager: VoiceSessionManager = None
     storage_manager: StorageManager = None
     background_tasks_manager: BackgroundTasksManager = None
     security_checks_handler: SecurityChecksHandler = None
@@ -107,6 +107,12 @@ class APIInitializer:
             encrypt_manager=self.encrypt_manager,
         )
         self.websockets_manager = WebSocketsManager(user_manager=self.user_manager)
+        self.voice_session_manager = VoiceSessionManager(
+            database_handler=self.database_handler,
+            auth_token_manager=self.auth_token_manager,
+            channels_manager=self.channels_manager,
+            websockets_manager=self.websockets_manager,
+        )
 
         if STORAGE_AVAILABLE and StorageManager:
             storage_config = {
@@ -160,7 +166,6 @@ class APIInitializer:
             messages_manager=self.messages_manager,
             websockets_manager=self.websockets_manager,
         )
-        initialize_webrtc_manager(self.database_handler)
 
         self.is_loaded = True
 
@@ -213,10 +218,16 @@ class APIInitializer:
         if self.config is None and database_uri is None:
             self.load_config()
 
-        if database_uri is not None:
-            self.database = Database(database_uri=database_uri)
-        else:
-            self.database = Database(config=self.config)
+        resolved_database_uri = database_uri
+        if resolved_database_uri is None and self.config_handler is not None:
+            resolved_database_uri = self.config_handler.resolve_database_uri()
+
+        if resolved_database_uri is None:
+            raise RuntimeError(
+                "No bootstrap database URI found. Run `pufferblow setup` first."
+            )
+
+        self.database = Database(database_uri=resolved_database_uri)
 
         database_engine = self.database.create_database_engine_instance()
         self.database_handler = DatabaseHandler(
@@ -224,29 +235,21 @@ class APIInitializer:
             encrypt_manager=self.encrypt_manager,
             config=self.config,
         )
+        if self.config_handler is not None:
+            self.config_handler.hydrate_config_from_database(
+                database_handler=self.database_handler,
+                config=self.config,
+            )
 
     def load_config(self) -> None:
-        """Load configuration from disk into a `Config` model instance."""
+        """Load minimal bootstrap config from environment."""
         self.config_handler = ConfigHandler()
-
-        if not self.config_handler.check_config():
-            if not self._is_cli_setup_mode():
-                logger.error(
-                    errors.ERROR_NO_CONFIG_FILE_FOUND(
-                        self.config_handler.config_file_path
-                    )
-                )
-
-        try:
-            config = self.config_handler.load_config()
-            self.config = Config() if len(config) == 0 else Config(config=config)
-        except FileNotFoundError:
-            if self._is_cli_setup_mode():
-                self.config = Config()
-            else:
-                logger.error("Configuration file not found and not in setup mode.")
-                raise
+        self.config = self.config_handler.build_bootstrap_config()
+        if not self.config_handler.check_config() and not self._is_cli_setup_mode():
+            logger.error(
+                "No bootstrap database URI found. "
+                "Run `pufferblow setup` before starting the server."
+            )
 
 
 api_initializer: APIInitializer = APIInitializer()
-

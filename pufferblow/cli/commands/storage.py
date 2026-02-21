@@ -17,6 +17,21 @@ from pufferblow.cli.common import console
 from pufferblow.core.bootstrap import api_initializer
 
 
+def _load_runtime_config_or_exit() -> Config:
+    """Load runtime config using bootstrap database URI."""
+    config_handler = ConfigHandler()
+    database_uri = config_handler.resolve_database_uri()
+    if not database_uri:
+        logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
+        raise typer.Exit(code=1)
+
+    from pufferblow.cli.common import ensure_database_exists, load_runtime
+
+    ensure_database_exists(database_uri)
+    load_runtime(database_uri=database_uri)
+    return api_initializer.config
+
+
 def _prompt_provider() -> str:
     """Prompt for selected storage provider."""
     console.print("[bold]Storage provider[/bold]")
@@ -83,13 +98,8 @@ def _prompt_s3_config(*, is_aws: bool) -> dict:
 
 
 def _save_storage_config(storage_config: dict) -> None:
-    """Persist storage configuration in config file."""
-    config_handler = ConfigHandler()
-    config = (
-        Config(config=config_handler.load_config())
-        if config_handler.check_config()
-        else Config()
-    )
+    """Persist storage configuration in database runtime config."""
+    config = _load_runtime_config_or_exit()
 
     config.STORAGE_PROVIDER = storage_config["provider"]
     config.STORAGE_PATH = storage_config.get("storage_path", config.STORAGE_PATH)
@@ -104,8 +114,27 @@ def _save_storage_config(storage_config: dict) -> None:
         config.S3_ACCESS_KEY = storage_config.get("access_key")
         config.S3_SECRET_KEY = storage_config.get("secret_key")
         config.S3_ENDPOINT_URL = storage_config.get("endpoint_url")
+    else:
+        config.S3_BUCKET_NAME = None
+        config.S3_ACCESS_KEY = None
+        config.S3_SECRET_KEY = None
+        config.S3_ENDPOINT_URL = None
 
-    config_handler.write_config(config=config.export_toml())
+    api_initializer.config_handler.write_config(
+        database_handler=api_initializer.database_handler,
+        config_updates={
+            "STORAGE_PROVIDER": config.STORAGE_PROVIDER,
+            "STORAGE_PATH": config.STORAGE_PATH,
+            "STORAGE_BASE_URL": config.STORAGE_BASE_URL,
+            "STORAGE_ALLOCATED_GB": int(config.STORAGE_ALLOCATED_GB),
+            "S3_BUCKET_NAME": config.S3_BUCKET_NAME,
+            "S3_REGION": config.S3_REGION,
+            "S3_ACCESS_KEY": config.S3_ACCESS_KEY,
+            "S3_SECRET_KEY": config.S3_SECRET_KEY,
+            "S3_ENDPOINT_URL": config.S3_ENDPOINT_URL,
+        },
+        secret_keys={"S3_ACCESS_KEY", "S3_SECRET_KEY"},
+    )
 
 
 async def _exercise_storage_backend(storage_config: dict) -> tuple[bool, str]:
@@ -174,12 +203,7 @@ def setup_storage_command() -> None:
 
 def test_storage_command() -> None:
     """Test the currently configured storage backend."""
-    config_handler = ConfigHandler()
-    if not config_handler.check_config():
-        logger.error("No config file found. Run 'pufferblow storage setup' first.")
-        raise typer.Exit(code=1)
-
-    config = Config(config=config_handler.load_config())
+    config = _load_runtime_config_or_exit()
     storage_config = _config_to_storage_dict(config)
 
     try:
@@ -214,13 +238,7 @@ def migrate_storage_command(
         logger.error("source/target provider must be either 'local' or 's3'.")
         raise typer.Exit(code=1)
 
-    config_handler = ConfigHandler()
-    if not config_handler.check_config():
-        logger.error("No config file found. Run 'pufferblow setup' first.")
-        raise typer.Exit(code=1)
-
-    config = Config(config=config_handler.load_config())
-    api_initializer.load_objects()
+    config = _load_runtime_config_or_exit()
 
     try:
         from scripts.migrate_storage import StorageMigrator
@@ -246,4 +264,3 @@ def migrate_storage_command(
     console.print(f"failed_files={stats['failed_files']}")
     console.print(f"skipped_files={stats['skipped_files']}")
     console.print(f"migrated_size_gb={stats['migrated_size'] / (1024**3):.2f}")
-

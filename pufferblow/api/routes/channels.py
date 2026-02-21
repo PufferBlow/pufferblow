@@ -320,171 +320,67 @@ async def remove_user_from_channel_route(
 
 # Voice Channel Routes
 
+
 @router.post(
     "/{channel_id}/join-audio",
     status_code=200,
     response_model=VoiceChannelJoinResponse,
 )
 async def join_voice_channel_route(auth_token: str, channel_id: str):
-    """
-    Join a voice channel using WebRTC.
-
-    Args:
-        auth_token: User's authentication token
-        channel_id: Voice channel ID
-
-    Returns:
-        200 OK: WebRTC configuration for voice channel
-        400 BAD REQUEST: Voice channels disabled or invalid request
-        404 NOT FOUND: Channel not found
-        403 FORBIDDEN: Access denied
-        409 CONFLICT: Already in another voice channel
-    """
+    """Join a voice channel."""
     user_id = get_current_user(auth_token)
-    logger.debug(
-        f"Voice channel join request | User: {user_id} | Channel: {channel_id} | Timestamp: {datetime.now().isoformat()}"
-    )
-
-    # Check if aiortc/WebRTC is available
-    try:
-        from pufferblow.api.webrtc.webrtc_manager import AIORTC_AVAILABLE
-
-        if not AIORTC_AVAILABLE:
-            logger.error(
-                f"Voice channels unavailable | User: {user_id} | Reason: aiortc not installed"
-            )
-            raise exceptions.HTTPException(
-                status_code=400,
-                detail="Voice channels are not available - aiortc library is not installed",
-            )
-    except ImportError as e:
-        logger.error(f"Voice channels unavailable | User: {user_id} | Reason: {str(e)}")
-        raise exceptions.HTTPException(
-            status_code=400,
-            detail="Voice channels are not available - aiortc library is not installed",
-        )
-
-    # Check channel access
     check_channel_access(user_id, channel_id)
 
-    # Check if user is already in another voice channel
     try:
-        webrtc_manager = api_initializer.channels_manager.get_webrtc_manager_singleton()
-        if hasattr(webrtc_manager, "get_user_current_channel"):
-            current_channel = webrtc_manager.get_user_current_channel(user_id)
-            if current_channel and current_channel != channel_id:
-                logger.warning(
-                    f"User already in voice channel | User: {user_id} | Requested: {channel_id} | Current: {current_channel}"
-                )
-                raise exceptions.HTTPException(
-                    status_code=409,
-                    detail=f"You're already in voice channel {current_channel}. Leave it first or use client prompt to switch.",
-                )
-    except exceptions.HTTPException:
-        raise
-    except Exception as e:
-        logger.debug(f"Single channel check failed | User: {user_id} | Error: {str(e)}")
-
-    logger.info(
-        f"Voice channel WebRTC join attempt | User: {user_id} | Channel: {channel_id}"
-    )
-
-    # Join voice channel
-    try:
-        result = await api_initializer.channels_manager.join_voice_channel(
-            user_id, channel_id
+        result = api_initializer.voice_session_manager.create_or_join_session(
+            user_id=user_id,
+            channel_id=channel_id,
+            quality_profile="balanced",
         )
-        logger.debug(
-            f"WebRTC manager response | User: {user_id} | Channel: {channel_id} | Result: {result}"
-        )
+    except ValueError as exc:
+        raise exceptions.HTTPException(status_code=400, detail=str(exc)) from exc
 
-        if "error" in result:
-            logger.warning(
-                f"Voice channel WebRTC join failed | User: {user_id} | Channel: {channel_id} | Error: {result['error']}"
-            )
-            raise exceptions.HTTPException(status_code=400, detail=result["error"])
-
-        # Log successful join
-        participant_count = result.get("participant_count", 0)
-        channel_type = result.get("webrtc_config", {}).get("channel_type", "unknown")
-        logger.info(
-            f"Voice channel WebRTC join successful | User: {user_id} | Channel: {channel_id} | Type: {channel_type} | Participants: {participant_count}"
-        )
-
-        # Log activity
-        api_initializer.database_handler.create_activity_audit_entry(
-            ActivityAudit(
-                activity_id=str(uuid.uuid4()),
-                activity_type="voice_channel_join",
-                user_id=user_id,
-                title=f"Joined voice channel #{result.get('channel_name', channel_id)}",
-                description=f"User joined voice channel with {participant_count} participants",
-                metadata_json=json.dumps(
-                    {
-                        "channel_id": channel_id,
-                        "channel_type": channel_type,
-                        "participant_count": participant_count,
-                        "action": "join_voice_channel",
-                    }
-                ),
-            )
-        )
-
-        return {
-            "status_code": 200,
-            "channel_id": channel_id,
-            "user_id": user_id,
-            "participants": result.get("participants", 0),
-            "participant_count": result.get("participant_count", 0),
-            "webrtc_config": result.get("webrtc_config", {}),
-        }
-
-    except exceptions.HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            f"Unexpected error in voice channel join | User: {user_id} | Channel: {channel_id} | Error: {str(e)}",
-            exc_info=True,
-        )
-        raise exceptions.HTTPException(
-            status_code=500, detail="Internal server error during voice channel join"
-        )
+    return {
+        "status_code": 200,
+        "channel_id": channel_id,
+        "user_id": user_id,
+        "participants": result.get("participant_count", 0),
+        "participant_count": result.get("participant_count", 0),
+        "webrtc_config": {
+            "backend": "sfu_v2",
+            "session_id": result.get("session_id"),
+            "signaling_url": result.get("signaling_url"),
+            "join_token": result.get("join_token"),
+            "ice_servers": [
+                server.get("urls") for server in result.get("ice_servers", [])
+            ],
+            "ice_servers_raw": result.get("ice_servers", []),
+            "expires_at": result.get("expires_at"),
+            "quality_profile": result.get("quality_profile", "balanced"),
+        },
+    }
 
 
 @router.post("/{channel_id}/leave-audio", status_code=200)
 async def leave_voice_channel_route(auth_token: str, channel_id: str):
-    """
-    Leave a voice channel.
-
-    Args:
-        auth_token: User's authentication token
-        channel_id: Voice channel ID
-
-    Returns:
-        200 OK: Successfully left voice channel
-        404 NOT FOUND: Channel not found
-    """
+    """Leave a voice channel."""
     user_id = get_current_user(auth_token)
 
-    logger.info(
-        f"Voice channel leave attempt | User: {user_id} | Channel: {channel_id}"
-    )
-
-    result = await api_initializer.channels_manager.leave_voice_channel(
-        user_id, channel_id
-    )
-
-    if "error" in result:
-        logger.warning(
-            f"Voice channel leave failed | User: {user_id} | Channel: {channel_id} | Error: {result['error']}"
+    try:
+        result = api_initializer.voice_session_manager.leave_session_by_channel(
+            user_id=user_id,
+            channel_id=channel_id,
         )
-        raise exceptions.HTTPException(status_code=400, detail=result["error"])
+    except ValueError as exc:
+        raise exceptions.HTTPException(status_code=400, detail=str(exc)) from exc
 
-    logger.info(
-        f"Voice channel leave successful | User: {user_id} | Channel: {channel_id}"
-    )
-
-    return {"status_code": 200, "message": "Successfully left voice channel"}
+    return {
+        "status_code": 200,
+        "message": "Successfully left voice channel",
+        "session_id": result.get("session_id"),
+        "participant_count": result.get("participant_count", 0),
+        "session_ended": result.get("session_ended", False),
+    }
 
 
 @router.get(
@@ -493,32 +389,27 @@ async def leave_voice_channel_route(auth_token: str, channel_id: str):
     response_model=VoiceChannelStatusResponse,
 )
 async def get_voice_channel_status_route(auth_token: str, channel_id: str):
-    """
-    Get voice channel status including participants.
-
-    Args:
-        auth_token: User's authentication token
-        channel_id: Voice channel ID
-
-    Returns:
-        200 OK: Channel status with participants
-        404 NOT FOUND: Channel not found
-        403 FORBIDDEN: Access denied
-    """
+    """Get voice channel status including participants."""
     user_id = get_current_user(auth_token)
-
-    # Check channel access
     check_channel_access(user_id, channel_id)
 
-    result = api_initializer.channels_manager.get_voice_channel_status(channel_id)
-
-    if "error" in result:
-        raise exceptions.HTTPException(status_code=404, detail=result["error"])
+    result = api_initializer.voice_session_manager.get_active_session_for_channel(
+        channel_id=channel_id
+    )
+    if result is None:
+        return {
+            "status_code": 200,
+            "channel_id": channel_id,
+            "room_name": None,
+            "participants": [],
+            "participant_count": 0,
+        }
 
     return {
         "status_code": 200,
         "channel_id": channel_id,
-        "room_name": result.get("room_name"),
+        "room_name": result.get("session_id"),
         "participants": result.get("participants", []),
         "participant_count": result.get("participant_count", 0),
     }
+

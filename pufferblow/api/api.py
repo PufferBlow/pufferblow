@@ -8,7 +8,6 @@ from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from pufferblow.api.background_tasks.background_tasks_manager import (
@@ -33,32 +32,11 @@ ALLOWED_ORIGINS = [
 ]
 
 
-def _route_name_exists(app: FastAPI, route_name: str) -> bool:
-    """Check whether a mounted route name already exists."""
-    for route in app.router.routes:
-        if getattr(route, "name", None) == route_name:
-            return True
-    return False
-
-
-def _mount_static_routes(app: FastAPI) -> None:
-    """Mount CDN and storage static routes once config is available."""
-    if not api_initializer.is_loaded:
-        return
-
-    if not _route_name_exists(app, "cdn"):
-        app.mount(
-            api_initializer.config.CDN_BASE_URL,
-            StaticFiles(directory=api_initializer.config.CDN_STORAGE_PATH, check_dir=False),
-            name="cdn",
-        )
-
-    if not _route_name_exists(app, "storage"):
-        app.mount(
-            api_initializer.config.STORAGE_BASE_URL,
-            StaticFiles(directory=api_initializer.config.STORAGE_PATH, check_dir=False),
-            name="storage",
-        )
+def _mount_static_routes() -> None:
+    """Disable direct static file mounts for managed storage."""
+    # All file access flows through storage route handlers so SSE decryption,
+    # auth checks, and audit behavior remain centralized.
+    return
 
 
 @asynccontextmanager
@@ -72,7 +50,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("API_INITIALIZER_ALREADY_LOADED")
 
-    _mount_static_routes(app)
+    _mount_static_routes()
 
     async with lifespan_background_tasks():
         logger.info("API_STARTUP_COMPLETE")

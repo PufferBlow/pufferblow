@@ -5,6 +5,8 @@ This module contains all Pydantic schemas used for validating
 API requests and responses across all routes.
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -177,9 +179,13 @@ class VoiceChannelJoinRequest(BaseModel):
 class VoiceChannelJoinResponse(BaseModel):
     """VoiceChannelJoinResponse class."""
     status_code: int
+    channel_id: str | None = None
+    user_id: str | None = None
+    participants: int | None = None
+    participant_count: int | None = None
+    webrtc_config: dict | None = None
     token: str | None = None
     room_name: str | None = None
-    livekit_url: str | None = None
     proxy: bool | None = None
     error: str | None = None
 
@@ -192,6 +198,40 @@ class VoiceChannelStatusResponse(BaseModel):
     participants: list = []
     participant_count: int = 0
     error: str | None = None
+
+
+class VoiceSessionCreateRequest(BaseModel):
+    """Create or join a voice session request."""
+
+    auth_token: str = Field(min_length=1)
+    quality_profile: str = Field(default="balanced", pattern="^(low|balanced|high)$")
+
+
+class VoiceSessionLeaveRequest(BaseModel):
+    """Leave voice session request."""
+
+    auth_token: str = Field(min_length=1)
+
+
+class VoiceSessionActionRequest(BaseModel):
+    """Apply participant action inside voice session."""
+
+    auth_token: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    payload: dict = Field(default_factory=dict)
+
+
+class VoiceJoinTokenConsumeRequest(BaseModel):
+    """Internal request payload for one-time join-token consume."""
+
+    join_token: str = Field(min_length=1)
+
+
+class InternalVoiceEventRequest(BaseModel):
+    """Internal signed event payload emitted by SFU."""
+
+    event_type: str = Field(min_length=1)
+    payload: dict = Field(default_factory=dict)
 
 
 # ============================================================================
@@ -356,24 +396,24 @@ class UploadAuthForm(BaseModel):
 
 
 # ============================================================================
-# Storage/CDN Schemas
+# Storage Schemas
 # ============================================================================
 
 
-class CDNFilesRequest(BaseModel):
-    """CDNFilesRequest class."""
+class StorageFilesRequest(BaseModel):
+    """StorageFilesRequest class."""
     auth_token: str = Field(min_length=1)
     directory: str = Field(default="uploads", min_length=1)
 
 
-class CDNDeleteFileRequest(BaseModel):
-    """CDNDeleteFileRequest class."""
+class StorageDeleteFileRequest(BaseModel):
+    """StorageDeleteFileRequest class."""
     auth_token: str = Field(min_length=1)
     file_url: str = Field(min_length=1)
 
 
-class CDNFileInfoRequest(BaseModel):
-    """CDNFileInfoRequest class."""
+class StorageFileInfoRequest(BaseModel):
+    """StorageFileInfoRequest class."""
     auth_token: str = Field(min_length=1)
     file_url: str = Field(min_length=1)
 
@@ -446,3 +486,18 @@ class ServerLogsRequest(BaseModel):
         default=None,
         description="Filter by log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
     )
+
+
+class RuntimeConfigRequest(BaseModel):
+    """RuntimeConfigRequest class."""
+
+    auth_token: str = Field(min_length=1)
+    include_secrets: bool = False
+
+
+class RuntimeConfigUpdateRequest(BaseModel):
+    """RuntimeConfigUpdateRequest class."""
+
+    auth_token: str = Field(min_length=1)
+    settings: dict[str, Any] = Field(default_factory=dict)
+

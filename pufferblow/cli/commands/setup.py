@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass
 
 import typer
@@ -10,10 +11,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 from pufferblow.api.config.config_handler import ConfigHandler
-from pufferblow.api.models.config_model import Config
 from pufferblow.cli.common import (
     DatabaseCredentials,
-    build_database_uri_from_config,
     build_database_uri_from_credentials,
     console,
     ensure_database_exists,
@@ -122,20 +121,6 @@ def _apply_server_configuration(
     )
 
 
-def _save_database_config(
-    *, config_handler: ConfigHandler, credentials: DatabaseCredentials
-) -> Config:
-    """Persist database settings to config file and return config model."""
-    config = Config()
-    config.DATABASE_NAME = credentials.database_name
-    config.USERNAME = credentials.username
-    config.DATABASE_PASSWORD = credentials.password
-    config.DATABASE_HOST = credentials.host
-    config.DATABASE_PORT = credentials.port
-    config_handler.write_config(config=config.export_toml())
-    return config
-
-
 def _run_full_setup(
     *,
     config_handler: ConfigHandler,
@@ -155,6 +140,7 @@ def _run_full_setup(
         raise typer.Exit(code=1)
 
     api_initializer.database_handler.initialize_default_data()
+    _ensure_runtime_security_settings(config_handler=config_handler)
     _apply_server_configuration(server=server, is_update=False)
 
     auth_token = api_initializer.user_manager.sign_up(
@@ -163,31 +149,75 @@ def _run_full_setup(
         is_admin=True,
         is_owner=True,
     ).raw_auth_token
-
-    _save_database_config(config_handler=config_handler, credentials=credentials)
+    config_handler.set_bootstrap_database_uri(database_uri=database_uri)
+    sfu_bootstrap_secret = config_handler.resolve_bootstrap_sfu_secret() or "[unknown]"
 
     console.print(
         Panel.fit(
             f"[bold green]{auth_token}[/bold green]\n\n"
-            "[bold red]Store this owner auth token safely.[/bold red]",
+            "[bold red]Store this owner auth token safely.[/bold red]\n\n"
+            f"[bold cyan]SFU bootstrap secret:[/bold cyan] {sfu_bootstrap_secret}",
             title="[bold yellow]Setup Complete[/bold yellow]",
             border_style="green",
         )
     )
 
 
+def _is_default_secret(value: str | None) -> bool:
+    """Return whether a secret value still looks default/insecure."""
+    if value is None:
+        return True
+    normalized = value.strip().lower()
+    if not normalized:
+        return True
+    return normalized.startswith("change-this-")
+
+
+def _ensure_runtime_security_settings(*, config_handler: ConfigHandler) -> dict[str, str]:
+    """
+    Ensure critical runtime secrets are generated and persisted in DB.
+    """
+    runtime = api_initializer.database_handler.get_runtime_config(include_secrets=True)
+    updates: dict[str, str] = {}
+
+    if _is_default_secret(str(runtime.get("JWT_SECRET") or "")):
+        updates["JWT_SECRET"] = secrets.token_urlsafe(48)
+    if _is_default_secret(str(runtime.get("RTC_JOIN_SECRET") or "")):
+        updates["RTC_JOIN_SECRET"] = secrets.token_urlsafe(48)
+    if _is_default_secret(str(runtime.get("RTC_INTERNAL_SECRET") or "")):
+        updates["RTC_INTERNAL_SECRET"] = secrets.token_urlsafe(48)
+    if _is_default_secret(str(runtime.get("RTC_BOOTSTRAP_SECRET") or "")):
+        updates["RTC_BOOTSTRAP_SECRET"] = secrets.token_urlsafe(48)
+
+    if updates:
+        config_handler.write_config(
+            database_handler=api_initializer.database_handler,
+            config_updates=updates,
+            secret_keys=set(updates.keys()),
+        )
+        for key, value in updates.items():
+            setattr(api_initializer.config, key, value)
+
+    bootstrap_secret = updates.get("RTC_BOOTSTRAP_SECRET") or str(
+        runtime.get("RTC_BOOTSTRAP_SECRET") or ""
+    )
+    if bootstrap_secret:
+        config_handler.set_bootstrap_sfu_secret(bootstrap_secret)
+
+    return updates
+
+
 def _run_server_only_setup(
     *, config_handler: ConfigHandler, server: ServerDetails, is_update: bool
 ) -> None:
     """Execute setup flow that only touches server metadata."""
-    if not config_handler.check_config():
+    database_uri = config_handler.resolve_database_uri()
+    if not database_uri:
         logger.error(
-            "No config file found. Run full setup before using --setup-server/--update-server."
+            "No bootstrap database URI found. Run `pufferblow setup` first."
         )
         raise typer.Exit(code=1)
 
-    config = Config(config=config_handler.load_config())
-    database_uri = build_database_uri_from_config(config)
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri)
 
@@ -267,7 +297,7 @@ def setup_command(
 ) -> None:
     """Configure database, server metadata, and owner account."""
     config_handler = ConfigHandler()
-    has_config = config_handler.check_config()
+    has_bootstrap_config = config_handler.resolve_database_uri() is not None
 
     if is_setup_server and is_update_server:
         logger.error("Choose either --setup-server or --update-server, not both.")
@@ -282,7 +312,9 @@ def setup_command(
         )
         return
 
-    setup_state, payload = _launch_textual_setup(has_existing_config=has_config)
+    setup_state, payload = _launch_textual_setup(
+        has_existing_config=has_bootstrap_config
+    )
     if setup_state == "ok":
         _run_textual_payload(payload, config_handler=config_handler)
         return
@@ -290,7 +322,7 @@ def setup_command(
         console.print("[dim]Setup cancelled.[/dim]")
         raise typer.Exit(code=0)
 
-    mode = _prompt_mode_without_textual(has_config=has_config)
+    mode = _prompt_mode_without_textual(has_config=has_bootstrap_config)
     server = _prompt_server_details()
 
     if mode == "server_only":
@@ -308,8 +340,8 @@ def setup_command(
         )
         return
 
-    if has_config and not Confirm.ask(
-        "Config file exists. Do you want to continue and overwrite database settings?",
+    if has_bootstrap_config and not Confirm.ask(
+        "A bootstrap database URI already exists. Continue and overwrite it?",
         default=False,
     ):
         raise typer.Exit(code=0)

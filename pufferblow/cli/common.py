@@ -105,14 +105,14 @@ def ensure_database_exists(database_uri: str) -> None:
 
 
 def load_config_or_exit(config_handler: ConfigHandler | None = None) -> Config:
-    """Load config from disk or exit with guidance."""
+    """Load bootstrap config from environment or exit with guidance."""
     handler = config_handler or ConfigHandler()
-    if not handler.check_config():
+    if not handler.resolve_database_uri():
         logger.error(
-            "Configuration file not found. Run 'pufferblow setup' before serving."
+            "No bootstrap database URI found. Run `pufferblow setup` first."
         )
         raise typer.Exit(code=1)
-    return Config(config=handler.load_config())
+    return handler.build_bootstrap_config()
 
 
 def load_runtime(*, database_uri: str | None = None, setup_tables: bool = False) -> None:
@@ -187,4 +187,3 @@ def run_gunicorn_server(*, app, config: Config, log_level_name: str) -> None:
         "logger_class": StubbedGunicornLogger,
     }
     StandaloneApplication(app, options).run()
-

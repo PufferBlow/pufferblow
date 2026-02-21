@@ -181,7 +181,7 @@ class SetupWizardApp(App[SetupWizardResult | None]):
 
         if not is_full and not self.has_existing_config:
             self.query_one("#status", Static).update(
-                "No config found. Use full setup mode first."
+                "No bootstrap database URI found. Use full setup mode first."
             )
         else:
             self.query_one("#status", Static).update("")
@@ -191,7 +191,7 @@ class SetupWizardApp(App[SetupWizardResult | None]):
         mode = str(self.query_one("#mode", Select).value)
         if mode in {"server_only", "server_update"} and not self.has_existing_config:
             self.query_one("#status", Static).update(
-                "Config file missing. Switch to full setup mode."
+                "Bootstrap database URI missing. Switch to full setup mode."
             )
             return
 

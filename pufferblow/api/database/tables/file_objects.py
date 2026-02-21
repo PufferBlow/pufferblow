@@ -17,7 +17,7 @@ class FileObjects(Base):
     Attributes:
         file_hash (Mapped[str]): SHA-256 hash of file content (primary key).
         ref_count (Mapped[int]): Number of references to this file.
-        file_path (Mapped[str]): Relative path to file within CDN storage.
+        file_path (Mapped[str]): Relative path to file within storage backend.
         filename (Mapped[str]): Original filename of the uploaded file.
         file_size (Mapped[int]): File size in bytes.
         mime_type (Mapped[str]): Detected MIME type of file.

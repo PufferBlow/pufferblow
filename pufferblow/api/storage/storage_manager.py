@@ -61,9 +61,7 @@ class StorageManager:
         """
         Load and normalize SSE key material to a 32-byte AES key.
         """
-        configured_key = self.config.get("sse_key") or os.getenv(
-            "PUFFERBLOW_STORAGE_SSE_KEY"
-        )
+        configured_key = self.config.get("sse_key")
         if not configured_key:
             logger.warning(
                 "Storage SSE requested but no key provided. Disabling storage SSE."
@@ -374,8 +372,9 @@ class StorageManager:
                     f"Failed to trigger image optimization for {storage_path}: {str(e)}"
                 )
 
-        # Return hash-based relative URL for client-side URL construction
-        hash_url = f"/storage/{file_hash}"
+        # Return hash-based URL under configured storage base path.
+        storage_base_url = str(self.config.get("base_url", "/storage")).rstrip("/")
+        hash_url = f"{storage_base_url}/{file_hash}"
         return hash_url, False
 
     async def delete_file(self, file_path: str) -> bool:

@@ -3,7 +3,6 @@ import datetime
 import hashlib
 import hmac
 import json
-import os
 import secrets
 from typing import Any
 
@@ -19,23 +18,11 @@ class AuthTokenManager:
         self.database_handler = database_handler
         self.encrypt_manager = encrypt_manager
         config = self.database_handler.config
-        self.jwt_secret = (
-            os.getenv("PUFFERBLOW_JWT_SECRET")
-            or os.getenv("JWT_SECRET")
-            or getattr(config, "JWT_SECRET", "change-this-jwt-secret-in-production")
+        self.jwt_secret = getattr(
+            config, "JWT_SECRET", "change-this-jwt-secret-in-production"
         )
-        self.access_ttl_minutes = int(
-            os.getenv(
-                "PUFFERBLOW_JWT_ACCESS_TTL_MINUTES",
-                str(getattr(config, "JWT_ACCESS_TTL_MINUTES", 15)),
-            )
-        )
-        self.refresh_ttl_days = int(
-            os.getenv(
-                "PUFFERBLOW_JWT_REFRESH_TTL_DAYS",
-                str(getattr(config, "JWT_REFRESH_TTL_DAYS", 30)),
-            )
-        )
+        self.access_ttl_minutes = int(getattr(config, "JWT_ACCESS_TTL_MINUTES", 15))
+        self.refresh_ttl_days = int(getattr(config, "JWT_REFRESH_TTL_DAYS", 30))
 
     def _instance_id(self) -> str:
         """Instance id."""

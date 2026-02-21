@@ -218,7 +218,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         """Get bucket."""
         if "/signin" in path or "/signup" in path or "/auth/" in path:
             return "auth"
-        if "/upload" in path or "/storage/" in path or "/cdn/" in path:
+        if "/upload" in path or "/storage/" in path:
             return "uploads"
         if "/send_message" in path or "/load_messages" in path or "/ws" in path:
             return "messages"
@@ -262,7 +262,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         "/api/v1/channels/*/send_message",
         "/api/v1/users/profile/avatar",
         "/api/v1/users/profile/banner",
-        "/api/v1/cdn/upload",
+        "/api/v1/storage/upload",
         "/api/v1/system/upload-avatar",
         "/api/v1/system/upload-banner",
     )

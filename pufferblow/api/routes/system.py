@@ -6,13 +6,20 @@ import json
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
-from pufferblow.api.schemas import AuthTokenQuery, ServerSettingsRequest, UploadAuthForm
+from pufferblow.api.schemas import (
+    AuthTokenQuery,
+    RuntimeConfigRequest,
+    RuntimeConfigUpdateRequest,
+    ServerSettingsRequest,
+    UploadAuthForm,
+)
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.core.bootstrap import api_initializer
 
@@ -24,6 +31,77 @@ async def parse_upload_auth_form(
 ) -> UploadAuthForm:
     """Parse upload auth form."""
     return UploadAuthForm(auth_token=auth_token)
+
+
+def _is_hash(value: str) -> bool:
+    """Check if a string looks like a SHA-256 hash."""
+    return len(value) == 64 and all(c in "0123456789abcdef" for c in value.lower())
+
+
+def _extract_storage_hash(storage_url: str) -> str | None:
+    """Extract hash from canonical storage URL (`/storage/<hash>`)."""
+    if not storage_url:
+        return None
+    path = urlparse(storage_url).path if "://" in storage_url else storage_url
+    base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
+    if not path.startswith(f"{base}/"):
+        return None
+    suffix = path[len(base) + 1 :]
+    if "/" in suffix or not _is_hash(suffix):
+        return None
+    return suffix
+
+
+def _resolve_storage_relative_path(storage_url: str) -> str | None:
+    """Resolve relative storage path from hash URL or direct storage file URL."""
+    if not storage_url:
+        return None
+
+    path = urlparse(storage_url).path if "://" in storage_url else storage_url
+    base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
+
+    file_hash = _extract_storage_hash(path)
+    if file_hash:
+        file_object = api_initializer.database_handler.get_file_object_by_hash(file_hash)
+        return file_object.file_path if file_object else None
+
+    if path.startswith("/api/v1/storage/file/"):
+        return path.replace("/api/v1/storage/file/", "", 1).lstrip("/") or None
+
+    if path.startswith(f"{base}/"):
+        suffix = path[len(base) + 1 :]
+        if "/" in suffix:
+            return suffix
+
+    return None
+
+
+async def _delete_previous_storage_file(storage_url: str) -> None:
+    """Best-effort cleanup for previously assigned server media file."""
+    relative_path = _resolve_storage_relative_path(storage_url)
+    if not relative_path:
+        return
+
+    try:
+        await api_initializer.storage_manager.delete_file(relative_path)
+        logger.info(f"Deleted previous server media file: {relative_path}")
+    except Exception as exc:
+        logger.warning(f"Failed to delete previous storage file {storage_url}: {exc}")
+
+
+def _create_server_file_reference(file_hash: str, reference_type: str) -> None:
+    """Create a storage reference entry for server avatar/banner assets."""
+    try:
+        api_initializer.database_handler.create_file_reference(
+            reference_id=f"{reference_type}_{uuid.uuid4()}",
+            file_hash=file_hash,
+            reference_type=reference_type,
+            reference_entity_id="server",
+        )
+    except Exception as exc:
+        logger.warning(
+            f"Failed to create file reference {reference_type} for hash {file_hash}: {exc}"
+        )
 
 @router.get("/api/v1/system/latest-release", status_code=200)
 async def get_latest_release_route():
@@ -437,6 +515,90 @@ async def update_server_info_route(request: ServerSettingsRequest):
         )
 
 
+@router.post("/api/v1/system/runtime-config", status_code=200)
+async def get_runtime_config_route(request: RuntimeConfigRequest):
+    """
+    Get runtime configuration saved in database.
+    """
+    user_id = extract_user_id(auth_token=request.auth_token)
+    is_owner = api_initializer.user_manager.is_server_owner(user_id=user_id)
+    is_admin = api_initializer.user_manager.is_admin(user_id=user_id)
+
+    if not (is_owner or is_admin):
+        raise exceptions.HTTPException(
+            status_code=403,
+            detail="Access forbidden. Only administrators can access runtime config.",
+        )
+
+    include_secrets = bool(request.include_secrets and is_owner)
+    runtime_config = api_initializer.database_handler.get_runtime_config(
+        include_secrets=include_secrets
+    )
+
+    return {
+        "status_code": 200,
+        "runtime_config": runtime_config,
+        "include_secrets": include_secrets,
+    }
+
+
+@router.put("/api/v1/system/runtime-config", status_code=200)
+async def update_runtime_config_route(request: RuntimeConfigUpdateRequest):
+    """
+    Update runtime configuration values in database. Server Owner only.
+    """
+    user_id = extract_user_id(auth_token=request.auth_token)
+    if not api_initializer.user_manager.is_server_owner(user_id=user_id):
+        raise exceptions.HTTPException(
+            status_code=403,
+            detail="Access forbidden. Only the server owner can update runtime config.",
+        )
+
+    default_map = api_initializer.database_handler.get_runtime_default_map()
+    allowed_keys = set(default_map.keys())
+    updates = {k: v for k, v in request.settings.items() if k in allowed_keys}
+
+    if not updates:
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail="No valid runtime config keys provided.",
+        )
+
+    secret_keys = {key for key, (_, is_secret) in default_map.items() if is_secret}
+    api_initializer.config_handler.write_config(
+        database_handler=api_initializer.database_handler,
+        config_updates=updates,
+        secret_keys=secret_keys,
+    )
+    for key, value in updates.items():
+        if hasattr(api_initializer.config, key):
+            setattr(api_initializer.config, key, value)
+
+    restart_required_keys = sorted(
+        key
+        for key in updates.keys()
+        if key
+        in {
+            "API_HOST",
+            "API_PORT",
+            "WORKERS",
+            "JWT_SECRET",
+            "RTC_JOIN_SECRET",
+            "RTC_INTERNAL_SECRET",
+            "RTC_BOOTSTRAP_SECRET",
+            "RTC_UDP_PORT_MIN",
+            "RTC_UDP_PORT_MAX",
+        }
+    )
+
+    return {
+        "status_code": 200,
+        "message": "Runtime config updated successfully.",
+        "updated_keys": sorted(updates.keys()),
+        "restart_required_keys": restart_required_keys,
+    }
+
+
 @router.post("/api/v1/system/upload-avatar", status_code=201)
 async def upload_server_avatar_route(
     form_data: UploadAuthForm = Depends(parse_upload_auth_form),
@@ -467,33 +629,13 @@ async def upload_server_avatar_route(
         )
 
     try:
-        # Get current server data to check for existing avatar
         current_server = api_initializer.database_handler.get_server()
         old_avatar_url = current_server.avatar_url
 
-        # Delete old avatar file if it exists
         if old_avatar_url:
-            try:
-                # Extract relative path from the URL for deletion
-                if old_avatar_url.startswith("/"):
-                    # It's a local CDN URL like /api/v1/cdn/file/...
-                    relative_path = old_avatar_url.replace("/api/v1/cdn/file/", "", 1)
-                    full_path = (
-                        Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
-                    )
-                    if full_path.exists():
-                        full_path.unlink()
-                        logger.info(f"Deleted old server avatar: {relative_path}")
-                else:
-                    # Try the CDN manager deletion method
-                    api_initializer.cdn_manager.delete_file(old_avatar_url)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to delete old server avatar {old_avatar_url}: {str(e)}"
-                )
+            await _delete_previous_storage_file(old_avatar_url)
 
-        # Upload new avatar
-        cdn_url, is_duplicate = (
+        storage_url, _ = (
             await api_initializer.storage_manager.validate_and_save_categorized_file(
                 file=avatar,
                 user_id=user_id,
@@ -502,70 +644,12 @@ async def upload_server_avatar_route(
             )
         )
 
-        # Register file in database and create reference
-        try:
-            # Extract file info from URL
-            relative_path = cdn_url[len(api_initializer.config.CDN_BASE_URL) :].lstrip(
-                "/"
-            )
-            file_path_obj = (
-                Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
-            )
+        file_hash = _extract_storage_hash(storage_url)
+        if file_hash:
+            _create_server_file_reference(file_hash, "server_avatar")
 
-            if file_path_obj.exists():
-                # Read file to compute hash
-                with open(file_path_obj, "rb") as f:
-                    content = f.read()
+        api_initializer.database_handler.update_server_avatar_url(storage_url)
 
-                file_hash = api_initializer.cdn_manager.compute_file_hash(content)
-
-                # Always check if file object exists and increment reference count if duplicate
-                # Skip creating file object if it already exists
-                existing_ref_count = (
-                    api_initializer.database_handler.get_file_reference_count(file_hash)
-                )
-                if existing_ref_count is not None and existing_ref_count > 0:
-                    # File already exists, just increment reference count
-                    api_initializer.database_handler.increment_file_reference_count(
-                        file_hash
-                    )
-                else:
-                    # For new files, register and create reference
-                    api_initializer.database_handler.create_file_object(
-                        file_hash=file_hash,
-                        ref_count=1,
-                        file_path=relative_path,  # Store relative path
-                        file_size=len(content),
-                        mime_type=api_initializer.cdn_manager.mime_detector.from_buffer(
-                            content
-                        )
-                        or "application/octet-stream",
-                        verification_status="verified",
-                    )
-
-                # Create reference for server avatar
-                reference_id = f"server_avatar_{uuid.uuid4()}"
-                api_initializer.database_handler.create_file_reference(
-                    reference_id=reference_id,
-                    file_hash=file_hash,
-                    reference_type="server_avatar",
-                    reference_entity_id="server",  # Server entity
-                )
-
-        except Exception as e:
-            # Log error but don't fail the upload
-            logger.warning(
-                f"Failed to create file reference for server avatar: {str(e)}"
-            )
-
-        # Update server avatar URL in database - ensure full path for proper serving
-        if not cdn_url.startswith("/api/v1/cdn/file/"):
-            # Convert CDN-mounted URL to API route URL for database storage
-            if cdn_url.startswith("/cdn/"):
-                cdn_url = cdn_url.replace("/cdn/", "/api/v1/cdn/file/", 1)
-        api_initializer.database_handler.update_server_avatar_url(cdn_url)
-
-        # Log server avatar update activity
         try:
             api_initializer.database_handler.create_activity_audit_entry(
                 ActivityAudit(
@@ -575,7 +659,7 @@ async def upload_server_avatar_route(
                     title="Server avatar updated",
                     description=f"Server avatar was updated by user {user_id}",
                     metadata_json=json.dumps(
-                        {"avatar_url": cdn_url, "updated_by": user_id}
+                        {"avatar_url": storage_url, "updated_by": user_id}
                     ),
                 )
             )
@@ -585,7 +669,7 @@ async def upload_server_avatar_route(
         return {
             "status_code": 201,
             "message": "Server avatar uploaded successfully",
-            "avatar_url": cdn_url,
+            "avatar_url": storage_url,
         }
 
     except exceptions.HTTPException:
@@ -626,33 +710,13 @@ async def upload_server_banner_route(
         )
 
     try:
-        # Get current server data to check for existing banner
         current_server = api_initializer.database_handler.get_server()
         old_banner_url = current_server.banner_url
 
-        # Delete old banner file if it exists
         if old_banner_url:
-            try:
-                # Extract relative path from the URL for deletion
-                if old_banner_url.startswith("/"):
-                    # It's a local CDN URL like /api/v1/cdn/file/...
-                    relative_path = old_banner_url.replace("/api/v1/cdn/file/", "", 1)
-                    full_path = (
-                        Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
-                    )
-                    if full_path.exists():
-                        full_path.unlink()
-                        logger.info(f"Deleted old server banner: {relative_path}")
-                else:
-                    # Try the CDN manager deletion method
-                    api_initializer.cdn_manager.delete_file(old_banner_url)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to delete old server banner {old_banner_url}: {str(e)}"
-                )
+            await _delete_previous_storage_file(old_banner_url)
 
-        # Upload new banner
-        cdn_url, is_duplicate = (
+        storage_url, _ = (
             await api_initializer.storage_manager.validate_and_save_categorized_file(
                 file=banner,
                 user_id=user_id,
@@ -661,75 +725,16 @@ async def upload_server_banner_route(
             )
         )
 
-        # Register file in database and create reference
-        try:
-            # Extract file info from URL
-            from pathlib import Path
+        file_hash = _extract_storage_hash(storage_url)
+        if file_hash:
+            _create_server_file_reference(file_hash, "server_banner")
 
-            relative_path = cdn_url[len(api_initializer.config.CDN_BASE_URL) :].lstrip(
-                "/"
-            )
-            file_path_obj = (
-                Path(api_initializer.config.CDN_STORAGE_PATH) / relative_path
-            )
-
-            if file_path_obj.exists():
-                # Read file to compute hash
-                with open(file_path_obj, "rb") as f:
-                    content = f.read()
-
-                file_hash = api_initializer.cdn_manager.compute_file_hash(content)
-
-                # Always check if file object exists and increment reference count if duplicate
-                # Skip creating file object if it already exists
-                existing_ref_count = (
-                    api_initializer.database_handler.get_file_reference_count(file_hash)
-                )
-                if existing_ref_count is not None and existing_ref_count > 0:
-                    # File already exists, just increment reference count
-                    api_initializer.database_handler.increment_file_reference_count(
-                        file_hash
-                    )
-                else:
-                    # For new files, register and create reference
-                    api_initializer.database_handler.create_file_object(
-                        file_hash=file_hash,
-                        ref_count=1,
-                        file_path=relative_path,  # Store relative path
-                        file_size=len(content),
-                        mime_type=api_initializer.cdn_manager.mime_detector.from_buffer(
-                            content
-                        )
-                        or "application/octet-stream",
-                        verification_status="verified",
-                    )
-
-                # Create reference for server banner
-                reference_id = f"server_banner_{uuid.uuid4()}"
-                api_initializer.database_handler.create_file_reference(
-                    reference_id=reference_id,
-                    file_hash=file_hash,
-                    reference_type="server_banner",
-                    reference_entity_id="server",  # Server entity
-                )
-
-        except Exception as e:
-            # Log error but don't fail the upload
-            logger.warning(
-                f"Failed to create file reference for server banner: {str(e)}"
-            )
-
-        # Update server banner URL in database - ensure full path for proper serving
-        if not cdn_url.startswith("/api/v1/cdn/file/"):
-            # Convert CDN-mounted URL to API route URL for database storage
-            if cdn_url.startswith("/cdn/"):
-                cdn_url = cdn_url.replace("/cdn/", "/api/v1/cdn/file/", 1)
-        api_initializer.database_handler.update_server_banner_url(cdn_url)
+        api_initializer.database_handler.update_server_banner_url(storage_url)
 
         return {
             "status_code": 201,
             "message": "Server banner uploaded successfully",
-            "banner_url": cdn_url,
+            "banner_url": storage_url,
         }
 
     except exceptions.HTTPException:

@@ -335,11 +335,11 @@ class BackgroundTasksManager:
             return []
 
     def _get_directory_files(self, subdirectory: str) -> list[str]:
-        """Get all file URLs in a CDN subdirectory"""
+        """Get all file URLs in a storage subdirectory."""
         try:
             from pathlib import Path
 
-            sub_dir = Path(self.config.CDN_STORAGE_PATH) / subdirectory
+            sub_dir = Path(self.config.STORAGE_PATH) / subdirectory
 
             if not sub_dir.exists():
                 return []
@@ -348,7 +348,7 @@ class BackgroundTasksManager:
             for file_path in sub_dir.glob("*"):
                 if file_path.is_file():
                     files.append(
-                        f"{self.config.CDN_BASE_URL}/{subdirectory}/{file_path.name}"
+                        f"{self.config.STORAGE_BASE_URL.rstrip('/')}/{subdirectory}/{file_path.name}"
                     )
 
             return files

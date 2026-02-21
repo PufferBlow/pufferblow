@@ -85,11 +85,6 @@ class ChannelsManager:
         channel.channel_type = channel_type
         channel.is_private = is_private
         channel.created_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-        # For voice-capable channels, generate a deterministic room name.
-        if channel_type in ["voice", "mixed"]:
-            channel.livekit_room_name = f"pufferblow_channel_{channel.channel_id}"
-
         self.database_handler.create_new_channel(user_id=user_id, channel=channel)
 
         return channel
@@ -213,100 +208,6 @@ class ChannelsManager:
         channel_type = self.get_channel_type(channel_id)
         return channel_type in ["voice", "mixed"]
 
-    def get_webrtc_manager_singleton(self):
-        """
-        Get the WebRTC manager singleton.
-        """
-        from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
-
-        return get_webrtc_manager()
-
-    async def join_voice_channel(self, user_id: str, channel_id: str) -> dict:
-        """
-        Join voice channel using aiortc WebRTC manager.
-        Provides direct WebRTC configuration for clients.
-
-        Args:
-            `user_id` (str): The user's `user_id`.
-            `channel_id` (str): The channel's `channel_id`.
-
-        Returns:
-            dict: Contains WebRTC configuration, or error message.
-        """
-        try:
-            webrtc_manager = self.get_webrtc_manager_singleton()
-
-            # Join voice channel using WebRTC manager
-            result = await webrtc_manager.join_voice_channel(user_id, channel_id)
-
-            if "error" in result:
-                return {"error": result["error"]}
-
-            # Get channel data for additional info
-            channel_data = self.database_handler.get_channel_data(channel_id=channel_id)
-            if channel_data and channel_data.livekit_room_name:
-                # Include fallback info in case WebRTC fails
-                result["fallback_room_name"] = channel_data.livekit_room_name
-
-            return result
-
-        except Exception as e:
-            logger.error(
-                f"Failed to join WebRTC voice channel for user {user_id}: {str(e)}"
-            )
-            return {"error": f"Failed to join voice channel: {str(e)}"}
-
-    async def leave_voice_channel(self, user_id: str, channel_id: str) -> dict:
-        """
-        Handle leaving a WebRTC voice channel
-
-        Args:
-            `user_id` (str): The user's `user_id`.
-            `channel_id` (str): The channel's `channel_id`.
-
-        Returns:
-            dict: Success or error message.
-        """
-        try:
-            webrtc_manager = self.get_webrtc_manager_singleton()
-
-            # Leave voice channel using WebRTC manager
-            result = await webrtc_manager.leave_voice_channel(user_id, channel_id)
-
-            if "error" in result:
-                return {"error": result["error"]}
-
-            return result
-
-        except Exception as e:
-            logger.error(
-                f"Failed to leave WebRTC voice channel for user {user_id}: {str(e)}"
-            )
-            return {"error": f"Failed to leave voice channel: {str(e)}"}
-
-    def get_voice_channel_status(self, channel_id: str) -> dict:
-        """
-        Get status of a WebRTC voice channel including participants
-
-        Args:
-            `channel_id` (str): The channel's `channel_id`.
-
-        Returns:
-            dict: Channel status including participant info.
-        """
-        try:
-            from pufferblow.api.webrtc.webrtc_manager import get_webrtc_manager
-
-            webrtc_manager = get_webrtc_manager()
-
-            return webrtc_manager.get_voice_channel_status(channel_id)
-
-        except Exception as e:
-            logger.error(
-                f"Failed to get WebRTC voice channel status for {channel_id}: {str(e)}"
-            )
-            return {"error": "Failed to get voice channel status"}
-
     def _generate_channel_id(self, channel_name: str) -> str:
         """
         Generate a unique `channel_id` for a
@@ -322,4 +223,6 @@ class ChannelsManager:
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_channel_name)
 
         return str(generated_uuid)
+
+
 

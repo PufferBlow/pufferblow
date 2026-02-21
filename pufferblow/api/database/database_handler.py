@@ -1,6 +1,7 @@
 import base64
 import datetime
 import hashlib
+import json
 import uuid
 
 import sqlalchemy
@@ -28,6 +29,7 @@ from pufferblow.api.database.tables.decentralized_sessions import (
 )
 from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
+from pufferblow.api.database.tables.instance_runtime_config import InstanceRuntimeConfig
 from pufferblow.api.database.tables.keys import Keys
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
 from pufferblow.api.database.tables.messages import Messages
@@ -36,6 +38,12 @@ from pufferblow.api.database.tables.roles import Roles
 from pufferblow.api.database.tables.server import Server
 from pufferblow.api.database.tables.server_settings import ServerSettings
 from pufferblow.api.database.tables.sticker_catalog import ServerGIFs, ServerStickers
+from pufferblow.api.database.tables.voice_sessions import (
+    VoiceJoinToken,
+    VoiceSession,
+    VoiceSessionEvent,
+    VoiceSessionParticipant,
+)
 from pufferblow.api.database.tables.users import Users
 
 # Encryption manager
@@ -144,6 +152,8 @@ class DatabaseHandler:
                 self._create_tables_safely(base)
                 # Ensure default server settings are created
                 self._ensure_default_server_settings()
+                # Ensure runtime config keys exist
+                self._ensure_default_runtime_config()
             except Exception as e:
                 logger.error(f"PostgreSQL table creation failed: {e}")
                 raise
@@ -212,6 +222,199 @@ class DatabaseHandler:
         except Exception as e:
             logger.error(f"Failed to ensure default server settings: {str(e)}")
             raise
+
+    def _runtime_defaults(self) -> dict[str, tuple[object, bool]]:
+        """
+        Build default runtime config map from the current config model.
+
+        Returns:
+            dict[str, tuple[object, bool]]: Runtime setting key -> (value, is_secret)
+        """
+        cfg = self.config
+        return {
+            "API_HOST": (cfg.API_HOST, False),
+            "API_PORT": (cfg.API_PORT, False),
+            "LOGS_PATH": (cfg.LOGS_PATH, False),
+            "WORKERS": (cfg.WORKERS, False),
+            "RATE_LIMIT_DURATION": (cfg.RATE_LIMIT_DURATION, False),
+            "MAX_RATE_LIMIT_REQUESTS": (cfg.MAX_RATE_LIMIT_REQUESTS, False),
+            "MAX_RATE_LIMIT_WARNINGS": (cfg.MAX_RATE_LIMIT_WARNINGS, False),
+            "JWT_SECRET": (cfg.JWT_SECRET, True),
+            "JWT_ACCESS_TTL_MINUTES": (cfg.JWT_ACCESS_TTL_MINUTES, False),
+            "JWT_REFRESH_TTL_DAYS": (cfg.JWT_REFRESH_TTL_DAYS, False),
+            "VOICE_BACKEND": (cfg.VOICE_BACKEND, False),
+            "RTC_SIGNALING_URL": (cfg.RTC_SIGNALING_URL, False),
+            "RTC_JOIN_TOKEN_TTL_SECONDS": (cfg.RTC_JOIN_TOKEN_TTL_SECONDS, False),
+            "RTC_JOIN_SECRET": (cfg.RTC_JOIN_SECRET, True),
+            "RTC_INTERNAL_SECRET": (cfg.RTC_INTERNAL_SECRET, True),
+            "RTC_BOOTSTRAP_SECRET": (cfg.RTC_BOOTSTRAP_SECRET, True),
+            "RTC_INTERNAL_API_BASE": (cfg.RTC_INTERNAL_API_BASE, False),
+            "RTC_STUN_SERVERS": (cfg.RTC_STUN_SERVERS, False),
+            "TURN_URL": (cfg.TURN_URL, False),
+            "TURN_USERNAME": (cfg.TURN_USERNAME, False),
+            "TURN_PASSWORD": (cfg.TURN_PASSWORD, True),
+            "RTC_MAX_TOTAL_PEERS": (cfg.RTC_MAX_TOTAL_PEERS, False),
+            "RTC_MAX_ROOM_PEERS": (cfg.RTC_MAX_ROOM_PEERS, False),
+            "RTC_ROOM_END_GRACE_SECONDS": (cfg.RTC_ROOM_END_GRACE_SECONDS, False),
+            "RTC_INTERNAL_EVENT_WORKERS": (cfg.RTC_INTERNAL_EVENT_WORKERS, False),
+            "RTC_INTERNAL_EVENT_QUEUE_SIZE": (cfg.RTC_INTERNAL_EVENT_QUEUE_SIZE, False),
+            "RTC_INTERNAL_HTTP_TIMEOUT_SECONDS": (cfg.RTC_INTERNAL_HTTP_TIMEOUT_SECONDS, False),
+            "RTC_WS_WRITE_TIMEOUT_SECONDS": (cfg.RTC_WS_WRITE_TIMEOUT_SECONDS, False),
+            "RTC_WS_PING_INTERVAL_SECONDS": (cfg.RTC_WS_PING_INTERVAL_SECONDS, False),
+            "RTC_WS_PONG_WAIT_SECONDS": (cfg.RTC_WS_PONG_WAIT_SECONDS, False),
+            "RTC_WS_READ_LIMIT_BYTES": (cfg.RTC_WS_READ_LIMIT_BYTES, False),
+            "RTC_UDP_PORT_MIN": (cfg.RTC_UDP_PORT_MIN, False),
+            "RTC_UDP_PORT_MAX": (cfg.RTC_UDP_PORT_MAX, False),
+            "DERIVED_KEY_BYTES": (cfg.DERIVED_KEY_BYTES, False),
+            "DERIVED_KEY_ROUNDS": (cfg.DERIVED_KEY_ROUNDS, False),
+            "MAX_MESSAGE_SIZE": (cfg.MAX_MESSAGE_SIZE, False),
+            "MAX_MESSAGES_PER_PAGE": (cfg.MAX_MESSAGES_PER_PAGE, False),
+            "MIN_MESSAGES_PER_PAGE": (cfg.MIN_MESSAGES_PER_PAGE, False),
+            "STORAGE_PROVIDER": (cfg.STORAGE_PROVIDER, False),
+            "STORAGE_PATH": (cfg.STORAGE_PATH, False),
+            "STORAGE_BASE_URL": (cfg.STORAGE_BASE_URL, False),
+            "STORAGE_ALLOCATED_GB": (cfg.STORAGE_ALLOCATED_GB, False),
+            "STORAGE_SSE_ENABLED": (cfg.STORAGE_SSE_ENABLED, False),
+            "STORAGE_SSE_KEY": (cfg.STORAGE_SSE_KEY, True),
+            "S3_BUCKET_NAME": (cfg.S3_BUCKET_NAME, False),
+            "S3_REGION": (cfg.S3_REGION, False),
+            "S3_ACCESS_KEY": (cfg.S3_ACCESS_KEY, True),
+            "S3_SECRET_KEY": (cfg.S3_SECRET_KEY, True),
+            "S3_ENDPOINT_URL": (cfg.S3_ENDPOINT_URL, False),
+        }
+
+    def get_runtime_default_map(self) -> dict[str, tuple[object, bool]]:
+        """
+        Return default runtime key metadata map.
+        """
+        return self._runtime_defaults()
+
+    def _ensure_default_runtime_config(self) -> None:
+        """
+        Ensure runtime config keys are present in database.
+        """
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return
+
+        defaults = self._runtime_defaults()
+        inserted = 0
+
+        with self.database_session() as session:
+            existing_rows = session.query(InstanceRuntimeConfig.config_key).all()
+            existing_keys = {row[0] for row in existing_rows}
+
+            for key, (value, is_secret) in defaults.items():
+                if key in existing_keys:
+                    continue
+
+                session.add(
+                    InstanceRuntimeConfig(
+                        config_key=key,
+                        config_value=json.dumps(value),
+                        is_secret=is_secret,
+                    )
+                )
+                inserted += 1
+
+            if inserted > 0:
+                session.commit()
+                logger.info(
+                    "Inserted default runtime config rows: {count}",
+                    count=inserted,
+                )
+
+    def get_runtime_config(self, include_secrets: bool = True) -> dict[str, object]:
+        """
+        Fetch runtime configuration key/value pairs from database.
+
+        Args:
+            include_secrets: Whether secret rows should be returned.
+
+        Returns:
+            dict[str, object]: Runtime settings map.
+        """
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return {
+                key: value
+                for key, (value, is_secret) in self._runtime_defaults().items()
+                if include_secrets or not is_secret
+            }
+
+        with self.database_session() as session:
+            query = session.query(InstanceRuntimeConfig)
+            if not include_secrets:
+                query = query.filter(InstanceRuntimeConfig.is_secret.is_(False))
+
+            rows = query.all()
+
+            parsed: dict[str, object] = {}
+            for row in rows:
+                try:
+                    parsed[row.config_key] = json.loads(row.config_value)
+                except json.JSONDecodeError:
+                    parsed[row.config_key] = row.config_value
+
+            return parsed
+
+    def update_runtime_config(
+        self, settings_updates: dict[str, object], secret_keys: set[str] | None = None
+    ) -> None:
+        """
+        Upsert runtime settings into instance runtime config table.
+
+        Args:
+            settings_updates: Key/value updates.
+            secret_keys: Optional explicit secret key set for inserted rows.
+        """
+        if not settings_updates:
+            return
+
+        secret_keys = secret_keys or set()
+        known_defaults = self._runtime_defaults()
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        with self.database_session() as session:
+            existing_rows = (
+                session.query(InstanceRuntimeConfig)
+                .filter(InstanceRuntimeConfig.config_key.in_(list(settings_updates.keys())))
+                .all()
+            )
+            existing_by_key = {row.config_key: row for row in existing_rows}
+
+            for key, value in settings_updates.items():
+                encoded = json.dumps(value)
+                existing = existing_by_key.get(key)
+
+                if existing is not None:
+                    existing.config_value = encoded
+                    existing.updated_at = now
+                    continue
+
+                is_secret = (
+                    key in secret_keys
+                    or key in {
+                        default_key
+                        for default_key, (_, default_secret) in known_defaults.items()
+                        if default_secret
+                    }
+                )
+
+                session.add(
+                    InstanceRuntimeConfig(
+                        config_key=key,
+                        config_value=encoded,
+                        is_secret=is_secret,
+                    )
+                )
+
+            session.commit()
+
+        logger.info(
+            "Runtime config updated keys={keys}",
+            keys=sorted(settings_updates.keys()),
+        )
 
     def sign_up(self, user_data: Users) -> None:
         """
@@ -2046,7 +2249,7 @@ class DatabaseHandler:
                 "name": "Manage Server Privileges",
                 "category": "server_management",
             },
-            {"id": "manage_cdn", "name": "Manage CDN", "category": "server_management"},
+            {"id": "manage_cdn", "name": "Manage Storage", "category": "server_management"},
             {
                 "id": "view_server_stats",
                 "name": "View Server Stats",
@@ -2065,18 +2268,18 @@ class DatabaseHandler:
                 "name": "View Audit Logs",
                 "category": "moderation",
             },
-            # CDN Management
+            # Storage Management
             {
                 "id": "upload_files",
                 "name": "Upload Files",
-                "category": "cdn_management",
+                "category": "storage_management",
             },
             {
                 "id": "delete_files",
                 "name": "Delete Files",
-                "category": "cdn_management",
+                "category": "storage_management",
             },
-            {"id": "view_files", "name": "View Files", "category": "cdn_management"},
+            {"id": "view_files", "name": "View Files", "category": "storage_management"},
         ]
 
         # Default roles data
@@ -2246,7 +2449,7 @@ class DatabaseHandler:
         Add a sticker to the server catalog if it doesn't already exist.
 
         Args:
-            sticker_url (str): The CDN URL of the sticker
+            sticker_url (str): The storage URL of the sticker
             filename (str): Original filename of the sticker
             uploaded_by (uuid.UUID): User ID of who uploaded it
 
@@ -2283,7 +2486,7 @@ class DatabaseHandler:
         Add a GIF to the server catalog if it doesn't already exist.
 
         Args:
-            gif_url (str): The CDN URL of the GIF
+            gif_url (str): The storage URL of the GIF
             filename (str): Original filename of the GIF
             uploaded_by (uuid.UUID): User ID of who uploaded it
 
@@ -2921,7 +3124,7 @@ class DatabaseHandler:
         Args:
             reference_id (str): Unique reference identifier
             file_hash (str): SHA-256 hash of the file
-            reference_type (str): Type of reference (e.g., 'cdn_upload')
+            reference_type (str): Type of reference (e.g., 'storage_upload')
             reference_entity_id (str): ID of the entity being referenced
 
         Returns:
@@ -2994,7 +3197,7 @@ class DatabaseHandler:
     def cleanup_orphaned_files(self, db_files: list[str] = None) -> None:
         """
         Remove files that are no longer referenced in the database.
-        This is used by the CDN cleanup feature to remove unreferenced files.
+        This is used by storage cleanup to remove unreferenced files.
 
         Args:
             db_files (List[str]): Optional list of referenced file URLs.
@@ -3020,10 +3223,11 @@ class DatabaseHandler:
                 file_hashes = []
                 for url in db_files:
                     # Extract path from URL and try to find corresponding file
-                    base_url = self.config.CDN_BASE_URL.lstrip("/")
-                    if url.startswith(base_url):
-                        relative_path = url[len(base_url) :].lstrip("/")
-                        file_path = Path(self.config.CDN_STORAGE_PATH) / relative_path
+                    base_url = self.config.STORAGE_BASE_URL.lstrip("/")
+                    normalized_url = url.lstrip("/")
+                    if normalized_url.startswith(base_url):
+                        relative_path = normalized_url[len(base_url) :].lstrip("/")
+                        file_path = Path(self.config.STORAGE_PATH) / relative_path
                         if file_path.exists():
                             try:
                                 with open(file_path, "rb") as f:
@@ -3045,7 +3249,7 @@ class DatabaseHandler:
 
             # Delete orphaned files from disk and database
             for file_obj in orphaned_files:
-                file_path = Path(self.config.CDN_STORAGE_PATH) / file_obj.file_path
+                file_path = Path(self.config.STORAGE_PATH) / file_obj.file_path
                 try:
                     if file_path.exists():
                         file_path.unlink()
@@ -3060,9 +3264,9 @@ class DatabaseHandler:
                     )
 
             # Also find and remove files on disk that aren't in the database
-            cdn_dir = Path(self.config.CDN_STORAGE_PATH)
-            if cdn_dir.exists():
-                for sub_dir in cdn_dir.glob("*"):
+            storage_dir = Path(self.config.STORAGE_PATH)
+            if storage_dir.exists():
+                for sub_dir in storage_dir.glob("*"):
                     if sub_dir.is_dir():  # Only process subdirectories
                         for file_path in sub_dir.glob("*"):
                             if file_path.is_file():
@@ -3126,7 +3330,7 @@ class DatabaseHandler:
             # Convert to URLs
             referenced_files = []
             for file_hash, file_path in results:
-                url = f"{self.config.CDN_BASE_URL}/{file_path}"
+                url = f"{self.config.STORAGE_BASE_URL.rstrip('/')}/{file_path}"
                 referenced_files.append(url)
 
             return referenced_files
@@ -3266,4 +3470,5 @@ class DatabaseHandler:
             stmt = select(FileObjects).where(FileObjects.file_hash == file_hash)
             result = session.execute(stmt).fetchone()
             return result[0] if result else None
+
 

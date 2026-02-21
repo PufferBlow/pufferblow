@@ -2,7 +2,7 @@ import pufferblow.core.constants as constants
 
 
 class Config:
-    """config model class"""
+    """Configuration model class."""
 
     # API related parameters
     API_HOST: str = "127.0.0.1"
@@ -15,6 +15,31 @@ class Config:
     JWT_SECRET: str = "change-this-jwt-secret-in-production"
     JWT_ACCESS_TTL_MINUTES: int = 15
     JWT_REFRESH_TTL_DAYS: int = 30
+
+    # RTC/voice related parameters
+    VOICE_BACKEND: str = "sfu_v2"
+    RTC_SIGNALING_URL: str = "ws://127.0.0.1:8787/rtc/v1/ws"
+    RTC_JOIN_TOKEN_TTL_SECONDS: int = 60
+    RTC_JOIN_SECRET: str = "change-this-rtc-join-secret"
+    RTC_INTERNAL_SECRET: str = "change-this-rtc-internal-secret"
+    RTC_BOOTSTRAP_SECRET: str = "change-this-rtc-bootstrap-secret"
+    RTC_INTERNAL_API_BASE: str = "http://127.0.0.1:7575/api/internal/v1/voice"
+    RTC_STUN_SERVERS: str = "stun:stun.l.google.com:19302"
+    TURN_URL: str | None = None
+    TURN_USERNAME: str | None = None
+    TURN_PASSWORD: str | None = None
+    RTC_MAX_TOTAL_PEERS: int = 200
+    RTC_MAX_ROOM_PEERS: int = 60
+    RTC_ROOM_END_GRACE_SECONDS: int = 15
+    RTC_INTERNAL_EVENT_WORKERS: int = 4
+    RTC_INTERNAL_EVENT_QUEUE_SIZE: int = 4096
+    RTC_INTERNAL_HTTP_TIMEOUT_SECONDS: int = 5
+    RTC_WS_WRITE_TIMEOUT_SECONDS: int = 4
+    RTC_WS_PING_INTERVAL_SECONDS: int = 20
+    RTC_WS_PONG_WAIT_SECONDS: int = 45
+    RTC_WS_READ_LIMIT_BYTES: int = 1_048_576
+    RTC_UDP_PORT_MIN: int = 50000
+    RTC_UDP_PORT_MAX: int = 50199
 
     # PostgreSQL Database
     DATABASE_NAME: str
@@ -40,7 +65,7 @@ class Config:
     STORAGE_PROVIDER: str = "local"
     STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/storage"
     STORAGE_BASE_URL: str = "/storage"
-    STORAGE_ALLOCATED_GB: int = 10  # Default 10GB for local storage
+    STORAGE_ALLOCATED_GB: int = 10
     STORAGE_SSE_ENABLED: bool = False
     STORAGE_SSE_KEY: str | None = None
 
@@ -49,12 +74,12 @@ class Config:
     S3_REGION: str = "us-east-1"
     S3_ACCESS_KEY: str | None = None
     S3_SECRET_KEY: str | None = None
-    S3_ENDPOINT_URL: str | None = None  # For custom S3-compatible services
+    S3_ENDPOINT_URL: str | None = None
 
     # Static file serving parameters
     CDN_STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/cdn"
     CDN_BASE_URL: str = "/cdn"
-    CDN_CACHE_MAX_AGE: int = 86400  # 24 hours in seconds
+    CDN_CACHE_MAX_AGE: int = 86400
 
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the instance."""
@@ -62,16 +87,7 @@ class Config:
             self.set_attr_from_config(config)
 
     def set_attr_from_config(self, config: dict) -> None:
-        """
-        Sets the attributes values from the config file
-
-        Args:
-            config (dict): The config file data.
-
-        Returns:
-            None.
-        """
-        # API related parameters
+        """Set model attributes from config file data."""
         self.API_HOST = config["api"]["host"]
         self.API_PORT = config["api"]["port"]
         self.LOGS_PATH = config["api"]["logs_path"]
@@ -85,7 +101,61 @@ class Config:
         self.JWT_ACCESS_TTL_MINUTES = config["api"].get("jwt_access_ttl_minutes", 15)
         self.JWT_REFRESH_TTL_DAYS = config["api"].get("jwt_refresh_ttl_days", 30)
 
-        # PostgreSQL Database
+        rtc_section = config.get("rtc", {})
+        self.VOICE_BACKEND = rtc_section.get("voice_backend", "sfu_v2")
+        self.RTC_SIGNALING_URL = rtc_section.get(
+            "signaling_url", "ws://127.0.0.1:8787/rtc/v1/ws"
+        )
+        self.RTC_JOIN_TOKEN_TTL_SECONDS = int(
+            rtc_section.get("join_token_ttl_seconds", 60)
+        )
+        self.RTC_JOIN_SECRET = rtc_section.get(
+            "join_secret", "change-this-rtc-join-secret"
+        )
+        self.RTC_INTERNAL_SECRET = rtc_section.get(
+            "internal_secret", "change-this-rtc-internal-secret"
+        )
+        self.RTC_BOOTSTRAP_SECRET = rtc_section.get(
+            "bootstrap_secret", "change-this-rtc-bootstrap-secret"
+        )
+        self.RTC_INTERNAL_API_BASE = rtc_section.get(
+            "internal_api_base", "http://127.0.0.1:7575/api/internal/v1/voice"
+        )
+        self.RTC_STUN_SERVERS = rtc_section.get(
+            "stun_servers", "stun:stun.l.google.com:19302"
+        )
+        self.TURN_URL = rtc_section.get("turn_url")
+        self.TURN_USERNAME = rtc_section.get("turn_username")
+        self.TURN_PASSWORD = rtc_section.get("turn_password")
+        self.RTC_MAX_TOTAL_PEERS = int(rtc_section.get("max_total_peers", 200))
+        self.RTC_MAX_ROOM_PEERS = int(rtc_section.get("max_room_peers", 60))
+        self.RTC_ROOM_END_GRACE_SECONDS = int(
+            rtc_section.get("room_end_grace_seconds", 15)
+        )
+        self.RTC_INTERNAL_EVENT_WORKERS = int(
+            rtc_section.get("internal_event_workers", 4)
+        )
+        self.RTC_INTERNAL_EVENT_QUEUE_SIZE = int(
+            rtc_section.get("internal_event_queue_size", 4096)
+        )
+        self.RTC_INTERNAL_HTTP_TIMEOUT_SECONDS = int(
+            rtc_section.get("internal_http_timeout_seconds", 5)
+        )
+        self.RTC_WS_WRITE_TIMEOUT_SECONDS = int(
+            rtc_section.get("ws_write_timeout_seconds", 4)
+        )
+        self.RTC_WS_PING_INTERVAL_SECONDS = int(
+            rtc_section.get("ws_ping_interval_seconds", 20)
+        )
+        self.RTC_WS_PONG_WAIT_SECONDS = int(
+            rtc_section.get("ws_pong_wait_seconds", 45)
+        )
+        self.RTC_WS_READ_LIMIT_BYTES = int(
+            rtc_section.get("ws_read_limit_bytes", 1_048_576)
+        )
+        self.RTC_UDP_PORT_MIN = int(rtc_section.get("udp_port_min", 50000))
+        self.RTC_UDP_PORT_MAX = int(rtc_section.get("udp_port_max", 50199))
+
         db_section = config.get("postgresql")
         if not db_section:
             raise KeyError("'postgresql' section not found in config")
@@ -100,16 +170,13 @@ class Config:
         self.DATABASE_SSL_KEY = db_section.get("ssl_key")
         self.DATABASE_SSL_ROOT_CERT = db_section.get("ssl_root_cert")
 
-        # Encryption
         self.DERIVED_KEY_BYTES = config["encryption"]["derived_key_bytes"]
         self.DERIVED_KEY_ROUNDS = config["encryption"]["derived_key_rounds"]
 
-        # Messages related parameters
         self.MAX_MESSAGE_SIZE = config["messages"]["max_message_size"]
         self.MAX_MESSAGES_PER_PAGE = config["messages"]["max_messages_per_page"]
         self.MIN_MESSAGES_PER_PAGE = config["messages"]["min_messages_per_page"]
 
-        # Storage related parameters
         if "storage" in config:
             self.STORAGE_PROVIDER = config["storage"]["provider"]
             self.STORAGE_PATH = config["storage"]["storage_path"]
@@ -118,88 +185,28 @@ class Config:
             self.STORAGE_SSE_ENABLED = config["storage"].get("sse_enabled", False)
             self.STORAGE_SSE_KEY = config["storage"].get("sse_key")
 
-            # S3 configuration
             if "s3" in config["storage"]:
-                self.S3_BUCKET_NAME = config["storage"]["s3"]["bucket_name"]
-                self.S3_REGION = config["storage"]["s3"]["region"]
-                self.S3_ACCESS_KEY = config["storage"]["s3"]["access_key"]
-                self.S3_SECRET_KEY = config["storage"]["s3"]["secret_key"]
+                self.S3_BUCKET_NAME = config["storage"]["s3"].get("bucket_name")
+                self.S3_REGION = config["storage"]["s3"].get("region", "us-east-1")
+                self.S3_ACCESS_KEY = config["storage"]["s3"].get("access_key")
+                self.S3_SECRET_KEY = config["storage"]["s3"].get("secret_key")
                 self.S3_ENDPOINT_URL = config["storage"]["s3"].get("endpoint_url")
 
-        # Static file serving parameters
         if "cdn" in config:
             self.CDN_STORAGE_PATH = config["cdn"]["storage_path"]
             self.CDN_BASE_URL = config["cdn"]["base_url"]
             self.CDN_CACHE_MAX_AGE = config["cdn"]["cache_max_age"]
 
-    def export_toml(self) -> str:
-        """
-        Exports the attributes into a toml format.
-
-        Args:
-            None.
-
-        Returns:
-            str: The attributes in the toml format.
-        """
-        config = f"""# This is the config file for pufferblow-api
-# please if you do edit this file you will need
-# to restart, in order to apply the changes
-
-[api]
-host = "{self.API_HOST}"
-port = {self.API_PORT}
-logs_path = "{self.LOGS_PATH}"
-workers = {self.WORKERS} # number of workers for the ASGI, the higher the better
-rate_limit_duration = {self.RATE_LIMIT_DURATION} # the duration of a rate limit of an IP address (in minutes)
-max_rate_limit_requests = {self.MAX_RATE_LIMIT_REQUESTS} # number of request before a rate limit warning
-max_rate_limit_warnings = {self.MAX_RATE_LIMIT_WARNINGS} # number of rate limit warnings before blocking the IP address
-jwt_secret = "{self.JWT_SECRET}" # JWT signing secret (change this in production)
-jwt_access_ttl_minutes = {self.JWT_ACCESS_TTL_MINUTES} # Access token lifetime in minutes
-jwt_refresh_ttl_days = {self.JWT_REFRESH_TTL_DAYS} # Refresh token lifetime in days
-
-[postgresql]
-database_name = "{self.DATABASE_NAME}"
-username = "{self.USERNAME}"
-password = "{self.DATABASE_PASSWORD}"
-host = "{self.DATABASE_HOST}"
-port = "{self.DATABASE_PORT}"
-ssl_mode = "{self.DATABASE_SSL_MODE}"
-ssl_cert = "{self.DATABASE_SSL_CERT}" if self.DATABASE_SSL_CERT else ""
-ssl_key = "{self.DATABASE_SSL_KEY}" if self.DATABASE_SSL_KEY else ""
-ssl_root_cert = "{self.DATABASE_SSL_ROOT_CERT}" if self.DATABASE_SSL_ROOT_CERT else ""
-
-[encryption]
-derived_key_bytes = {self.DERIVED_KEY_BYTES} # This specifies the bytes length of the derived key. A 56-bit key provides a good balance between security and performance. The bytes should be 5 to 56 bytes.
-derived_key_rounds = {self.DERIVED_KEY_ROUNDS} # This represents the number of iterations for the derived key generation process. A higher value increases the computational effort required, enhancing security but also using more CPU resources.
-
-[messages]
-max_message_size = {self.MAX_MESSAGE_SIZE} # This defines the maximum size (in KB) for a message that can be sent. Setting this to a larger value may provide more flexibility, but it could also impact your storage capacity. Please adjust according to your storage resources.
-max_messages_per_page = {self.MAX_MESSAGES_PER_PAGE} # This defines the maximum number of messages that can be displayed on each page. A value of 50 is recommended to balance between data load and user experience.
-min_messages_per_page = {self.MIN_MESSAGES_PER_PAGE} # This defines the minimum number of messages that can be displayed on each page. A value of 20 is recommended to ensure that there is enough message for the user to engage with on each page.
-
-[storage]
-provider = "{self.STORAGE_PROVIDER}" # Storage backend provider: "local" or "s3"
-storage_path = "{self.STORAGE_PATH}" # Local storage directory (for local provider)
-base_url = "{self.STORAGE_BASE_URL}" # Base URL for serving files
-allocated_gb = {self.STORAGE_ALLOCATED_GB} # Allocated storage space in GB (for local provider)
-sse_enabled = {str(self.STORAGE_SSE_ENABLED).lower()} # Enable AES-256 server-side encryption for stored files
-sse_key = "{self.STORAGE_SSE_KEY}" if self.STORAGE_SSE_KEY else "" # Encryption key or passphrase (recommended: set via env PUFFERBLOW_STORAGE_SSE_KEY)
-
-[storage.s3]
-bucket_name = "{self.S3_BUCKET_NAME}" if self.S3_BUCKET_NAME else "" # S3 bucket name (for s3 provider)
-region = "{self.S3_REGION}" # AWS region
-access_key = "{self.S3_ACCESS_KEY}" if self.S3_ACCESS_KEY else "" # AWS access key
-secret_key = "{self.S3_SECRET_KEY}" if self.S3_SECRET_KEY else "" # AWS secret key
-endpoint_url = "{self.S3_ENDPOINT_URL}" if self.S3_ENDPOINT_URL else "" # Custom S3 endpoint (optional)
-
-[cdn]
-storage_path = "{self.CDN_STORAGE_PATH}" # This defines the directory where uploaded files will be stored on the server.
-base_url = "{self.CDN_BASE_URL}" # This defines the base URL path for serving files (e.g., /cdn).
-cache_max_age = {self.CDN_CACHE_MAX_AGE} # This defines the maximum age (in seconds) for caching file responses. A value of 86400 (24 hours) is recommended for good performance.
-"""
-        return config
-
     def __repr__(self) -> str:
         """Repr special method."""
-        return f"Config(API_HOST={self.API_HOST!r}, API_PORT={self.API_PORT!r}, WORKERS={self.WORKERS!r}, LOGS_PATH={self.LOGS_PATH!r}, RATE_LIMIT_DURATION={self.RATE_LIMIT_DURATION!r}, MAX_RATE_LIMIT_REQUESTS={self.MAX_RATE_LIMIT_REQUESTS!r}, MAX_RATE_LIMIT_WARNINGS={self.MAX_RATE_LIMIT_WARNINGS!r})"
+        return (
+            "Config("
+            f"API_HOST={self.API_HOST!r}, "
+            f"API_PORT={self.API_PORT!r}, "
+            f"WORKERS={self.WORKERS!r}, "
+            f"LOGS_PATH={self.LOGS_PATH!r}, "
+            f"RATE_LIMIT_DURATION={self.RATE_LIMIT_DURATION!r}, "
+            f"MAX_RATE_LIMIT_REQUESTS={self.MAX_RATE_LIMIT_REQUESTS!r}, "
+            f"MAX_RATE_LIMIT_WARNINGS={self.MAX_RATE_LIMIT_WARNINGS!r}, "
+            f"VOICE_BACKEND={self.VOICE_BACKEND!r})"
+        )

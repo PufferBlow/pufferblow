@@ -9,7 +9,9 @@ This module handles all message-related operations including:
 """
 
 import sys
+import mimetypes
 from datetime import datetime
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
 from loguru import logger
 
@@ -23,6 +25,52 @@ from pufferblow.core.bootstrap import api_initializer
 
 # Create router for message-related endpoints
 router = APIRouter(prefix="/api/v1/channels/{channel_id}")
+
+
+def _extract_storage_hash(storage_url: str) -> str | None:
+    """Extract storage hash from canonical `/storage/<hash>` style URLs."""
+    if not storage_url:
+        return None
+
+    path = urlparse(storage_url).path if "://" in storage_url else storage_url
+    storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
+    if not path.startswith(f"{storage_base}/"):
+        return None
+
+    suffix = path[len(storage_base) + 1 :]
+    if "/" in suffix:
+        return None
+    if len(suffix) != 64:
+        return None
+    return suffix
+
+
+def _serialize_attachment(storage_url: str) -> dict:
+    """Build a client-facing attachment object from a storage URL."""
+    file_hash = _extract_storage_hash(storage_url)
+    if file_hash:
+        file_obj = api_initializer.database_handler.get_file_object_by_hash(file_hash)
+        if file_obj:
+            return {
+                "url": storage_url,
+                "filename": file_obj.filename,
+                "type": file_obj.mime_type,
+                "size": file_obj.file_size,
+            }
+
+    fallback_name = (
+        (urlparse(storage_url).path if "://" in storage_url else storage_url)
+        .rstrip("/")
+        .split("/")[-1]
+        or "attachment"
+    )
+    guessed_type = mimetypes.guess_type(fallback_name)[0] or "application/octet-stream"
+    return {
+        "url": storage_url,
+        "filename": fallback_name,
+        "type": guessed_type,
+        "size": None,
+    }
 
 
 # Dependency to parse form data into Pydantic model
@@ -161,8 +209,8 @@ async def channel_send_message(
         for file in attachments:
             if file.filename:
                 try:
-                    # Use the CDN manager to save the attachment
-                    cdn_url, is_duplicate = (
+                    # Use the storage manager to save the attachment
+                    storage_url, is_duplicate = (
                         await api_initializer.storage_manager.validate_and_save_categorized_file(
                             file=file,
                             user_id=user_id,
@@ -170,7 +218,7 @@ async def channel_send_message(
                             check_duplicates=True,
                         )
                     )
-                    attachment_urls.append(cdn_url)
+                    attachment_urls.append(storage_url)
 
                     # Log attachment upload
                     try:
@@ -180,7 +228,7 @@ async def channel_send_message(
                             "event_type": "message_attachment",
                             "description": f"Attachment '{file.filename}' uploaded for message in channel {channel_id}",
                             "metadata": {
-                                "file_url": cdn_url,
+                                "file_url": storage_url,
                                 "file_size": file_size,
                                 "file_type": file_type,
                                 "channel_id": channel_id,
@@ -241,7 +289,7 @@ async def channel_send_message(
         "sender_last_seen": sender_user.get("last_seen"),
         "sender_created_at": sender_user.get("created_at"),
         "sent_at": sent_at_value,
-        "attachments": attachment_urls,
+        "attachments": [_serialize_attachment(item) for item in attachment_urls],
     }
 
     # Broadcast to all eligible users using global websocket system
