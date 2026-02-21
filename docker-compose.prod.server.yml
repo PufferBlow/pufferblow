@@ -39,7 +39,7 @@ services:
       - pufferblow-server-net
 
   coturn:
-    image: instrumentisto/coturn:4.6.3
+    image: instrumentisto/coturn:latest
     container_name: pufferblow-coturn
     restart: unless-stopped
     command: >
