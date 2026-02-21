@@ -41,7 +41,7 @@ class BackgroundTasksManager:
     def __init__(
         self,
         database_handler: DatabaseHandler,
-        storage_manager: StorageManager | None,
+        storage_manager: StorageManager,
         config: Config,
     ):
         """Initialize the instance."""

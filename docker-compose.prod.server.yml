@@ -2,7 +2,7 @@ services:
   pufferblow-server:
     build:
       context: .
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     container_name: pufferblow-server
     restart: unless-stopped
     ports:
@@ -25,16 +25,20 @@ services:
       dockerfile: Dockerfile
     container_name: pufferblow-media-sfu
     restart: unless-stopped
+    command: ["-config", "/root/.pufferblow/config.toml"]
     ports:
       - "8787:8787"
       - "${RTC_UDP_PORT_MIN:-50000}-${RTC_UDP_PORT_MAX:-50199}:${RTC_UDP_PORT_MIN:-50000}-${RTC_UDP_PORT_MAX:-50199}/udp"
+    volumes:
+      - pufferblow_data:/root/.pufferblow
     environment:
+      # Fallbacks for env-only configuration (used if config.toml not found)
       RTC_BIND_ADDR: ":8787"
       RTC_BOOTSTRAP_CONFIG_URL: http://pufferblow-server:7575/api/internal/v1/voice/bootstrap-config
-      RTC_BOOTSTRAP_SECRET: ${RTC_BOOTSTRAP_SECRET}
       RTC_BOOTSTRAP_HTTP_TIMEOUT: ${RTC_BOOTSTRAP_HTTP_TIMEOUT:-5s}
     depends_on:
-      - pufferblow-server
+      pufferblow-server:
+        condition: service_started
     networks:
       - pufferblow-server-net
 

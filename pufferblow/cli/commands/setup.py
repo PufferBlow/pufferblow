@@ -18,6 +18,7 @@ from pufferblow.cli.common import (
     ensure_database_exists,
     load_runtime,
 )
+from pufferblow.cli.setup_prompt import run_setup_wizard
 from pufferblow.core.bootstrap import api_initializer
 
 
@@ -38,18 +39,9 @@ class OwnerDetails:
     password: str
 
 
-def _launch_textual_setup(has_existing_config: bool):
-    """Run the Textual setup wizard when available."""
-    try:
-        from pufferblow.cli.textual_setup import SetupWizardApp
-    except ImportError:
-        return ("missing_dependency", None)
-
-    app = SetupWizardApp(has_existing_config=has_existing_config)
-    app.run()
-    if app.result is None:
-        return ("cancelled", None)
-    return ("ok", app.result)
+def _launch_setup_wizard(has_existing_config: bool):
+    """Run the interactive setup wizard using typer prompts."""
+    return run_setup_wizard(has_existing_config=has_existing_config)
 
 
 def _prompt_database_credentials() -> DatabaseCredentials:
@@ -102,6 +94,38 @@ def _prompt_owner_details() -> OwnerDetails:
     return OwnerDetails(username=username, password=password)
 
 
+def _prompt_media_sfu_config() -> dict[str, str | int]:
+    """Prompt user for media-sfu configuration."""
+    bootstrap_secret = Prompt.ask("Bootstrap secret", password=True).strip()
+    bootstrap_config_url = Prompt.ask(
+        "Bootstrap config URL",
+        default="http://localhost:7575/api/internal/v1/voice/bootstrap-config",
+    ).strip()
+    bind_addr = Prompt.ask("WebSocket bind address", default=":8787").strip()
+    max_total_peers = int(
+        Prompt.ask("Max total peers across all rooms", default="200").strip()
+    )
+    max_room_peers = int(
+        Prompt.ask("Max peers per room", default="60").strip()
+    )
+    event_workers = int(
+        Prompt.ask("Event workers", default="4").strip()
+    )
+
+    if not bootstrap_secret:
+        logger.error("Bootstrap secret is required.")
+        raise typer.Exit(code=1)
+
+    return {
+        "bootstrap_secret": bootstrap_secret,
+        "bootstrap_config_url": bootstrap_config_url,
+        "bind_addr": bind_addr,
+        "max_total_peers": max_total_peers,
+        "max_room_peers": max_room_peers,
+        "event_workers": event_workers,
+    }
+
+
 def _apply_server_configuration(
     *, server: ServerDetails, is_update: bool
 ) -> None:
@@ -140,8 +164,47 @@ def _run_full_setup(
         raise typer.Exit(code=1)
 
     api_initializer.database_handler.initialize_default_data()
-    _ensure_runtime_security_settings(config_handler=config_handler)
+    security_settings = _ensure_runtime_security_settings(config_handler=config_handler)
     _apply_server_configuration(server=server, is_update=False)
+
+    # Write database config to config.toml
+    db_config = {
+        "host": credentials.host,
+        "port": credentials.port,
+        "username": credentials.username,
+        "password": credentials.password,
+        "database": credentials.database_name,
+    }
+
+    # Write media-sfu config to config.toml with the generated bootstrap secret
+    bootstrap_secret = security_settings.get("RTC_BOOTSTRAP_SECRET") or str(
+        api_initializer.database_handler.get_runtime_config(include_secrets=True).get(
+            "RTC_BOOTSTRAP_SECRET", ""
+        )
+    )
+    
+    media_sfu_config = {
+        "bootstrap_config_url": "http://localhost:7575/api/internal/v1/voice/bootstrap-config",
+        "bootstrap_secret": bootstrap_secret,
+        "bind_addr": ":8787",
+        "max_total_peers": 200,
+        "max_room_peers": 60,
+        "room_end_grace_seconds": 15,
+        "event_workers": 4,
+        "event_queue_size": 4096,
+        "http_timeout_seconds": 5,
+        "ws_write_timeout_seconds": 4,
+        "ws_ping_interval_seconds": 20,
+        "ws_pong_wait_seconds": 45,
+        "ws_read_limit_bytes": 1048576,
+        "udp_port_min": 50000,
+        "udp_port_max": 50199,
+    }
+
+    config_handler.write_config_toml(
+        database_config=db_config,
+        media_sfu_config=media_sfu_config,
+    )
 
     auth_token = api_initializer.user_manager.sign_up(
         username=owner.username,
@@ -149,14 +212,13 @@ def _run_full_setup(
         is_admin=True,
         is_owner=True,
     ).raw_auth_token
-    config_handler.set_bootstrap_database_uri(database_uri=database_uri)
-    sfu_bootstrap_secret = config_handler.resolve_bootstrap_sfu_secret() or "[unknown]"
 
     console.print(
         Panel.fit(
             f"[bold green]{auth_token}[/bold green]\n\n"
             "[bold red]Store this owner auth token safely.[/bold red]\n\n"
-            f"[bold cyan]SFU bootstrap secret:[/bold cyan] {sfu_bootstrap_secret}",
+            f"[bold cyan]RTC Bootstrap Secret:[/bold cyan] [bold green]{bootstrap_secret}[/bold green]\n"
+            f"(saved to ~/.pufferblow/config.toml)",
             title="[bold yellow]Setup Complete[/bold yellow]",
             border_style="green",
         )
@@ -201,8 +263,6 @@ def _ensure_runtime_security_settings(*, config_handler: ConfigHandler) -> dict[
     bootstrap_secret = updates.get("RTC_BOOTSTRAP_SECRET") or str(
         runtime.get("RTC_BOOTSTRAP_SECRET") or ""
     )
-    if bootstrap_secret:
-        config_handler.set_bootstrap_sfu_secret(bootstrap_secret)
 
     return updates
 
@@ -232,8 +292,48 @@ def _run_server_only_setup(
     )
 
 
-def _run_textual_payload(payload, *, config_handler: ConfigHandler) -> None:
-    """Execute setup using values produced by Textual setup app."""
+def _run_media_sfu_only_setup(
+    *, config_handler: ConfigHandler, media_sfu_config: dict[str, str | int]
+) -> None:
+    """Execute setup flow that only touches media-sfu configuration."""
+    database_uri = config_handler.resolve_database_uri()
+    if not database_uri:
+        logger.error(
+            "No bootstrap database URI found. Run `pufferblow setup` first."
+        )
+        raise typer.Exit(code=1)
+
+    # Write media-sfu config to config.toml (don't touch database section)
+    config_handler.write_config_toml(
+        media_sfu_config=media_sfu_config,
+    )
+
+    console.print(
+        Panel.fit(
+            "[bold green]Media-SFU configuration updated successfully![/bold green]\n\n"
+            f"[bold cyan]Bootstrap URL:[/bold cyan] {media_sfu_config['bootstrap_config_url']}\n"
+            f"[bold cyan]Bind Address:[/bold cyan] {media_sfu_config['bind_addr']}\n"
+            f"(Configuration saved to ~/.pufferblow/config.toml)",
+            title="[bold yellow]Media-SFU Setup Complete[/bold yellow]",
+            border_style="green",
+        )
+    )
+
+
+
+def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
+    """Execute setup using values produced by the setup wizard."""
+    # Handle media-sfu only mode
+    if payload.mode == "media_sfu_only":
+        if payload.media_sfu_config is None:
+            logger.error("No media-sfu configuration provided.")
+            raise typer.Exit(code=1)
+        _run_media_sfu_only_setup(
+            config_handler=config_handler,
+            media_sfu_config=payload.media_sfu_config,
+        )
+        return
+
     server = ServerDetails(
         name=payload.server_name,
         description=payload.server_description,
@@ -267,24 +367,6 @@ def _run_textual_payload(payload, *, config_handler: ConfigHandler) -> None:
     )
 
 
-def _prompt_mode_without_textual(has_config: bool) -> str:
-    """Prompt for setup mode when Textual is unavailable."""
-    console.print("[bold]Setup mode[/bold]")
-    console.print("1. Full setup (database + server + owner)")
-    if has_config:
-        console.print("2. Server configuration only")
-        console.print("3. Update existing server information")
-        choices = ["1", "2", "3"]
-    else:
-        choices = ["1"]
-    selected = Prompt.ask("Select mode", choices=choices, default="1")
-    if selected == "2":
-        return "server_only"
-    if selected == "3":
-        return "server_update"
-    return "full"
-
-
 def setup_command(
     is_setup_server: bool = typer.Option(
         False, "--setup-server", help="Only create initial server metadata."
@@ -294,14 +376,34 @@ def setup_command(
         "--update-server",
         help="Update existing server metadata (name, description, welcome message).",
     ),
+    is_setup_media_sfu: bool = typer.Option(
+        False,
+        "--setup-media-sfu",
+        help="Only configure media-sfu WebRTC server.",
+    ),
 ) -> None:
     """Configure database, server metadata, and owner account."""
     config_handler = ConfigHandler()
     has_bootstrap_config = config_handler.resolve_database_uri() is not None
 
-    if is_setup_server and is_update_server:
-        logger.error("Choose either --setup-server or --update-server, not both.")
+    # Validate that only one flag is used
+    flags_used = sum([is_setup_server, is_update_server, is_setup_media_sfu])
+    if flags_used > 1:
+        logger.error("Choose only one of --setup-server, --update-server, or --setup-media-sfu.")
         raise typer.Exit(code=1)
+
+    if is_setup_media_sfu:
+        if not has_bootstrap_config:
+            logger.error(
+                "No bootstrap database URI found. Run `pufferblow setup` first."
+            )
+            raise typer.Exit(code=1)
+        media_sfu_config = _prompt_media_sfu_config()
+        _run_media_sfu_only_setup(
+            config_handler=config_handler,
+            media_sfu_config=media_sfu_config,
+        )
+        return
 
     if is_setup_server or is_update_server:
         server = _prompt_server_details()
@@ -312,45 +414,9 @@ def setup_command(
         )
         return
 
-    setup_state, payload = _launch_textual_setup(
-        has_existing_config=has_bootstrap_config
-    )
-    if setup_state == "ok":
-        _run_textual_payload(payload, config_handler=config_handler)
-        return
-    if setup_state == "cancelled":
+    payload = _launch_setup_wizard(has_existing_config=has_bootstrap_config)
+    if payload is None:
         console.print("[dim]Setup cancelled.[/dim]")
         raise typer.Exit(code=0)
 
-    mode = _prompt_mode_without_textual(has_config=has_bootstrap_config)
-    server = _prompt_server_details()
-
-    if mode == "server_only":
-        _run_server_only_setup(
-            config_handler=config_handler,
-            server=server,
-            is_update=False,
-        )
-        return
-    if mode == "server_update":
-        _run_server_only_setup(
-            config_handler=config_handler,
-            server=server,
-            is_update=True,
-        )
-        return
-
-    if has_bootstrap_config and not Confirm.ask(
-        "A bootstrap database URI already exists. Continue and overwrite it?",
-        default=False,
-    ):
-        raise typer.Exit(code=0)
-
-    credentials = _prompt_database_credentials()
-    owner = _prompt_owner_details()
-    _run_full_setup(
-        config_handler=config_handler,
-        credentials=credentials,
-        server=server,
-        owner=owner,
-    )
+    _run_setup_payload(payload, config_handler=config_handler)

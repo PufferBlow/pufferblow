@@ -244,7 +244,7 @@ class CDNManager:
 
         # Check file size
         content = file.file.read()
-        if len(content) > max_size_mb * 1024 * 1024:
+        if len(content) > max_size_mb * 1024 * 1024 * 30:
             raise HTTPException(
                 status_code=400, detail=f"File size exceeds maximum of {max_size_mb}MB"
             )

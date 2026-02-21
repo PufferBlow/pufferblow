@@ -1,29 +1,26 @@
-# Global variables
-ARG MEMCACHED_URL="https://www.memcached.org/files/memcached-1.6.29.tar.gz"
-ARG MEMCACHED_TAR_FILE="memcached-1.6.29.tar.gz"
-ARG MEMCACHED_FOLDER="memcached-1.6.29"
+FROM python:3.12-slim AS runtime
 
-# Installing python 3.11
-FROM python:3.11
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
 
-RUN apt-get update -y \
-  &&  apt-get upgrade -y
+WORKDIR /app
 
-# Installing dependencies packages
-RUN apt-get install libevent-dev -y # Needed by memcached
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
+COPY pyproject.toml poetry.lock ./
 
-# Installing pufferblow
-RUN pip install git+https://github.com/PufferBlow/pufferblow.git
+RUN pip install --upgrade pip poetry && \
+    poetry config virtualenvs.create false && \
+    poetry install --only main --no-interaction --no-ansi --no-root
 
+COPY . .
 
-WORKDIR "/home"
+RUN pip install --no-cache-dir -e .
 
-# Installing memcached
-RUN wget https://www.memcached.org/files/memcached-1.6.29.tar.gz  \
-  && tar -zxvf memcached-1.6.29.tar.gz                            \
-  && cd memcached-1.6.29                                          \
-  && ./configure                                                  \
-  && make                                                         \
-  && make install                                                 \
+EXPOSE 7575
 
+CMD ["pufferblow", "serve"]

@@ -1,0 +1,120 @@
+# PufferBlow Configuration File
+# Location: ~/.pufferblow/config.toml
+# This file stores critical server configuration including database credentials.
+# Keep this file secure and never commit it to version control.
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+# Choose ONE of the following approaches:
+# Approach 1: Use a full PostgreSQL connection URI
+# Approach 2: Use individual connection parameters (host, port, user, password, database)
+
+[database]
+# Approach 1: Full URI (takes precedence if both are specified)
+# database_uri = "postgresql://user:password@localhost:5432/pufferblow"
+
+# Approach 2: Individual parameters
+host = "localhost"
+port = 5432
+username = "pufferblow"
+password = "change-me-in-production"
+database = "pufferblow"
+
+# ============================================================================
+# SERVER CONFIGURATION (Optional - can also use environment variables)
+# ============================================================================
+[server]
+api_host = "127.0.0.1"    # Listen address (0.0.0.0 for external access)
+api_port = 7575           # API server port
+workers = 4               # Number of worker processes
+logs_path = "~/.pufferblow/logs/pufferblow.log"
+
+# ============================================================================
+# RTC/MEDIA CONFIGURATION (Optional)
+# ============================================================================
+[rtc]
+# Bootstrap secret must be kept secure - used for media-sfu/SFU authentication
+bootstrap_secret = "change-me-in-production"
+# TURN server password for WebRTC relay
+turn_password = "change-me-in-production"
+
+# ============================================================================
+# MEDIA-SFU RTC CONFIGURATION
+# ============================================================================
+# Configuration for the media-sfu server (Selective Forwarding Unit)
+# This manages WebRTC connections and audio/video streaming
+[media-sfu]
+# Bootstrap config URL (where to fetch runtime config)
+bootstrap_config_url = "http://localhost:7575/api/internal/v1/voice/bootstrap-config"
+
+# Bootstrap secret (must match server's RTC_BOOTSTRAP_SECRET)
+bootstrap_secret = "change-me-in-production"
+
+# WebSocket server bind address
+bind_addr = ":8787"
+
+# Bootstrap HTTP timeout (how long to wait for config fetch)
+bootstrap_http_timeout = "5s"
+
+# Max total peers across all rooms
+max_total_peers = 200
+
+# Max peers per room
+max_room_peers = 60
+
+# Grace period before ending empty rooms
+room_end_grace_seconds = 15
+
+# Internal event workers and queue
+event_workers = 4
+event_queue_size = 4096
+
+# HTTP client timeout for bootstrap
+http_timeout_seconds = 5
+
+# WebSocket timeouts
+ws_write_timeout_seconds = 4
+ws_ping_interval_seconds = 20
+ws_pong_wait_seconds = 45
+
+# WebSocket read limit (bytes)
+ws_read_limit_bytes = 1048576
+
+# UDP port range for RTC
+udp_port_min = 50000
+udp_port_max = 50199
+
+# ============================================================================
+# STORAGE CONFIGURATION (Optional)
+# ============================================================================
+[storage]
+# Local filesystem storage
+storage_backend = "local"
+local_storage_path = "~/.pufferblow/storage"
+
+# Or use S3-compatible storage
+# storage_backend = "s3"
+# s3_bucket = "pufferblow"
+# s3_region = "us-east-1"
+# s3_access_key = "your-access-key"
+# s3_secret_key = "your-secret-key"
+# s3_endpoint = "https://s3.amazonaws.com"
+
+# ============================================================================
+# LOGGING CONFIGURATION (Optional)
+# ============================================================================
+[logging]
+level = "INFO"            # DEBUG, INFO, WARNING, ERROR, CRITICAL
+format = "json"           # json or plain text
+
+# ============================================================================
+# SECURITY CONFIGURATION (Optional)
+# ============================================================================
+[security]
+# CORS allowed origins (comma-separated)
+# cors_origins = "http://localhost:3000,https://example.com"
+# 
+# Rate limiting
+# rate_limit_requests = 100        # requests per window
+# rate_limit_window_seconds = 60   # time window in seconds
