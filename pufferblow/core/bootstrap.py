@@ -12,7 +12,7 @@ from pufferblow.api.channels.channels_manager import ChannelsManager
 from pufferblow.api.config.config_handler import ConfigHandler
 from pufferblow.api.database.database import Database
 from pufferblow.api.database.database_handler import DatabaseHandler
-from pufferblow.api.hasher.hasher import Hasher
+from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.logger.msgs import errors
 from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.api.models.config_model import Config
@@ -40,7 +40,7 @@ class APIInitializer:
     """
 
     config: Config = None
-    hasher: Hasher = None
+    encrypt_manager: Encrypt = None
     database: Database = None
     database_handler: DatabaseHandler = None
     server_manager: ServerManager = None
@@ -78,7 +78,7 @@ class APIInitializer:
             return
 
         self.load_config()
-        self.hasher = Hasher()
+        self.encrypt_manager = Encrypt()
         self.load_database(database_uri=database_uri)
 
         database_uri_check = str(self.database_handler.database_engine.url)
@@ -87,24 +87,24 @@ class APIInitializer:
 
         self.server_manager = ServerManager(database_handler=self.database_handler)
         self.auth_token_manager = AuthTokenManager(
-            database_handler=self.database_handler, hasher=self.hasher
+            database_handler=self.database_handler, encrypt_manager=self.encrypt_manager
         )
         self.user_manager = UserManager(
             database_handler=self.database_handler,
             auth_token_manager=self.auth_token_manager,
-            hasher=self.hasher,
+            encrypt_manager=self.encrypt_manager,
             config=self.config,
         )
         self.channels_manager = ChannelsManager(
             database_handler=self.database_handler,
             auth_token_manager=self.auth_token_manager,
-            hasher=self.hasher,
+            encrypt_manager=self.encrypt_manager,
         )
         self.messages_manager = MessagesManager(
             database_handler=self.database_handler,
             auth_token_manager=self.auth_token_manager,
             user_manager=self.user_manager,
-            hasher=self.hasher,
+            encrypt_manager=self.encrypt_manager,
         )
         self.websockets_manager = WebSocketsManager(user_manager=self.user_manager)
 
@@ -221,7 +221,7 @@ class APIInitializer:
         database_engine = self.database.create_database_engine_instance()
         self.database_handler = DatabaseHandler(
             database_engine=database_engine,
-            hasher=self.hasher,
+            encrypt_manager=self.encrypt_manager,
             config=self.config,
         )
 
@@ -249,3 +249,4 @@ class APIInitializer:
 
 
 api_initializer: APIInitializer = APIInitializer()
+

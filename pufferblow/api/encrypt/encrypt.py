@@ -11,9 +11,9 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from pufferblow.api.database.tables.keys import Keys
 
 
-class Hasher:
+class Encrypt:
     """
-    Hasher class used to encrypt and decrypt data
+    Encrypt class used to encrypt and decrypt data
     using the AES algorithm.
     """
 
@@ -127,3 +127,4 @@ class Hasher:
         data = data[:-padding_length]
 
         return data
+

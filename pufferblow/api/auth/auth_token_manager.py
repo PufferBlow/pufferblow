@@ -8,16 +8,16 @@ import secrets
 from typing import Any
 
 from pufferblow.api.database.database_handler import DatabaseHandler
-from pufferblow.api.hasher.hasher import Hasher
+from pufferblow.api.encrypt.encrypt import Encrypt
 
 
 class AuthTokenManager:
     """Authentication token manager with JWT access + refresh token support."""
 
-    def __init__(self, database_handler: DatabaseHandler, hasher: Hasher) -> None:
+    def __init__(self, database_handler: DatabaseHandler, encrypt_manager: Encrypt) -> None:
         """Initialize the instance."""
         self.database_handler = database_handler
-        self.hasher = hasher
+        self.encrypt_manager = encrypt_manager
         config = self.database_handler.config
         self.jwt_secret = (
             os.getenv("PUFFERBLOW_JWT_SECRET")
@@ -223,3 +223,4 @@ class AuthTokenManager:
         except Exception:
             return False
         return str(payload.get("sub")) == str(user_id)
+

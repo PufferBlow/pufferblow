@@ -39,7 +39,7 @@ from pufferblow.api.database.tables.sticker_catalog import ServerGIFs, ServerSti
 from pufferblow.api.database.tables.users import Users
 
 # Encryption manager
-from pufferblow.api.hasher.hasher import Hasher
+from pufferblow.api.encrypt.encrypt import Encrypt
 
 # Log messages
 from pufferblow.api.logger.msgs import debug, info
@@ -55,14 +55,14 @@ class DatabaseHandler:
     """Database handler for PufferBlow's API"""
 
     def __init__(
-        self, database_engine: sqlalchemy.create_engine, hasher: Hasher, config: Config
+        self, database_engine: sqlalchemy.create_engine, encrypt_manager: Encrypt, config: Config
     ) -> None:
         """Initialize the instance."""
         self.database_engine = database_engine
         self.database_session = sessionmaker(
             bind=self.database_engine, expire_on_commit=False
         )
-        self.hasher = hasher
+        self.encrypt_manager = encrypt_manager
         self.config = config
 
         self.setup_tables(base=Base)
@@ -249,13 +249,13 @@ class DatabaseHandler:
             # Handle encryption for non-SQLite databases
             if not is_sqlite:
                 # Encrypt password and create key
-                enc_password_data, password_key = self.hasher.encrypt(
+                enc_password_data, password_key = self.encrypt_manager.encrypt(
                     user_data.password
                 )
                 enc_password = base64.b64encode(enc_password_data).decode("ascii")
 
                 # Encrypt auth token and create key
-                enc_auth_token_data, auth_token_key = self.hasher.encrypt(
+                enc_auth_token_data, auth_token_key = self.encrypt_manager.encrypt(
                     user_data.auth_token
                 )
                 enc_auth_token = base64.b64encode(enc_auth_token_data).decode("ascii")
@@ -3266,3 +3266,4 @@ class DatabaseHandler:
             stmt = select(FileObjects).where(FileObjects.file_hash == file_hash)
             result = session.execute(stmt).fetchone()
             return result[0] if result else None
+

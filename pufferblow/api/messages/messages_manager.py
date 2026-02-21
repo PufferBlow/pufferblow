@@ -12,7 +12,7 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 
 # Tables
 from pufferblow.api.database.tables.messages import Messages
-from pufferblow.api.hasher.hasher import Hasher
+from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.user.user_manager import UserManager
 
 
@@ -24,13 +24,13 @@ class MessagesManager:
         database_handler: DatabaseHandler,
         auth_token_manager: AuthTokenManager,
         user_manager: UserManager,
-        hasher: Hasher,
+        encrypt_manager: Encrypt,
     ) -> None:
         """Initialize the instance."""
         self.database_handler = database_handler
         self.auth_token_manager = auth_token_manager
         self.user_manager = user_manager
-        self.hasher = hasher
+        self.encrypt_manager = encrypt_manager
 
     def load_messages(
         self,
@@ -221,7 +221,7 @@ class MessagesManager:
         Returns:
             tuple[str, object]: (base64 encoded encrypted message, encryption key object)
         """
-        encrypted_message, key = self.hasher.encrypt(data=message)
+        encrypted_message, key = self.encrypt_manager.encrypt(data=message)
 
         key.user_id = user_id
         key.message_id = message_id
@@ -252,7 +252,7 @@ class MessagesManager:
                 f"Missing encryption key for message_id={message_id}, user_id={user_id}"
             )
 
-        decrypted_message = self.hasher.decrypt(
+        decrypted_message = self.encrypt_manager.decrypt(
             ciphertext=encrypted_message, key=key.key_value, iv=key.iv
         )
 
@@ -445,3 +445,4 @@ class MessagesManager:
 
         logger.debug(f"{messages = }")
         return messages_metadata
+

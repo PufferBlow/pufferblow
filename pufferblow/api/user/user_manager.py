@@ -16,8 +16,8 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 # Tables dataclass
 from pufferblow.api.database.tables.users import Users
 
-# Hasher
-from pufferblow.api.hasher.hasher import Hasher
+# Encrypt manager
+from pufferblow.api.encrypt.encrypt import Encrypt
 
 # Log messages
 from pufferblow.api.logger.msgs import debug, info
@@ -34,13 +34,13 @@ class UserManager:
         self,
         database_handler: DatabaseHandler,
         auth_token_manager: AuthTokenManager,
-        hasher: Hasher,
+        encrypt_manager: Encrypt,
         config: Config,
     ) -> None:
         """Initialize the instance."""
         self.database_handler = database_handler
         self.auth_token_manager = auth_token_manager
-        self.hasher = hasher
+        self.encrypt_manager = encrypt_manager
         self.config = config
 
     def sign_up(
@@ -629,7 +629,7 @@ class UserManager:
         Returns:
             `None`.
         """
-        ciphered_new_password, key = self.hasher.encrypt(data=new_password)
+        ciphered_new_password, key = self.encrypt_manager.encrypt(data=new_password)
         ciphered_new_password = base64.b64encode(ciphered_new_password).decode("ascii")
 
         key.user_id = user_id
@@ -673,7 +673,7 @@ class UserManager:
             logger.debug(f"DEBUG_{associated_to.upper()}_SIMULATED_ENCRYPTED")
             return ciphered_data
 
-        ciphered_data, key = self.hasher.encrypt(data)
+        ciphered_data, key = self.encrypt_manager.encrypt(data)
 
         ciphered_data = base64.b64encode(ciphered_data).decode("ascii")
 
@@ -735,7 +735,7 @@ class UserManager:
 
         data = base64.b64decode(data)
 
-        decrypted_data = self.hasher.decrypt(
+        decrypted_data = self.encrypt_manager.decrypt(
             ciphertext=data, key=key.key_value, iv=key.iv
         )
 
@@ -766,3 +766,4 @@ class UserManager:
         logger.debug(debug.DEBUG_NEW_USER_ID_GENERATED(user_id=str(generated_uuid)))
 
         return str(generated_uuid)
+

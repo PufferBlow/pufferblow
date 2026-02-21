@@ -12,8 +12,8 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 # Tables
 from pufferblow.api.database.tables.channels import Channels
 
-# Hasher
-from pufferblow.api.hasher.hasher import Hasher
+# Encrypt manager
+from pufferblow.api.encrypt.encrypt import Encrypt
 
 # Log messages
 from pufferblow.api.logger.msgs import info
@@ -29,12 +29,12 @@ class ChannelsManager:
         self,
         database_handler: DatabaseHandler,
         auth_token_manager: AuthTokenManager,
-        hasher: Hasher,
+        encrypt_manager: Encrypt,
     ) -> None:
         """Initialize the instance."""
         self.database_handler = database_handler
         self.auth_token_manager = auth_token_manager
-        self.hasher = hasher
+        self.encrypt_manager = encrypt_manager
 
     def list_channels(self, user_id: str) -> list[dict]:
         """
@@ -322,3 +322,4 @@ class ChannelsManager:
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_channel_name)
 
         return str(generated_uuid)
+
