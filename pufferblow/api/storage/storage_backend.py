@@ -13,6 +13,7 @@ class StorageBackend(ABC):
     """Abstract base class for storage backends"""
 
     def __init__(self, config: dict[str, Any]):
+        """Initialize the instance."""
         self.config = config
 
     @abstractmethod

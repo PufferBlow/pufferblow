@@ -10,12 +10,15 @@ JSON_LOGS = True if os.environ.get("JSON_LOGS", "0") == "1" else False
 
 
 def WORKERS(workers_number) -> int:
+    """WORKERS."""
     return int(os.environ.get("GUNICORN_WORKERS", workers_number))
 
 
 class InterceptHandler(logging.Handler):
+    """InterceptHandler class."""
     def emit(self, record):
         # get corresponding Loguru level if it exists
+        """Emit."""
         try:
             level = logger.level(record.levelname).name
         except ValueError:
@@ -33,9 +36,11 @@ class InterceptHandler(logging.Handler):
 
 
 class StubbedGunicornLogger(Logger):
+    """StubbedGunicornLogger class."""
     log_level: str = None
 
     def setup(self, cfg):
+        """Setup."""
         handler = logging.NullHandler()
         self.error_logger = logging.getLogger("gunicorn.error")
         self.error_logger.addHandler(handler)
@@ -49,11 +54,13 @@ class StandaloneApplication(BaseApplication):
     """Our Gunicorn application."""
 
     def __init__(self, app, options=None):
+        """Initialize the instance."""
         self.options = options or {}
         self.application = app
         super().__init__()
 
     def load_config(self):
+        """Load config."""
         config = {
             key: value
             for key, value in self.options.items()
@@ -63,4 +70,5 @@ class StandaloneApplication(BaseApplication):
             self.cfg.set(key.lower(), value)
 
     def load(self):
+        """Load."""
         return self.application

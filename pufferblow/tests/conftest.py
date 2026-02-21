@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pufferblow.api.api import api
-from pufferblow.api_initializer import api_initializer
+from pufferblow.core.bootstrap import api_initializer
 
 # Middlewares
 

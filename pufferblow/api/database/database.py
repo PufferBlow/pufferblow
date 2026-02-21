@@ -8,9 +8,11 @@ from pufferblow.api.models.config_model import Config
 
 
 class Database:
+    """Database class."""
     def __init__(
         self, config: Config | None = None, database_uri: str | None = None
     ) -> None:
+        """Initialize the instance."""
         self.config = config
 
         if self.config is not None:

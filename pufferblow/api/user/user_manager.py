@@ -24,6 +24,7 @@ from pufferblow.api.logger.msgs import debug, info
 
 # Models
 from pufferblow.api.models.config_model import Config
+from pufferblow.api.user.status import normalize_user_status
 
 
 class UserManager:
@@ -36,6 +37,7 @@ class UserManager:
         hasher: Hasher,
         config: Config,
     ) -> None:
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.auth_token_manager = auth_token_manager
         self.hasher = hasher
@@ -76,8 +78,11 @@ class UserManager:
         new_user = Users()
 
         user_id = self._generate_user_id(username=username)
-        auth_token = f"{user_id}.{self.auth_token_manager.create_token()}"
-        auth_token_expire_time = self.auth_token_manager.create_auth_token_expire_time()
+        # Persist a non-session bootstrap token in DB; active sessions use JWT access/refresh tokens.
+        auth_token = f"bootstrap.{uuid.uuid4().hex}{uuid.uuid4().hex}"
+        auth_token_expire_time = datetime.datetime.now(
+            datetime.timezone.utc
+        ) + datetime.timedelta(days=30)
 
         new_user.user_id = uuid.UUID(user_id)  # Convert string UUID to UUID object
         new_user.username = username
@@ -362,33 +367,42 @@ class UserManager:
             )
         )
 
-    def update_user_status(self, user_id: str, status: str) -> None:
+    def update_user_status(self, user_id: str, status: str) -> bool:
         """
         Update the user's `status`
 
         Args:
-            `status` (str): The new status value. ["online", "offline"]
+            `status` (str): The new status value.
 
         Returns:
-            `None`.
+            bool: `True` if status changed and was persisted, otherwise `False`.
+
+        Raises:
+            ValueError: If status value is not supported.
         """
+        normalized_status = normalize_user_status(status)
         user_data = self.database_handler.get_user(user_id=user_id)
 
-        if user_data.status == status:
+        if user_data.status == normalized_status:
             logger.info(
                 info.INFO_USER_STATUS_UPDATE_SKIPPED(
                     user_id=user_id,
                 )
             )
-            return
+            return False
 
-        self.database_handler.update_user_status(user_id=user_id, status=status)
+        self.database_handler.update_user_status(
+            user_id=user_id, status=normalized_status
+        )
 
         logger.info(
             info.INFO_UPDATE_USER_STATUS(
-                user_id=user_id, from_status=user_data.status, to_status=status
+                user_id=user_id,
+                from_status=user_data.status,
+                to_status=normalized_status,
             )
         )
+        return True
 
     def update_user_about(self, user_id: str, new_about: str) -> None:
         """
@@ -414,7 +428,7 @@ class UserManager:
         Returns:
             tuple[str, bool]: (URL of the uploaded avatar, is_duplicate)
         """
-        from pufferblow.api_initializer import api_initializer
+        from pufferblow.core.bootstrap import api_initializer
 
         # Get server settings for limits
         server_settings = self.database_handler.get_server_settings()
@@ -462,7 +476,7 @@ class UserManager:
         """
         import uuid
 
-        from pufferblow.api_initializer import api_initializer
+        from pufferblow.core.bootstrap import api_initializer
 
         # Upload the sticker
         sticker_url, _ = (
@@ -506,7 +520,7 @@ class UserManager:
         """
         import uuid
 
-        from pufferblow.api_initializer import api_initializer
+        from pufferblow.core.bootstrap import api_initializer
 
         # Upload the GIF
         gif_url, _ = (
@@ -571,7 +585,7 @@ class UserManager:
         Returns:
             tuple[str, bool]: (URL of the uploaded banner, is_duplicate)
         """
-        from pufferblow.api_initializer import api_initializer
+        from pufferblow.core.bootstrap import api_initializer
 
         # Get server settings for limits
         server_settings = self.database_handler.get_server_settings()

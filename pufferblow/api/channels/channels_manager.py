@@ -31,6 +31,7 @@ class ChannelsManager:
         auth_token_manager: AuthTokenManager,
         hasher: Hasher,
     ) -> None:
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.auth_token_manager = auth_token_manager
         self.hasher = hasher

@@ -1,4 +1,4 @@
-from pufferblow import constants
+import pufferblow.core.constants as constants
 
 
 class Config:
@@ -51,12 +51,13 @@ class Config:
     S3_SECRET_KEY: str | None = None
     S3_ENDPOINT_URL: str | None = None  # For custom S3-compatible services
 
-    # Legacy CDN parameters (for backward compatibility)
+    # Static file serving parameters
     CDN_STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/cdn"
     CDN_BASE_URL: str = "/cdn"
     CDN_CACHE_MAX_AGE: int = 86400  # 24 hours in seconds
 
     def __init__(self, config: dict | None = None) -> None:
+        """Initialize the instance."""
         if config is not None:
             self.set_attr_from_config(config)
 
@@ -84,13 +85,10 @@ class Config:
         self.JWT_ACCESS_TTL_MINUTES = config["api"].get("jwt_access_ttl_minutes", 15)
         self.JWT_REFRESH_TTL_DAYS = config["api"].get("jwt_refresh_ttl_days", 30)
 
-        # PostgreSQL Database - support for both postregsql (legacy) and postgresql
-        db_section = config.get("postgresql") or config.get("postregsql")
+        # PostgreSQL Database
+        db_section = config.get("postgresql")
         if not db_section:
-            # If neither section exists, raise error
-            raise KeyError(
-                "Neither 'postgresql' nor 'postregsql' section found in config"
-            )
+            raise KeyError("'postgresql' section not found in config")
 
         self.DATABASE_NAME = db_section["database_name"]
         self.USERNAME = db_section["username"]
@@ -128,7 +126,7 @@ class Config:
                 self.S3_SECRET_KEY = config["storage"]["s3"]["secret_key"]
                 self.S3_ENDPOINT_URL = config["storage"]["s3"].get("endpoint_url")
 
-        # Legacy CDN related parameters (for backward compatibility)
+        # Static file serving parameters
         if "cdn" in config:
             self.CDN_STORAGE_PATH = config["cdn"]["storage_path"]
             self.CDN_BASE_URL = config["cdn"]["base_url"]
@@ -203,4 +201,5 @@ cache_max_age = {self.CDN_CACHE_MAX_AGE} # This defines the maximum age (in seco
         return config
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return f"Config(API_HOST={self.API_HOST!r}, API_PORT={self.API_PORT!r}, WORKERS={self.WORKERS!r}, LOGS_PATH={self.LOGS_PATH!r}, RATE_LIMIT_DURATION={self.RATE_LIMIT_DURATION!r}, MAX_RATE_LIMIT_REQUESTS={self.MAX_RATE_LIMIT_REQUESTS!r}, MAX_RATE_LIMIT_WARNINGS={self.MAX_RATE_LIMIT_WARNINGS!r})"

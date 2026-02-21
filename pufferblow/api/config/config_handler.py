@@ -2,7 +2,7 @@ import os
 
 import tomllib
 
-import pufferblow.constants as constants
+import pufferblow.core.constants as constants
 
 
 class ConfigHandler:
@@ -16,6 +16,7 @@ class ConfigHandler:
     default_config_file_path: str = f"{script_dir}{constants.SLASH}config_sample.toml"
 
     def __init__(self) -> None:
+        """Initialize the instance."""
         if not os.path.exists(self.root_config_dir):
             os.mkdir(self.root_config_dir)
 

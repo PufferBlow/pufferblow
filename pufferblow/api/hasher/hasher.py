@@ -1,4 +1,5 @@
 import base64
+
 from os import urandom
 
 from cryptography.hazmat.backends import default_backend
@@ -19,6 +20,7 @@ class Hasher:
     PADDING: int = 128
 
     def __init__(self) -> None:
+        """Initialize the instance."""
         pass
 
     def encrypt(

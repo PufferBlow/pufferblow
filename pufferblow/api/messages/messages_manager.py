@@ -26,6 +26,7 @@ class MessagesManager:
         user_manager: UserManager,
         hasher: Hasher,
     ) -> None:
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.auth_token_manager = auth_token_manager
         self.user_manager = user_manager
@@ -52,8 +53,6 @@ class MessagesManager:
         Returns:
             list[dict]: A list of messages' metadata in dict format.
         """
-        messages = None
-
         if not websocket:
             messages = self.database_handler.fetch_channel_messages(
                 channel_id=channel_id, messages_per_page=messages_per_page, page=page
@@ -62,131 +61,23 @@ class MessagesManager:
             messages = self.database_handler.fetch_unviewed_channel_messages(
                 channel_id=channel_id, viewed_messages_ids=viewed_messages_ids
             )
+        return self._hydrate_messages(messages)
 
-        messages_metadata: list[dict] = list()
-
-        # messages is now list[tuple[Messages, Users | None]] since we joined with users
-        for message_tuple in messages:
-            message_data = message_tuple[0]  # The Messages object
-            user_data = message_tuple[1]  # The Users object (can be None)
-
-            # Decrypt the message
-            try:
-                raw_message = self.decrypt_message(
-                    user_id=str(message_data.sender_id),
-                    message_id=message_data.message_id,
-                    encrypted_message=base64.b64decode(message_data.hashed_message),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to decrypt message_id={message_id} sender_id={sender_id}: {error}",
-                    message_id=message_data.message_id,
-                    sender_id=message_data.sender_id,
-                    error=str(exc),
-                )
-                raw_message = "[message unavailable]"
-
-            json_metadata_format = message_data.to_dict()
-            # Replace the encrypted hashed_message with the decrypted message content
-            json_metadata_format["message"] = raw_message
-            # Remove the encrypted field
-            json_metadata_format.pop("hashed_message", None)
-
-            for key in ["channel_id", "conversation_id"]:
-                if json_metadata_format[key] is None:
-                    json_metadata_format.pop(key)
-
-            # Add complete user profile data if available
-            if user_data:
-                json_metadata_format["sender_username"] = user_data.username
-                json_metadata_format["sender_avatar_url"] = user_data.avatar_url
-                json_metadata_format["sender_banner_url"] = user_data.banner_url
-                json_metadata_format["sender_status"] = user_data.status or "offline"
-                json_metadata_format["sender_roles"] = user_data.roles_ids or []
-                json_metadata_format["sender_about"] = user_data.about
-                json_metadata_format["sender_last_seen"] = (
-                    user_data.last_seen.isoformat() if user_data.last_seen else None
-                )
-                json_metadata_format["sender_created_at"] = (
-                    user_data.created_at.isoformat() if user_data.created_at else None
-                )
-            else:
-                # Fallback for messages without user data
-                json_metadata_format["sender_username"] = "Unknown User"
-                json_metadata_format["sender_avatar_url"] = None
-                json_metadata_format["sender_banner_url"] = None
-                json_metadata_format["sender_status"] = "offline"
-                json_metadata_format["sender_roles"] = []
-                json_metadata_format["sender_about"] = None
-                json_metadata_format["sender_last_seen"] = None
-                json_metadata_format["sender_created_at"] = None
-
-            # Enhance attachments with complete metadata from database
-            if message_data.attachments and len(message_data.attachments) > 0:
-                enhanced_attachments = []
-                for attachment_url in message_data.attachments:
-                    # Extract file hash from URL (format: /storage/{file_hash})
-                    if attachment_url and attachment_url.startswith("/storage/"):
-                        file_hash = attachment_url.split("/")[-1]
-                        # Query file metadata from database
-                        file_obj = self.database_handler.get_file_object_by_hash(
-                            file_hash
-                        )
-                        if file_obj:
-                            enhanced_attachments.append(
-                                {
-                                    "url": attachment_url,
-                                    "filename": file_obj.filename,
-                                    "type": file_obj.mime_type,
-                                    "size": file_obj.file_size,
-                                }
-                            )
-                        else:
-                            # Fallback for missing file metadata
-                            filename = file_hash  # Use hash as filename fallback
-                            mime_type = (
-                                mimetypes.guess_type(filename)[0]
-                                or "application/octet-stream"
-                            )
-                            enhanced_attachments.append(
-                                {
-                                    "url": attachment_url,
-                                    "filename": filename,
-                                    "type": mime_type,
-                                    "size": None,
-                                }
-                            )
-                    else:
-                        # Fallback for malformed URLs
-                        filename = (
-                            attachment_url.split("/")[-1]
-                            if attachment_url
-                            else "unknown"
-                        )
-                        mime_type = (
-                            mimetypes.guess_type(filename)[0]
-                            or "application/octet-stream"
-                        )
-                        enhanced_attachments.append(
-                            {
-                                "url": attachment_url,
-                                "filename": filename,
-                                "type": mime_type,
-                                "size": None,
-                            }
-                        )
-
-                json_metadata_format["attachments"] = enhanced_attachments
-            else:
-                json_metadata_format["attachments"] = []
-
-            # Keep the sender_user_id for backward compatibility
-            json_metadata_format["sender_user_id"] = str(message_data.sender_id)
-
-            messages_metadata.append(json_metadata_format)
-
-        logger.debug(f"{messages = }")
-        return messages_metadata
+    def load_direct_messages(
+        self,
+        conversation_id: str,
+        messages_per_page: int | None = 20,
+        page: int | None = 1,
+    ) -> list[dict]:
+        """
+        Load direct messages for a conversation_id.
+        """
+        messages = self.database_handler.fetch_conversation_messages(
+            conversation_id=conversation_id,
+            messages_per_page=messages_per_page,
+            page=page,
+        )
+        return self._hydrate_messages(messages)
 
     def send_message(
         self,
@@ -210,7 +101,7 @@ class MessagesManager:
             Messages: The message metadata object.
         """
         # Block text messages in voice-only channels.
-        from pufferblow.api_initializer import api_initializer
+        from pufferblow.core.bootstrap import api_initializer
 
         channel_type = api_initializer.channels_manager.get_channel_type(channel_id)
         if channel_type == "voice":
@@ -224,45 +115,39 @@ class MessagesManager:
                 detail="Messages cannot be sent to voice-only channels. Use a text or mixed channel.",
             )
 
-        message_metadata = Messages()
-
-        message_metadata.message_id = self._generate_message_id(
+        message_metadata, encryption_key = self._build_message_record(
             user_id=user_id,
-            message=(
-                message[: random.choice([i for i in range(len(message))])]
-                if message
-                else "attachment"
-            ),
+            message=message,
+            attachments=attachments,
+            sent_at=sent_at,
+            channel_id=channel_id,
+            conversation_id=None,
         )
-        message_metadata.channel_id = channel_id
-        message_metadata.sender_id = user_id
-        message_metadata.attachments = attachments or []
-
-        # Set sent_at timestamp if provided, otherwise use SQLAlchemy default
-        if sent_at:
-            try:
-                from datetime import datetime
-
-                # Parse ISO timestamp, removing timezone info to make it naive
-                dt_str = (
-                    sent_at.replace("Z", "").replace("+00:00", "").replace("+00", "")
-                )
-                message_metadata.sent_at = datetime.fromisoformat(dt_str)
-            except ValueError:
-                # If parsing fails, use SQLAlchemy default (don't set sent_at)
-                pass
-
-        # Encrypt the message and get the encryption key
-        message_metadata.hashed_message, encryption_key = self.encrypt_message(
-            message=message, user_id=user_id, message_id=message_metadata.message_id
-        )
-
-        # Save message to the database first (so message_id exists for foreign key)
         self.database_handler.save_message(message=message_metadata)
-
-        # Save the encryption key after we have the message record
         self.database_handler.save_keys(key=encryption_key)
+        return message_metadata
 
+    def send_direct_message(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        attachments: list[str] | None = None,
+        sent_at: str | None = None,
+    ) -> Messages:
+        """
+        Save a direct message in a conversation.
+        """
+        message_metadata, encryption_key = self._build_message_record(
+            user_id=user_id,
+            message=message,
+            attachments=attachments,
+            sent_at=sent_at,
+            channel_id=None,
+            conversation_id=conversation_id,
+        )
+        self.database_handler.save_direct_message(message=message_metadata)
+        self.database_handler.save_keys(key=encryption_key)
         return message_metadata
 
     def delete_message(self, message_id: str, channel_id: str) -> None:
@@ -407,3 +292,156 @@ class MessagesManager:
         generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_data_salt)
 
         return str(generated_uuid)
+
+    def _build_message_record(
+        self,
+        user_id: str,
+        message: str,
+        attachments: list[str] | None,
+        sent_at: str | None,
+        channel_id: str | None,
+        conversation_id: str | None,
+    ) -> tuple[Messages, object]:
+        """
+        Build encrypted message record and encryption key tuple.
+        """
+        message_metadata = Messages()
+        message_metadata.message_id = self._generate_message_id(
+            user_id=user_id,
+            message=(
+                message[: random.choice([i for i in range(len(message))])]
+                if message
+                else "attachment"
+            ),
+        )
+        message_metadata.channel_id = channel_id
+        message_metadata.conversation_id = conversation_id
+        message_metadata.sender_id = user_id
+        message_metadata.attachments = attachments or []
+
+        if sent_at:
+            try:
+                from datetime import datetime
+
+                dt_str = (
+                    sent_at.replace("Z", "").replace("+00:00", "").replace("+00", "")
+                )
+                message_metadata.sent_at = datetime.fromisoformat(dt_str)
+            except ValueError:
+                pass
+
+        message_metadata.hashed_message, encryption_key = self.encrypt_message(
+            message=message,
+            user_id=user_id,
+            message_id=message_metadata.message_id,
+        )
+        return message_metadata, encryption_key
+
+    def _hydrate_messages(self, messages: list[tuple[Messages, object | None]]) -> list[dict]:
+        """
+        Convert DB message tuples to client-facing dictionaries.
+        """
+        messages_metadata: list[dict] = []
+
+        for message_tuple in messages:
+            message_data = message_tuple[0]
+            user_data = message_tuple[1]
+
+            try:
+                raw_message = self.decrypt_message(
+                    user_id=str(message_data.sender_id),
+                    message_id=message_data.message_id,
+                    encrypted_message=base64.b64decode(message_data.hashed_message),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to decrypt message_id={message_id} sender_id={sender_id}: {error}",
+                    message_id=message_data.message_id,
+                    sender_id=message_data.sender_id,
+                    error=str(exc),
+                )
+                raw_message = "[message unavailable]"
+
+            json_metadata_format = message_data.to_dict()
+            json_metadata_format["message"] = raw_message
+            json_metadata_format.pop("hashed_message", None)
+
+            for key in ["channel_id", "conversation_id"]:
+                if json_metadata_format.get(key) is None:
+                    json_metadata_format.pop(key, None)
+
+            if user_data:
+                json_metadata_format["sender_username"] = user_data.username
+                json_metadata_format["sender_avatar_url"] = user_data.avatar_url
+                json_metadata_format["sender_banner_url"] = user_data.banner_url
+                json_metadata_format["sender_status"] = user_data.status or "offline"
+                json_metadata_format["sender_roles"] = user_data.roles_ids or []
+                json_metadata_format["sender_about"] = user_data.about
+                json_metadata_format["sender_last_seen"] = (
+                    user_data.last_seen.isoformat() if user_data.last_seen else None
+                )
+                json_metadata_format["sender_created_at"] = (
+                    user_data.created_at.isoformat() if user_data.created_at else None
+                )
+            else:
+                json_metadata_format["sender_username"] = "Unknown User"
+                json_metadata_format["sender_avatar_url"] = None
+                json_metadata_format["sender_banner_url"] = None
+                json_metadata_format["sender_status"] = "offline"
+                json_metadata_format["sender_roles"] = []
+                json_metadata_format["sender_about"] = None
+                json_metadata_format["sender_last_seen"] = None
+                json_metadata_format["sender_created_at"] = None
+
+            if message_data.attachments and len(message_data.attachments) > 0:
+                enhanced_attachments = []
+                for attachment_url in message_data.attachments:
+                    if attachment_url and attachment_url.startswith("/storage/"):
+                        file_hash = attachment_url.split("/")[-1]
+                        file_obj = self.database_handler.get_file_object_by_hash(file_hash)
+                        if file_obj:
+                            enhanced_attachments.append(
+                                {
+                                    "url": attachment_url,
+                                    "filename": file_obj.filename,
+                                    "type": file_obj.mime_type,
+                                    "size": file_obj.file_size,
+                                }
+                            )
+                        else:
+                            filename = file_hash
+                            mime_type = (
+                                mimetypes.guess_type(filename)[0]
+                                or "application/octet-stream"
+                            )
+                            enhanced_attachments.append(
+                                {
+                                    "url": attachment_url,
+                                    "filename": filename,
+                                    "type": mime_type,
+                                    "size": None,
+                                }
+                            )
+                    else:
+                        filename = attachment_url.split("/")[-1] if attachment_url else "unknown"
+                        mime_type = (
+                            mimetypes.guess_type(filename)[0]
+                            or "application/octet-stream"
+                        )
+                        enhanced_attachments.append(
+                            {
+                                "url": attachment_url,
+                                "filename": filename,
+                                "type": mime_type,
+                                "size": None,
+                            }
+                        )
+                json_metadata_format["attachments"] = enhanced_attachments
+            else:
+                json_metadata_format["attachments"] = []
+
+            json_metadata_format["sender_user_id"] = str(message_data.sender_id)
+            messages_metadata.append(json_metadata_format)
+
+        logger.debug(f"{messages = }")
+        return messages_metadata

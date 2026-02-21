@@ -16,6 +16,7 @@ class CDNManager:
     """CDN Manager for handling file uploads and serving"""
 
     def __init__(self, database_handler: DatabaseHandler, config: Config):
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.config = config
 
@@ -326,7 +327,7 @@ class CDNManager:
         # Register file in database (only in production, not SQLite tests)
         # We'll use a reference type of 'cdn_upload' for CDN management
         try:
-            from pufferblow.api_initializer import api_initializer
+            from pufferblow.core.bootstrap import api_initializer
 
             if file_hash == "":
                 file_hash = self.compute_file_hash(content)

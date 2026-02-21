@@ -56,6 +56,7 @@ class ChartData(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"ChartData(id={self.id!r}, "
             f"chart_type={self.chart_type!r}, "

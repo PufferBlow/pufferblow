@@ -1,37 +1,27 @@
+"""Application bootstrap and shared object wiring for API and CLI runtimes."""
+
 import sys
 
 from loguru import logger
 
-# Authentification token manager
+from pufferblow.api.activitypub import ActivityPubManager
 from pufferblow.api.auth.auth_token_manager import AuthTokenManager
 from pufferblow.api.auth.decentralized_auth_manager import DecentralizedAuthManager
-
-# Channels manager
+from pufferblow.api.background_tasks import BackgroundTasksManager
 from pufferblow.api.channels.channels_manager import ChannelsManager
-
-# Config handler
 from pufferblow.api.config.config_handler import ConfigHandler
-
-# Database
 from pufferblow.api.database.database import Database
 from pufferblow.api.database.database_handler import DatabaseHandler
-
-# Encryption/Decryption manager
 from pufferblow.api.hasher.hasher import Hasher
-
-# Messages manager
+from pufferblow.api.logger.msgs import errors
 from pufferblow.api.messages.messages_manager import MessagesManager
-
-# Server manager
+from pufferblow.api.models.config_model import Config
+from pufferblow.api.security.security_checks_handler import SecurityChecksHandler
 from pufferblow.api.server.server_manager import ServerManager
-
-# Users manager
 from pufferblow.api.user.user_manager import UserManager
-
-# WebSockets manager
+from pufferblow.api.webrtc.webrtc_manager import initialize_webrtc_manager
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
-# CDN manager - conditionally imported
 try:
     from pufferblow.api.storage.storage_manager import StorageManager
 
@@ -40,35 +30,13 @@ except ImportError:
     STORAGE_AVAILABLE = False
     StorageManager = None
 
-# Background tasks manager
-from pufferblow.api.background_tasks import BackgroundTasksManager
-
-# Log messages
-from pufferblow.api.logger.msgs import errors
-
-# Models
-from pufferblow.api.models.config_model import Config
-
-# SecurityChecks handler
-from pufferblow.api.security.security_checks_handler import SecurityChecksHandler
-
-# WebRTC manager
-from pufferblow.api.webrtc.webrtc_manager import initialize_webrtc_manager
-
 
 class APIInitializer:
     """
-    Api initializer class handles the start up of all the needed object
-    that will be used by the PufferBlow's API
+    Lazily initializes and shares API managers used across the application.
 
-    Attributes:
-        config                (Config)              : A `Config` object.
-        hasher                (Hasher)              : A `Hasher` object.
-        database              (Database)            : A `Database` object.
-        database_handler      (DatabaseHandler)     : A `DatabaseHandler` object.
-        auth_token_manager    (AuthTokenManager)    : A `AuthTokenManager` object.
-        user_manager          (UserManager)         : A `UserManger` object.
-        channels_manager      (ChannelsManager)     : A `ChannelsManager` object.
+    The initializer is intentionally stateful and exposed as a singleton
+    (`api_initializer`) so routes and managers share one runtime container.
     """
 
     config: Config = None
@@ -79,86 +47,68 @@ class APIInitializer:
     auth_token_manager: AuthTokenManager = None
     user_manager: UserManager = None
     channels_manager: ChannelsManager = None
+    messages_manager: MessagesManager = None
     websockets_manager: WebSocketsManager = None
     storage_manager: StorageManager = None
     background_tasks_manager: BackgroundTasksManager = None
     security_checks_handler: SecurityChecksHandler = None
     decentralized_auth_manager: DecentralizedAuthManager = None
+    activitypub_manager: ActivityPubManager = None
+    config_handler: ConfigHandler = None
 
     is_loaded: bool = False
 
     def __init__(self) -> None:
+        """Initialize the instance."""
         pass
 
     @staticmethod
     def _is_cli_setup_mode() -> bool:
+        """Return whether the process is currently executing CLI setup flow."""
         return len(sys.argv) > 1 and "setup" in sys.argv
 
     def load_objects(self, database_uri: str | None = None) -> None:
         """
-        Load all the objects that will be used by the API
+        Initialize shared managers and handlers when they are not loaded yet.
 
         Args:
-            `None`.
-
-        Returns:
-            `None`.
+            database_uri: Optional database URI override, mainly used by setup.
         """
         if self.is_loaded:
             return
 
-        # Init config
         self.load_config()
-
-        # Init the hasher
         self.hasher = Hasher()
-
-        # Init Database
         self.load_database(database_uri=database_uri)
 
-        # Initialize default roles, privileges, and server settings for PostgreSQL databases
-        # This ensures they're always present when the system starts
         database_uri_check = str(self.database_handler.database_engine.url)
         if not database_uri_check.startswith("sqlite://"):
             self.database_handler.initialize_default_data()
 
-        # Server manager
         self.server_manager = ServerManager(database_handler=self.database_handler)
-
-        # Init Auth tokens manager
         self.auth_token_manager = AuthTokenManager(
             database_handler=self.database_handler, hasher=self.hasher
         )
-
-        # Init user manager
         self.user_manager = UserManager(
             database_handler=self.database_handler,
             auth_token_manager=self.auth_token_manager,
             hasher=self.hasher,
             config=self.config,
         )
-
-        # Init channels manager
         self.channels_manager = ChannelsManager(
             database_handler=self.database_handler,
             auth_token_manager=self.auth_token_manager,
             hasher=self.hasher,
         )
-
-        # Init messages manager
         self.messages_manager = MessagesManager(
             database_handler=self.database_handler,
             auth_token_manager=self.auth_token_manager,
             user_manager=self.user_manager,
             hasher=self.hasher,
         )
+        self.websockets_manager = WebSocketsManager(user_manager=self.user_manager)
 
-        # Init websockets manager
-        self.websockets_manager = WebSocketsManager()
-
-        # Init storage manager (only if available)
         if STORAGE_AVAILABLE and StorageManager:
-            # Create storage config from main config
             storage_config = {
                 "provider": self.config.STORAGE_PROVIDER,
                 "storage_path": self.config.STORAGE_PATH,
@@ -174,94 +124,78 @@ class APIInitializer:
                 "secret_key": self.config.S3_SECRET_KEY,
                 "endpoint_url": self.config.S3_ENDPOINT_URL,
             }
-
             self.storage_manager = StorageManager(
-                storage_config=storage_config, database_handler=self.database_handler
+                storage_config=storage_config,
+                database_handler=self.database_handler,
             )
-            # Update storage limits from server settings
             self.storage_manager.update_server_limits()
         else:
             self.storage_manager = None
             logger.warning(
-                "Storage manager not available - file upload features will be disabled"
+                "Storage manager not available - file upload features are disabled."
             )
 
-        # Init background tasks manager (only register, don't start scheduler)
         self.background_tasks_manager = BackgroundTasksManager(
             database_handler=self.database_handler,
             storage_manager=self.storage_manager,
             config=self.config,
         )
 
-        # Register background tasks (but don't start the scheduler in CLI)
         is_cli = len(sys.argv) > 1 and sys.argv[1] in ["version", "setup", "serve"]
         if not is_cli or (is_cli and len(sys.argv) > 1 and sys.argv[1] == "serve"):
-            # Only register/start background tasks in server mode
             self._register_background_tasks()
 
-        # Init security checks handlker
         self.security_checks_handler = SecurityChecksHandler(
             database_handler=self.database_handler,
             user_manager=self.user_manager,
             channels_manager=self.channels_manager,
             auth_token_manager=self.auth_token_manager,
         )
-
-        # Init decentralized auth manager for node-aware authentication flow
         self.decentralized_auth_manager = DecentralizedAuthManager(
             database_handler=self.database_handler
         )
-
-        # Init WebRTC manager
+        self.activitypub_manager = ActivityPubManager(
+            database_handler=self.database_handler,
+            user_manager=self.user_manager,
+            messages_manager=self.messages_manager,
+            websockets_manager=self.websockets_manager,
+        )
         initialize_webrtc_manager(self.database_handler)
 
         self.is_loaded = True
 
     def _register_background_tasks(self) -> None:
-        """
-        Register background tasks that will be scheduled to run periodically.
-        """
-        # Register storage cleanup task - run every 24 hours
+        """Register periodic background tasks for scheduler startup."""
         self.background_tasks_manager.register_task(
             task_id="storage_cleanup",
             task_func=self.background_tasks_manager.cleanup_storage_orphaned_files,
             interval_hours=24,
             enabled=True,
         )
-
-        # Register auth token cleanup task - run every 12 hours
         self.background_tasks_manager.register_task(
             task_id="auth_token_cleanup",
             task_func=self.background_tasks_manager.cleanup_expired_auth_tokens,
             interval_hours=12,
             enabled=True,
         )
-
-        # Register server statistics update task - run every 15 minutes
         self.background_tasks_manager.register_task(
             task_id="server_stats_update",
             task_func=self.background_tasks_manager.update_server_statistics,
             interval_minutes=15,
             enabled=True,
         )
-
-        # Register chart data update task - run every hour
         self.background_tasks_manager.register_task(
             task_id="chart_data_update",
             task_func=self.background_tasks_manager.update_chart_data,
             interval_hours=1,
             enabled=True,
         )
-
-        # Register GitHub releases check task - run every 6 hours
         self.background_tasks_manager.register_task(
             task_id="github_releases_check",
             task_func=self.background_tasks_manager.check_github_releases,
             interval_hours=6,
             enabled=True,
         )
-
-        # Register activity metrics update task - run every 6 hours
         self.background_tasks_manager.register_task(
             task_id="activity_metrics_update",
             task_func=self.background_tasks_manager.update_activity_metrics,
@@ -271,7 +205,10 @@ class APIInitializer:
 
     def load_database(self, database_uri: str | None = None) -> None:
         """
-        Load the database and the database handler.
+        Initialize database and database handler.
+
+        Args:
+            database_uri: Optional database URI override.
         """
         if self.config is None and database_uri is None:
             self.load_config()
@@ -282,43 +219,33 @@ class APIInitializer:
             self.database = Database(config=self.config)
 
         database_engine = self.database.create_database_engine_instance()
-
         self.database_handler = DatabaseHandler(
-            database_engine=database_engine, hasher=self.hasher, config=self.config
+            database_engine=database_engine,
+            hasher=self.hasher,
+            config=self.config,
         )
 
     def load_config(self) -> None:
-        """
-        Load the config handler and the config model.
-        """
+        """Load configuration from disk into a `Config` model instance."""
         self.config_handler = ConfigHandler()
 
         if not self.config_handler.check_config():
-            # During setup, missing config is expected - don't log error
-            if self._is_cli_setup_mode():
-                pass  # Silently skip error during setup
-            else:
+            if not self._is_cli_setup_mode():
                 logger.error(
                     errors.ERROR_NO_CONFIG_FILE_FOUND(
                         self.config_handler.config_file_path
                     )
                 )
-            # sys.exit(1)
 
         try:
             config = self.config_handler.load_config()
-            if len(config) == 0:
+            self.config = Config() if len(config) == 0 else Config(config=config)
+        except FileNotFoundError:
+            if self._is_cli_setup_mode():
                 self.config = Config()
             else:
-                self.config = Config(config=config)
-        except FileNotFoundError:
-            # Config might not exist during setup - create empty config
-            if self._is_cli_setup_mode():
-                self.config = Config()  # Use defaults during setup
-            else:
-                logger.error("Configuration file not found and not in setup mode")
+                logger.error("Configuration file not found and not in setup mode.")
                 raise
 
 
-# PufferBlow's APIs objects loader
 api_initializer: APIInitializer = APIInitializer()

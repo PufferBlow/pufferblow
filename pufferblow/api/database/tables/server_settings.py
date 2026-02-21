@@ -43,4 +43,5 @@ class ServerSettings(Base):
     created_at = Column(DateTime(timezone=True), default=date_in_gmt, nullable=False)
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return f"Server(server_settings_id={self.server_settings_id!r}, is_private={self.is_private!r}, max_message_length={self.max_message_length!r}, max_image_size={self.max_image_size!r}, max_video_size={self.max_video_size!r}, allowed_images_extensions={self.allowed_images_extensions!r}, allowed_videos_extensions={self.allowed_videos_extensions!r}, allowed_doc_extensions={self.allowed_doc_extensions!r}, updated_at={self.updated_at!r}, created_at={self.created_at!r})"

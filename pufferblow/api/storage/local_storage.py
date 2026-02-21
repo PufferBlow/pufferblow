@@ -17,6 +17,7 @@ class LocalStorageBackend(StorageBackend):
     """Local file system storage backend with space allocation"""
 
     def __init__(self, config: dict[str, Any]):
+        """Initialize the instance."""
         super().__init__(config)
 
         # Storage configuration

@@ -2,14 +2,63 @@
 PufferBlow API Reference - Developer Documentation
 ==================================================
 
-This reference documents all available REST API endpoints for PufferBlow developers. The API uses standard HTTP methods (GET, POST, PUT, DELETE) and JSON for request/response formats.
+This reference documents the main REST and federation endpoints in the current
+beta server. The API uses standard HTTP methods and JSON payloads.
 
-All requests require appropriate authentication headers. Most endpoints require an `auth_token` which can be obtained through the signin process.
+Most feature endpoints require an ``auth_token`` (JWT access token) returned by
+``/api/v1/users/signup`` or ``/api/v1/users/signin``.
 
 Authentication
 ==============
 
-Most API endpoints require authentication. Include the `auth_token` in your requests in one of these ways:
+PufferBlow uses access + refresh token sessions.
+
+- Access token: short-lived JWT used for API calls.
+- Refresh token: long-lived token used to rotate session tokens.
+- Tokens are instance-bound via ``origin_server`` claims.
+
+Most endpoints still accept ``auth_token`` in query params or request body.
+For clients that send ``Authorization: Bearer`` headers, normalize to the same
+token value before calling routes.
+
+Token Refresh Endpoints
+-----------------------
+
+**POST /api/v1/auth/refresh**
+
+Rotate refresh token and issue a new access/refresh pair.
+
+**Request Body:**
+
+.. sourcecode:: json
+
+   {
+     "refresh_token": "..."
+   }
+
+**POST /api/v1/auth/revoke**
+
+Revoke refresh token (logout session).
+
+**Request Body:**
+
+.. sourcecode:: json
+
+   {
+     "refresh_token": "..."
+   }
+
+Decentralized Node Auth Endpoints
+---------------------------------
+
+These endpoints are used for node-bound delegated sessions:
+
+- ``POST /api/v1/auth/decentralized/challenge``
+- ``POST /api/v1/auth/decentralized/verify``
+- ``POST /api/v1/auth/decentralized/introspect``
+- ``POST /api/v1/auth/decentralized/revoke``
+
+General auth token placement patterns:
 
 1. **Query Parameter**: ``?auth_token=your_token_here``
 2. **Header**: ``Authorization: Bearer your_token_here``
@@ -42,7 +91,11 @@ password          string    Account password
    {
      "status_code": 200,
      "message": "Signin successfully",
-     "auth_token": "user_id.token_string"
+     "auth_token": "eyJhbGciOi...",
+     "refresh_token": "eyJ1aWQiOi...",
+     "token_type": "Bearer",
+     "auth_token_expire_time": "2026-02-21T10:00:00+00:00",
+     "refresh_token_expire_time": "2026-03-22T10:00:00+00:00"
    }
 
 **POST /api/v1/users/signup**
@@ -65,8 +118,11 @@ Create a new user account.
    {
      "status_code": 201,
      "message": "Account created successfully",
-     "auth_token": "user_id.token_string",
-     "auth_token_expire_time": "2025-10-25T10:00:00Z"
+     "auth_token": "eyJhbGciOi...",
+     "refresh_token": "eyJ1aWQiOi...",
+     "token_type": "Bearer",
+     "auth_token_expire_time": "2026-02-21T10:00:00+00:00",
+     "refresh_token_expire_time": "2026-03-22T10:00:00+00:00"
    }
 
 **POST /api/v1/users/profile**
@@ -363,34 +419,61 @@ message_id        string     Message to delete
      "message": "The message has been deleted successfully"
    }
 
-File Management (CDN) Routes
-=============================
+Voice Channel Routes
+====================
+
+Voice endpoints are attached to channel IDs and use WebRTC/aiortc:
+
+- ``POST /api/v1/channels/{channel_id}/join-audio``
+- ``POST /api/v1/channels/{channel_id}/leave-audio``
+- ``GET /api/v1/channels/{channel_id}/audio-status``
+
+Federation and Direct Message Routes
+====================================
+
+These endpoints provide ActivityPub interop and local/remote direct messaging:
+
+- ``GET /.well-known/webfinger``
+- ``GET /ap/users/{user_id}``
+- ``GET /ap/users/{user_id}/outbox``
+- ``POST /ap/users/{user_id}/inbox``
+- ``POST /ap/inbox``
+- ``POST /api/v1/federation/follow``
+- ``POST /api/v1/dms/send``
+- ``GET /api/v1/dms/messages``
+
+File Management (Storage/CDN) Routes
+====================================
 
 These endpoints handle file uploads, downloads, and CDN management. Most require server owner privileges.
 
-**POST /api/v1/cdn/upload**
+**POST /api/v1/storage/upload**
 
-Upload file to CDN. Server owner only.
+Upload file to storage. Server owner only.
 
-**POST /api/v1/cdn/files**
+**POST /api/v1/storage/files**
 
-List files in CDN directory. Server owner only.
+List files in storage directory. Server owner only.
 
-**POST /api/v1/cdn/file-info**
+**POST /api/v1/storage/file-info**
 
 Get detailed file information. Server owner only.
 
-**POST /api/v1/cdn/delete-file**
+**POST /api/v1/storage/delete-file**
 
-Delete file from CDN. Server owner only.
+Delete file from storage. Server owner only.
 
 **GET /api/v1/cdn/file/{file_path}**
 
-Serve CDN file directly.
+Serve CDN-compatible file path.
 
-**POST /api/v1/cdn/cleanup-orphaned**
+**GET /api/v1/storage/file/{file_path}**
 
-Clean up orphaned CDN files. Server owner only.
+Serve storage file path.
+
+**POST /api/v1/storage/cleanup-orphaned**
+
+Clean up orphaned stored files. Server owner only.
 
 Server Administration Routes
 =============================
@@ -417,7 +500,7 @@ Get server configuration information.
 
 Get server statistics and metrics.
 
-**GET /api/v1/system/server-usage**
+**POST /api/v1/system/server-usage**
 
 Get real-time server resource usage.
 
@@ -501,14 +584,17 @@ WebSocket Routes
 
 PufferBlow uses WebSockets for real-time messaging.
 
-**WebSocket Endpoint:** ``ws://your-server:7575/ws/channels/{channel_id}``
+**WebSocket Endpoints:**
+
+- ``ws://your-server:7575/ws`` (global stream for all accessible channels)
+- ``ws://your-server:7575/ws/channels/{channel_id}`` (channel-scoped stream)
 
 **Connection Parameters:**
 
 ================  =========  ===========
 Parameter         Type       Description
 ================  =========  ===========
-channel_id        string     Channel to connect to
+channel_id        string     Channel to connect to (channel endpoint only)
 auth_token        string     User authentication token (as query parameter)
 ================  =========  ===========
 
@@ -567,11 +653,12 @@ All API endpoints may return error responses in the following format:
 Rate Limiting
 =============
 
-The API implements rate limiting to prevent abuse:
+The API uses a sliding-window rate limiter with endpoint buckets:
 
-- **Standard users:** 100 requests per minute
-- **Authenticated users:** 200 requests per minute
-- **Server owners:** 500 requests per minute
+- ``auth`` endpoints (stricter)
+- ``uploads`` endpoints
+- ``messages`` endpoints
+- ``default`` endpoints
 
 Rate limit headers are included in responses:
 
@@ -583,6 +670,9 @@ X-RateLimit-Remaining Requests remaining in current window
 X-RateLimit-Reset Time when rate limit resets (Unix timestamp)
 Retry-After Seconds to wait before retrying (when limit exceeded)
 ================  ===========
+
+Final thresholds are derived from server settings (``server_settings`` table)
+and can trigger cooldowns and eventual automatic IP blocking.
 
 Development Tips
 ================

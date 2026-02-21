@@ -4,22 +4,18 @@ import hashlib
 import hmac
 import json
 import os
-import random
 import secrets
-import string
 from typing import Any
-
-from loguru import logger
 
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.hasher.hasher import Hasher
-from pufferblow.api.logger.msgs import debug
 
 
 class AuthTokenManager:
     """Authentication token manager with JWT access + refresh token support."""
 
     def __init__(self, database_handler: DatabaseHandler, hasher: Hasher) -> None:
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.hasher = hasher
         config = self.database_handler.config
@@ -42,19 +38,23 @@ class AuthTokenManager:
         )
 
     def _instance_id(self) -> str:
+        """Instance id."""
         config = self.database_handler.config
         return f"{config.API_HOST}:{config.API_PORT}"
 
     @staticmethod
     def _b64url_encode(data: bytes) -> str:
+        """B64url encode."""
         return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
 
     @staticmethod
     def _b64url_decode(data: str) -> bytes:
+        """B64url decode."""
         padding = "=" * (-len(data) % 4)
         return base64.urlsafe_b64decode((data + padding).encode("utf-8"))
 
     def _sign(self, signing_input: str) -> str:
+        """Sign."""
         signature = hmac.new(
             self.jwt_secret.encode("utf-8"),
             signing_input.encode("utf-8"),
@@ -63,6 +63,7 @@ class AuthTokenManager:
         return self._b64url_encode(signature)
 
     def create_access_token(self, user_id: str, origin_server: str) -> str:
+        """Create access token."""
         now = datetime.datetime.now(datetime.timezone.utc)
         exp = now + datetime.timedelta(minutes=self.access_ttl_minutes)
         header = {"alg": "HS256", "typ": "JWT"}
@@ -88,6 +89,7 @@ class AuthTokenManager:
     def decode_access_token(
         self, auth_token: str, verify_exp: bool = True
     ) -> dict[str, Any]:
+        """Decode access token."""
         parts = auth_token.split(".")
         if len(parts) != 3:
             raise ValueError("Invalid JWT format")
@@ -120,6 +122,7 @@ class AuthTokenManager:
         return payload
 
     def create_refresh_token(self, user_id: str, origin_server: str) -> str:
+        """Create refresh token."""
         now = datetime.datetime.now(datetime.timezone.utc)
         exp = now + datetime.timedelta(days=self.refresh_ttl_days)
         payload = {
@@ -133,9 +136,11 @@ class AuthTokenManager:
         )
 
     def _hash_refresh_token(self, refresh_token: str) -> str:
+        """Hash refresh token."""
         return hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
 
     def save_refresh_token(self, user_id: str, refresh_token: str) -> None:
+        """Save refresh token."""
         token_hash = self._hash_refresh_token(refresh_token)
         expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
             days=self.refresh_ttl_days
@@ -147,6 +152,7 @@ class AuthTokenManager:
         )
 
     def validate_refresh_token(self, refresh_token: str) -> dict[str, Any]:
+        """Validate refresh token."""
         try:
             payload = json.loads(self._b64url_decode(refresh_token).decode("utf-8"))
         except Exception as e:
@@ -171,12 +177,14 @@ class AuthTokenManager:
         return payload
 
     def revoke_refresh_token(self, refresh_token: str) -> None:
+        """Revoke refresh token."""
         token_hash = self._hash_refresh_token(refresh_token)
         self.database_handler.delete_refresh_token(token_hash=token_hash)
 
     def issue_session_tokens(
         self, user_id: str, origin_server: str
     ) -> dict[str, Any]:
+        """Issue session tokens."""
         access_token = self.create_access_token(
             user_id=str(user_id), origin_server=origin_server
         )
@@ -199,74 +207,19 @@ class AuthTokenManager:
         }
 
     def check_auth_token_format(self, auth_token: str) -> bool:
-        if auth_token.count(".") == 2:
-            return True
-        if "." not in auth_token:
+        """Check auth token format."""
+        if auth_token.count(".") != 2:
             return False
-
-        user_id = auth_token.split(".")[0]
-        token = auth_token.split(".")[1]
-        return len(user_id) == 36 and len(token) == 41
-
-    def check_users_auth_token(self, user_id: str, raw_auth_token: str) -> bool:
-        # JWT path
-        if raw_auth_token.count(".") == 2:
-            try:
-                payload = self.decode_access_token(raw_auth_token, verify_exp=True)
-                return str(payload.get("sub")) == str(user_id)
-            except Exception:
-                return False
-
-        # Legacy fallback path
-        user_data = self.database_handler.get_user(user_id=user_id)
-        ciphered_auth_token = base64.b64decode(user_data.auth_token)
-        key = self.database_handler.get_keys(
-            user_id=user_id, associated_to="auth_token"
-        )
-        auth_token = self.hasher.decrypt(
-            ciphertext=ciphered_auth_token, key=key.key_value, iv=key.iv
-        )
-        return auth_token == raw_auth_token
-
-    # Legacy methods kept for compatibility
-    def token_exists(self, user_id: str, hashed_auth_token: str):
-        return self.database_handler.check_auth_token(
-            user_id=user_id, hashed_auth_token=hashed_auth_token
-        )
-
-    def is_token_valid(self, user_id: str, auth_token: str) -> bool:
-        expire_time = self.database_handler.get_auth_token_expire_time(
-            user_id=user_id, auth_token=auth_token
-        )
-        if expire_time is None:
-            return False
-        if hasattr(expire_time, "timestamp"):
-            return expire_time.timestamp() > datetime.datetime.now(
-                datetime.timezone.utc
-            ).timestamp()
         try:
-            parsed = datetime.datetime.fromisoformat(str(expire_time))
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=datetime.timezone.utc)
-            return parsed > datetime.datetime.now(datetime.timezone.utc)
+            self.decode_access_token(auth_token=auth_token, verify_exp=False)
+            return True
         except Exception:
             return False
 
-    def create_token(self) -> str:
-        size = 41
-        alphabet = string.ascii_lowercase + string.ascii_uppercase + string.digits
-        token = "".join(random.choice(alphabet) for _ in range(size))
-        logger.info(debug.DEBUG_NEW_AUTH_TOKEN_GENERATED(auth_token=token))
-        return token
-
-    def delete_token(self, user_id: str, auth_token: str) -> None:
-        ciphered_auth_token, _key = self.hasher.encrypt(data=auth_token)
-        self.database_handler.delete_auth_token(
-            user_id=user_id, auth_token=ciphered_auth_token
-        )
-
-    def create_auth_token_expire_time(self):
-        expire_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
-            days=30
-        )
-        return expire_time.strftime("%Y-%m-%d")
+    def check_users_auth_token(self, user_id: str, raw_auth_token: str) -> bool:
+        """Check users auth token."""
+        try:
+            payload = self.decode_access_token(raw_auth_token, verify_exp=True)
+        except Exception:
+            return False
+        return str(payload.get("sub")) == str(user_id)

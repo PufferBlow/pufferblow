@@ -24,6 +24,7 @@ class Privileges(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"Privileges(privilege_id={self.privilege_id!r}, "
             f"privilege_name={self.privilege_name!r}, "

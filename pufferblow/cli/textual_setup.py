@@ -9,6 +9,7 @@ from textual.widgets import Button, Footer, Header, Input, Select, Static
 
 @dataclass
 class SetupWizardResult:
+    """SetupWizardResult class."""
     mode: str
     database_name: str
     database_username: str
@@ -23,6 +24,7 @@ class SetupWizardResult:
 
 
 class SetupWizardApp(App[SetupWizardResult | None]):
+    """SetupWizardApp class."""
     CSS = """
     Screen {
         background: #0a1325;
@@ -77,11 +79,13 @@ class SetupWizardApp(App[SetupWizardResult | None]):
     ]
 
     def __init__(self, has_existing_config: bool) -> None:
+        """Initialize the instance."""
         super().__init__()
         self.has_existing_config = has_existing_config
         self.result: SetupWizardResult | None = None
 
     def compose(self) -> ComposeResult:
+        """Compose."""
         yield Header(show_clock=True)
         with Container(id="root"):
             yield Static("PufferBlow Server Setup Wizard", id="title")
@@ -138,18 +142,22 @@ class SetupWizardApp(App[SetupWizardResult | None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        """On mount."""
         self.query_one("#database_host", Input).value = "localhost"
         self.query_one("#database_port", Input).value = "5432"
         self._sync_mode_fields()
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        """On select changed."""
         if event.select.id == "mode":
             self._sync_mode_fields()
 
     def action_submit(self) -> None:
+        """Action submit."""
         self._submit()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """On button pressed."""
         if event.button.id == "cancel":
             self.exit(None)
             return
@@ -157,6 +165,7 @@ class SetupWizardApp(App[SetupWizardResult | None]):
             self._submit()
 
     def _sync_mode_fields(self) -> None:
+        """Sync mode fields."""
         mode = self.query_one("#mode", Select).value
         is_full = mode == "full"
         for field_id in [
@@ -178,6 +187,7 @@ class SetupWizardApp(App[SetupWizardResult | None]):
             self.query_one("#status", Static).update("")
 
     def _submit(self) -> None:
+        """Submit."""
         mode = str(self.query_one("#mode", Select).value)
         if mode in {"server_only", "server_update"} and not self.has_existing_config:
             self.query_one("#status", Static).update(

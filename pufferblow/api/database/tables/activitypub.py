@@ -11,6 +11,7 @@ from pufferblow.api.database.tables.declarative_base import Base
 
 
 class ActivityPubActor(Base):
+    """ActivityPubActor class."""
     __tablename__ = "activitypub_actors"
 
     actor_id: Mapped[UUID] = mapped_column(
@@ -43,6 +44,7 @@ class ActivityPubActor(Base):
 
 
 class ActivityPubFollow(Base):
+    """ActivityPubFollow class."""
     __tablename__ = "activitypub_follows"
     __table_args__ = (
         UniqueConstraint("local_actor_uri", "remote_actor_uri", name="uq_ap_follow_pair"),
@@ -67,6 +69,7 @@ class ActivityPubFollow(Base):
 
 
 class ActivityPubInboxActivity(Base):
+    """ActivityPubInboxActivity class."""
     __tablename__ = "activitypub_inbox_activities"
 
     record_id: Mapped[UUID] = mapped_column(
@@ -83,6 +86,7 @@ class ActivityPubInboxActivity(Base):
 
 
 class ActivityPubOutboxActivity(Base):
+    """ActivityPubOutboxActivity class."""
     __tablename__ = "activitypub_outbox_activities"
 
     record_id: Mapped[UUID] = mapped_column(

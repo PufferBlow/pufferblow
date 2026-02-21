@@ -11,6 +11,7 @@ from pufferblow.api.user.user_manager import UserManager
 # Utils
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.api.utils.is_able_to_update import is_able_to_update
+from pufferblow.api.user.status import SUPPORTED_USER_STATUSES, normalize_user_status
 
 
 class SecurityChecksHandler:
@@ -25,6 +26,7 @@ class SecurityChecksHandler:
         user_manager: UserManager,
         auth_token_manager: AuthTokenManager,
     ) -> None:
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.channels_manager = channels_manager
         self.user_manager = user_manager
@@ -161,9 +163,9 @@ class SecurityChecksHandler:
         Returns:
             None.
         """
-        supported_status_values = ["online", "offline", "dnd", "idle"]
-
-        if status not in supported_status_values:
+        try:
+            normalize_user_status(status)
+        except ValueError:
             # logger.info(
             #     info.INFO_USER_STATUS_UPDATE_FAILED(
             #         user_id=user_id,
@@ -173,7 +175,10 @@ class SecurityChecksHandler:
 
             return ORJSONResponse(
                 content={
-                    "error": f"status value status='{status}' not found. Accepted values {supported_status_values}"
+                    "error": (
+                        f"status value status='{status}' not found. Accepted values "
+                        f"{list(SUPPORTED_USER_STATUSES)}"
+                    )
                 },
                 status_code=404,
             )

@@ -53,6 +53,7 @@ class FileObjects(Base):
     integrity_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"FileObjects(file_hash={self.file_hash!r}, "
             f"ref_count={self.ref_count!r}, "
@@ -101,6 +102,7 @@ class FileReferences(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"FileReferences(reference_id={self.reference_id!r}, "
             f"file_hash={self.file_hash!r}, "

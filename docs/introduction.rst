@@ -37,16 +37,20 @@ In today's world of centralized social platforms, your community data is often j
 The Decentralized Future: Fediverse Integration
 ===============================================
 
-PufferBlow embraces the **fediverse** vision - a connected network of independent servers that work together seamlessly. Just as email lets you communicate across different providers (Gmail to Outlook), fediverse-compatible platforms allow cross-server communication and account portability.
+PufferBlow embraces the **fediverse** model: independent instances with local ownership plus federated interoperability where it matters.
 
-**Current Status:**
-    PufferBlow v0.0.1-beta is fully functional for independent server hosting with all core chat features.
+**Current Federated Capabilities:**
+    - ActivityPub identity endpoints (WebFinger + actor documents)
+    - Cross-instance follows
+    - Cross-instance direct messages (DMs) through ActivityPub inbox/outbox exchange
 
-**Future Vision:**
-    Multi-server compatibility allowing users to interact across different PufferBlow instances, just like how Mastodon users can follow and communicate with users on different servers.
+**Instance-Local Boundaries (by design):**
+    - Server governance and moderation are local
+    - Channels and voice channels are local to each instance
+    - Account sign-in is instance-locked to where the account was created
 
-**Our Mission:**
-    To create a Discord-like experience that respects user privacy, community autonomy, and interoperability - combining the best of modern chat UX with the principles of the decentralized web.
+**Mission:**
+    Deliver a Discord-like experience with community ownership, privacy, and practical decentralization for real-world self-hosting.
 
 Who is PufferBlow For?
 ======================

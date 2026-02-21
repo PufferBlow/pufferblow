@@ -26,7 +26,7 @@ from pufferblow.api.dependencies import (
     require_admin,
     check_channel_access,
 )
-from pufferblow.api_initializer import api_initializer
+from pufferblow.core.bootstrap import api_initializer
 from pufferblow.api.logger.msgs import info
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 
@@ -262,7 +262,7 @@ async def remove_user_from_channel_route(
 
     # Check if targeted user is admin
     if api_initializer.user_manager.is_admin(user_id=to_remove_user_id):
-        from pufferblow import constants
+        import pufferblow.core.constants as constants
 
         logger.warning(
             constants.FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_AN_ADMIN(
@@ -279,7 +279,7 @@ async def remove_user_from_channel_route(
 
     # Check if targeted user is server owner
     if api_initializer.user_manager.is_server_owner(user_id=to_remove_user_id):
-        from pufferblow import constants
+        import pufferblow.core.constants as constants
 
         logger.warning(
             constants.FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_SERVER_OWNER(

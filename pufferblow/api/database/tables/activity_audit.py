@@ -45,6 +45,7 @@ class ActivityAudit(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"ActivityAudit(activity_id={self.activity_id!r}, activity_type={self.activity_type!r}, "
             f"user_id={self.user_id!r}, title={self.title!r})"

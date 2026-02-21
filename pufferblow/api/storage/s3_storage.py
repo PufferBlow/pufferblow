@@ -17,6 +17,7 @@ class S3StorageBackend(StorageBackend):
     """AWS S3 storage backend"""
 
     def __init__(self, config: dict[str, Any]):
+        """Initialize the instance."""
         super().__init__(config)
 
         # S3 configuration

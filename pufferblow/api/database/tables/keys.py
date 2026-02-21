@@ -11,6 +11,7 @@ from pufferblow.api.database.tables.declarative_base import Base
 
 
 class Keys(Base):
+    """Keys class."""
     __tablename__ = "keys"
 
     key_value: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
@@ -36,6 +37,7 @@ class Keys(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self):
+        """Repr special method."""
         return (
             f"Keys(key_value={self.key_value!r}, iv={self.iv!r}, "
             f"associated_to={self.associated_to!r}, user_id={self.user_id!r}, "

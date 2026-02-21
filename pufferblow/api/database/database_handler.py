@@ -57,6 +57,7 @@ class DatabaseHandler:
     def __init__(
         self, database_engine: sqlalchemy.create_engine, hasher: Hasher, config: Config
     ) -> None:
+        """Initialize the instance."""
         self.database_engine = database_engine
         self.database_session = sessionmaker(
             bind=self.database_engine, expire_on_commit=False
@@ -617,7 +618,7 @@ class DatabaseHandler:
         """Updates the user's status
 
         Args:
-            `status` (str): The user's `status` value. ["online", "offline"].
+            `status` (str): The user's canonical status value.
             `last_seen` (str): Last seen time in GMT (in case the status="offline").
 
         Returns:
@@ -1077,6 +1078,7 @@ class DatabaseHandler:
         shared_inbox_uri: str | None = None,
         private_key_pem: str | None = None,
     ) -> ActivityPubActor:
+        """Upsert activitypub actor."""
         with self.database_session() as session:
             stmt = select(ActivityPubActor).where(ActivityPubActor.actor_uri == actor_uri)
             existing = session.execute(stmt).fetchone()
@@ -1118,16 +1120,34 @@ class DatabaseHandler:
             return actor
 
     def get_activitypub_actor_by_uri(self, actor_uri: str) -> ActivityPubActor | None:
+        """Get activitypub actor by uri."""
         with self.database_session() as session:
             stmt = select(ActivityPubActor).where(ActivityPubActor.actor_uri == actor_uri)
             result = session.execute(stmt).fetchone()
             return result[0] if result else None
 
     def get_activitypub_actor_by_user_id(self, user_id: str) -> ActivityPubActor | None:
+        """Get activitypub actor by user id."""
         with self.database_session() as session:
             stmt = select(ActivityPubActor).where(
                 ActivityPubActor.user_id == uuid.UUID(str(user_id)),
                 ActivityPubActor.is_local.is_(True),
+            )
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def get_activitypub_actor_by_local_username(
+        self, username: str
+    ) -> ActivityPubActor | None:
+        """Get activitypub actor by local username."""
+        with self.database_session() as session:
+            stmt = (
+                select(ActivityPubActor)
+                .join(Users, ActivityPubActor.user_id == Users.user_id)
+                .where(
+                    Users.username == username,
+                    ActivityPubActor.is_local.is_(True),
+                )
             )
             result = session.execute(stmt).fetchone()
             return result[0] if result else None
@@ -1139,6 +1159,7 @@ class DatabaseHandler:
         follow_activity_uri: str | None = None,
         accepted: bool = False,
     ) -> ActivityPubFollow:
+        """Create or update activitypub follow."""
         with self.database_session() as session:
             stmt = select(ActivityPubFollow).where(
                 ActivityPubFollow.local_actor_uri == local_actor_uri,
@@ -1168,6 +1189,7 @@ class DatabaseHandler:
     def accept_activitypub_follow(
         self, local_actor_uri: str, remote_actor_uri: str
     ) -> bool:
+        """Accept activitypub follow."""
         with self.database_session() as session:
             stmt = (
                 update(ActivityPubFollow)
@@ -1184,6 +1206,7 @@ class DatabaseHandler:
     def list_activitypub_followers(
         self, local_actor_uri: str, accepted_only: bool = True
     ) -> list[ActivityPubFollow]:
+        """List activitypub followers."""
         with self.database_session() as session:
             stmt = select(ActivityPubFollow).where(
                 ActivityPubFollow.local_actor_uri == local_actor_uri
@@ -1194,6 +1217,7 @@ class DatabaseHandler:
             return [row[0] for row in result]
 
     def list_activitypub_following(self, remote_actor_uri: str) -> list[ActivityPubFollow]:
+        """List activitypub following."""
         with self.database_session() as session:
             stmt = select(ActivityPubFollow).where(
                 ActivityPubFollow.remote_actor_uri == remote_actor_uri
@@ -1209,6 +1233,7 @@ class DatabaseHandler:
         payload_json: str,
         target_actor_uri: str | None = None,
     ) -> ActivityPubInboxActivity:
+        """Store activitypub inbox activity."""
         with self.database_session() as session:
             existing_stmt = select(ActivityPubInboxActivity).where(
                 ActivityPubInboxActivity.activity_uri == activity_uri
@@ -1237,6 +1262,7 @@ class DatabaseHandler:
         payload_json: str,
         object_uri: str | None = None,
     ) -> ActivityPubOutboxActivity:
+        """Store activitypub outbox activity."""
         with self.database_session() as session:
             existing_stmt = select(ActivityPubOutboxActivity).where(
                 ActivityPubOutboxActivity.activity_uri == activity_uri
@@ -1260,6 +1286,7 @@ class DatabaseHandler:
     def get_activitypub_outbox_activities(
         self, actor_uri: str, limit: int = 20, offset: int = 0
     ) -> list[ActivityPubOutboxActivity]:
+        """Get activitypub outbox activities."""
         with self.database_session() as session:
             stmt = (
                 select(ActivityPubOutboxActivity)
@@ -1270,6 +1297,19 @@ class DatabaseHandler:
             )
             result = session.execute(stmt).fetchall()
             return [row[0] for row in result]
+
+    def update_user_origin_server(self, user_id: str, origin_server: str) -> None:
+        """
+        Update a user's origin_server.
+        """
+        with self.database_session() as session:
+            stmt = (
+                update(Users)
+                .values(origin_server=origin_server)
+                .where(Users.user_id == uuid.UUID(str(user_id)))
+            )
+            session.execute(stmt)
+            session.commit()
 
     def fetch_channels(self, user_id: str) -> list[tuple[Channels]]:
         """
@@ -1361,6 +1401,7 @@ class DatabaseHandler:
         return channel_metadata
 
     def get_first_public_channel(self) -> Channels | None:
+        """Get first public channel."""
         with self.database_session() as session:
             stmt = (
                 select(Channels)
@@ -1509,6 +1550,29 @@ class DatabaseHandler:
 
         return messages_with_users
 
+    def fetch_conversation_messages(
+        self, conversation_id: str, messages_per_page: int, page: int
+    ) -> list[tuple[Messages, Users | None]]:
+        """
+        Fetch a specific number of direct messages for a conversation_id.
+        """
+        messages_with_users: list[tuple[Messages, Users | None]] = []
+        start_index = (page * messages_per_page) - messages_per_page
+
+        with self.database_session() as session:
+            response = (
+                session.query(Messages, Users)
+                .join(Users, Messages.sender_id == Users.user_id, isouter=True)
+                .filter(Messages.conversation_id == conversation_id)
+                .order_by(Messages.sent_at)
+                .offset(start_index)
+                .limit(messages_per_page)
+                .all()
+            )
+            messages_with_users = response
+
+        return messages_with_users
+
     def update_channel_participants(
         self, channel_id: str, participant_ids: list[str]
     ) -> None:
@@ -1547,6 +1611,14 @@ class DatabaseHandler:
             session.execute(stmt)
             session.add(message)
 
+            session.commit()
+
+    def save_direct_message(self, message: Messages) -> None:
+        """
+        Save a direct message with no channel linkage.
+        """
+        with self.database_session() as session:
+            session.add(message)
             session.commit()
 
     def get_message_metadata(self, message_id: str) -> Messages | None:
@@ -2461,9 +2533,23 @@ class DatabaseHandler:
                 or 0
             )
 
-            away_count = (
+            idle_count = (
                 session.query(func.count(Users.user_id))
-                .filter(Users.status == "away")
+                .filter(Users.status == "idle")
+                .scalar()
+                or 0
+            )
+
+            dnd_count = (
+                session.query(func.count(Users.user_id))
+                .filter(Users.status == "dnd")
+                .scalar()
+                or 0
+            )
+
+            afk_count = (
+                session.query(func.count(Users.user_id))
+                .filter(Users.status.in_(["afk", "away"]))
                 .scalar()
                 or 0
             )
@@ -2471,7 +2557,11 @@ class DatabaseHandler:
             # Handle other statuses if any
             other_count = (
                 session.query(func.count(Users.user_id))
-                .filter(Users.status.not_in(["online", "offline", "away", "", None]))
+                .filter(
+                    Users.status.not_in(
+                        ["online", "offline", "idle", "dnd", "afk", "away", "", None]
+                    )
+                )
                 .scalar()
                 or 0
             )
@@ -2479,7 +2569,10 @@ class DatabaseHandler:
             return {
                 "online": online_count,
                 "offline": offline_count,
-                "away": away_count,
+                "idle": idle_count,
+                "dnd": dnd_count,
+                "afk": afk_count,
+                "away": afk_count,  # Backward-compatible alias for older consumers.
                 "other": other_count,
             }
 
@@ -2923,7 +3016,7 @@ class DatabaseHandler:
                 file_hashes = session.query(FileReferences.file_hash).distinct().all()
                 file_hashes = [h[0] for h in file_hashes]
             else:
-                # Convert URLs to hashes if URL list provided (legacy support)
+                # Convert input URLs to hashes when raw paths are provided.
                 file_hashes = []
                 for url in db_files:
                     # Extract path from URL and try to find corresponding file

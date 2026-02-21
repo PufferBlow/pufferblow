@@ -36,6 +36,7 @@ class Channels(Base):
     )
 
     def __repr__(self):
+        """Repr special method."""
         return (
             f"Channels(channel_id={self.channel_id!r}, "
             f"channel_name={self.channel_name!r}, "
@@ -46,6 +47,7 @@ class Channels(Base):
         )
 
     def to_dict(self) -> dict:
+        """To dict."""
         return {
             "channel_id": self.channel_id,
             "channel_name": self.channel_name,

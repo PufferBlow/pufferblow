@@ -31,6 +31,7 @@ class ServerStickers(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"ServerStickers(sticker_id={self.sticker_id!r}, "
             f"sticker_url={self.sticker_url!r}, "
@@ -60,6 +61,7 @@ class ServerGIFs(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"ServerGIFs(gif_id={self.gif_id!r}, "
             f"gif_url={self.gif_url!r}, "

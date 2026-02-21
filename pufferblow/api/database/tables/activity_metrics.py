@@ -73,6 +73,7 @@ class ActivityMetrics(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"ActivityMetrics(period={self.period!r}, date={self.date!r}, "
             f"total_users={self.total_users}, active_users={self.active_users}, "

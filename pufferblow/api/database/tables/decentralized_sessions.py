@@ -11,6 +11,7 @@ from pufferblow.api.database.tables.declarative_base import Base
 
 
 class DecentralizedAuthChallenge(Base):
+    """DecentralizedAuthChallenge class."""
     __tablename__ = "decentralized_auth_challenges"
 
     challenge_id: Mapped[UUID] = mapped_column(
@@ -32,6 +33,7 @@ class DecentralizedAuthChallenge(Base):
 
 
 class DecentralizedNodeSession(Base):
+    """DecentralizedNodeSession class."""
     __tablename__ = "decentralized_node_sessions"
 
     session_id: Mapped[UUID] = mapped_column(

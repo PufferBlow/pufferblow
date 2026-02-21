@@ -14,34 +14,41 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class SignupRequest(BaseModel):
+    """SignupRequest class."""
     username: str
     password: str
 
 
 class SigninRequest(BaseModel):
+    """SigninRequest class."""
     username: str
     password: str
 
 
 class SigninQuery(BaseModel):
+    """SigninQuery class."""
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
 
 
 class AuthTokenQuery(BaseModel):
+    """AuthTokenQuery class."""
     auth_token: str = Field(min_length=1)
 
 
 class RefreshTokenRequest(BaseModel):
+    """RefreshTokenRequest class."""
     refresh_token: str = Field(min_length=1)
 
 
 class DecentralizedChallengeRequest(BaseModel):
+    """DecentralizedChallengeRequest class."""
     auth_token: str = Field(min_length=1)
     node_id: str = Field(min_length=1, max_length=255)
 
 
 class DecentralizedVerifyRequest(BaseModel):
+    """DecentralizedVerifyRequest class."""
     challenge_id: str = Field(min_length=1)
     node_public_key: str = Field(min_length=1)
     challenge_signature: str = Field(min_length=1)
@@ -49,10 +56,12 @@ class DecentralizedVerifyRequest(BaseModel):
 
 
 class DecentralizedSessionIntrospectRequest(BaseModel):
+    """DecentralizedSessionIntrospectRequest class."""
     session_token: str = Field(min_length=1)
 
 
 class DecentralizedSessionRevokeRequest(BaseModel):
+    """DecentralizedSessionRevokeRequest class."""
     auth_token: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
 
@@ -63,16 +72,19 @@ class DecentralizedSessionRevokeRequest(BaseModel):
 
 
 class UserProfileRequest(BaseModel):
+    """UserProfileRequest class."""
     auth_token: str = Field(min_length=1)
     user_id: str | None = None  # Optional for current user profile
 
 
 class UserProfileQuery(BaseModel):
+    """UserProfileQuery class."""
     user_id: str = Field(min_length=1)
     auth_token: str = Field(min_length=1)
 
 
 class EditProfileRequest(BaseModel):
+    """EditProfileRequest class."""
     auth_token: str
     new_username: str | None = None
     status: str | None = None
@@ -82,6 +94,7 @@ class EditProfileRequest(BaseModel):
 
 
 class EditProfileQuery(BaseModel):
+    """EditProfileQuery class."""
     auth_token: str = Field(min_length=1)
     new_username: str | None = None
     status: str | None = None
@@ -91,15 +104,18 @@ class EditProfileQuery(BaseModel):
 
 
 class ResetTokenRequest(BaseModel):
+    """ResetTokenRequest class."""
     auth_token: str
     password: str
 
 
 class ListUsersRequest(BaseModel):
+    """ListUsersRequest class."""
     auth_token: str
 
 
 class ListUsersResponse(BaseModel):
+    """ListUsersResponse class."""
     status_code: int
     users: list[dict]  # Keep as dict for now since complex nested user structure
 
@@ -110,15 +126,18 @@ class ListUsersResponse(BaseModel):
 
 
 class ListChannelsRequest(BaseModel):
+    """ListChannelsRequest class."""
     auth_token: str
 
 
 class ListChannelsResponse(BaseModel):
+    """ListChannelsResponse class."""
     status_code: int
     channels: list = []  # Keep as list for now since complex nested channel structure
 
 
 class CreateChannelRequest(BaseModel):
+    """CreateChannelRequest class."""
     auth_token: str = Field(min_length=1)
     channel_name: str = Field(min_length=1)
     is_private: bool = False
@@ -126,18 +145,21 @@ class CreateChannelRequest(BaseModel):
 
 
 class CreateChannelResponse(BaseModel):
+    """CreateChannelResponse class."""
     status_code: int
     message: str
     channel_data: dict  # Keep complex dict structure for channel data
 
 
 class CreateChannelQuery(BaseModel):
+    """CreateChannelQuery class."""
     auth_token: str = Field(min_length=1)
     channel_name: str = Field(min_length=1)
     is_private: bool = False
 
 
 class ChannelOperationsQuery(BaseModel):
+    """ChannelOperationsQuery class."""
     auth_token: str = Field(min_length=1)
     target_user_id: str = Field(min_length=1)
 
@@ -148,10 +170,12 @@ class ChannelOperationsQuery(BaseModel):
 
 
 class VoiceChannelJoinRequest(BaseModel):
+    """VoiceChannelJoinRequest class."""
     auth_token: str
 
 
 class VoiceChannelJoinResponse(BaseModel):
+    """VoiceChannelJoinResponse class."""
     status_code: int
     token: str | None = None
     room_name: str | None = None
@@ -161,6 +185,7 @@ class VoiceChannelJoinResponse(BaseModel):
 
 
 class VoiceChannelStatusResponse(BaseModel):
+    """VoiceChannelStatusResponse class."""
     status_code: int
     channel_id: str
     room_name: str | None = None
@@ -206,6 +231,7 @@ class MessageData(BaseModel):
 
 
 class LoadMessagesQuery(BaseModel):
+    """LoadMessagesQuery class."""
     auth_token: str = Field(min_length=1)
     page: int = Field(default=1, ge=1)
     messages_per_page: int = Field(default=20, ge=1, le=50)
@@ -219,6 +245,7 @@ class LoadMessagesResponse(BaseModel):
 
 
 class SendMessageQuery(BaseModel):
+    """SendMessageQuery class."""
     auth_token: str = Field(min_length=1)
     message: str = Field(min_length=1)
 
@@ -240,6 +267,7 @@ class SendMessageForm(BaseModel):
     @field_validator("auth_token")
     @classmethod
     def validate_auth_token(cls, v):
+        """Validate auth token."""
         if not v or not v.strip():
             raise ValueError("auth_token cannot be empty")
         return v.strip()
@@ -247,6 +275,7 @@ class SendMessageForm(BaseModel):
     @field_validator("sent_at")
     @classmethod
     def validate_sent_at(cls, v):
+        """Validate sent at."""
         if v and v.strip():
             # Validate ISO timestamp format if provided
             try:
@@ -259,8 +288,50 @@ class SendMessageForm(BaseModel):
 
 
 class MessageOperationsQuery(BaseModel):
+    """MessageOperationsQuery class."""
     auth_token: str = Field(min_length=1)
     message_id: str = Field(min_length=1)
+
+
+class DirectMessageSendRequest(BaseModel):
+    """Send direct message to local or remote peer."""
+
+    auth_token: str = Field(min_length=1)
+    peer: str = Field(
+        min_length=1,
+        description="Peer user_id/username for local DM, or remote handle user@domain, or actor URI",
+    )
+    message: str = Field(min_length=1)
+    sent_at: str | None = Field(
+        default=None, description="Optional ISO timestamp sent by client"
+    )
+    attachments: list[str] = Field(
+        default_factory=list, description="Optional attachment URLs for federated Note"
+    )
+
+
+class DirectMessageLoadQuery(BaseModel):
+    """Load direct message conversation with a peer."""
+
+    auth_token: str = Field(min_length=1)
+    peer: str = Field(min_length=1)
+    page: int = Field(default=1, ge=1)
+    messages_per_page: int = Field(default=20, ge=1, le=50)
+
+
+class ActivityPubFollowRequest(BaseModel):
+    """Federated follow request."""
+
+    auth_token: str = Field(min_length=1)
+    remote_handle: str = Field(
+        min_length=3, description="Remote account handle like user@example.org"
+    )
+
+
+class ActivityPubInboxRequest(BaseModel):
+    """Incoming ActivityPub activity payload wrapper for typed routes."""
+
+    activity: dict
 
 
 # ============================================================================
@@ -278,6 +349,7 @@ class UploadAuthForm(BaseModel):
     @field_validator("auth_token")
     @classmethod
     def validate_auth_token(cls, v):
+        """Validate auth token."""
         if not v or not v.strip():
             raise ValueError("auth_token cannot be empty")
         return v.strip()
@@ -289,21 +361,25 @@ class UploadAuthForm(BaseModel):
 
 
 class CDNFilesRequest(BaseModel):
+    """CDNFilesRequest class."""
     auth_token: str = Field(min_length=1)
     directory: str = Field(default="uploads", min_length=1)
 
 
 class CDNDeleteFileRequest(BaseModel):
+    """CDNDeleteFileRequest class."""
     auth_token: str = Field(min_length=1)
     file_url: str = Field(min_length=1)
 
 
 class CDNFileInfoRequest(BaseModel):
+    """CDNFileInfoRequest class."""
     auth_token: str = Field(min_length=1)
     file_url: str = Field(min_length=1)
 
 
 class CleanupOrphanedRequest(BaseModel):
+    """CleanupOrphanedRequest class."""
     auth_token: str = Field(min_length=1)
     subdirectory: str = Field(default="", min_length=0)
 
@@ -314,17 +390,20 @@ class CleanupOrphanedRequest(BaseModel):
 
 
 class BlockIPRequest(BaseModel):
+    """BlockIPRequest class."""
     auth_token: str = Field(min_length=1)
     ip: str = Field(min_length=7, max_length=45)  # IPv4/IPv6 range
     reason: str = Field(min_length=1, max_length=500)
 
 
 class UnblockIPRequest(BaseModel):
+    """UnblockIPRequest class."""
     auth_token: str = Field(min_length=1)
     ip: str = Field(min_length=7, max_length=45)
 
 
 class ServerSettingsRequest(BaseModel):
+    """ServerSettingsRequest class."""
     auth_token: str = Field(min_length=1)
     server_name: str | None = None
     server_description: str | None = None
@@ -334,11 +413,13 @@ class ServerSettingsRequest(BaseModel):
 
 
 class RunTaskRequest(BaseModel):
+    """RunTaskRequest class."""
     auth_token: str = Field(min_length=1)
     task_id: str = Field(min_length=1)
 
 
 class ChartRequest(BaseModel):
+    """ChartRequest class."""
     auth_token: str = Field(min_length=1)
     period: str | None = Field(
         default=None, description="Time period (daily, weekly, monthly, 24h, 7d)"
@@ -346,15 +427,18 @@ class ChartRequest(BaseModel):
 
 
 class UserStatusChartRequest(BaseModel):
+    """UserStatusChartRequest class."""
     auth_token: str = Field(min_length=1)
 
 
 class RecentActivityRequest(BaseModel):
+    """RecentActivityRequest class."""
     auth_token: str
     limit: int = 10
 
 
 class ServerLogsRequest(BaseModel):
+    """ServerLogsRequest class."""
     auth_token: str = Field(min_length=1)
     lines: int = Field(default=50, ge=1, le=1000)
     search: str | None = Field(default=None)

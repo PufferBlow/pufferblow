@@ -25,12 +25,14 @@ class BlockedIPS(Base):
     )
 
     def __repr__(self):
+        """Repr special method."""
         return (
             f"BlockedIPS(ip_id={self.ip_id!r}, ip={self.ip!r}, "
             f"block_reason={self.block_reason!r}, blocked_at={self.blocked_at!r})"
         )
 
     def to_dict(self) -> dict:
+        """To dict."""
         return {
             "ip_id": self.ip_id,
             "ip": self.ip,

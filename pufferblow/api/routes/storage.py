@@ -687,3 +687,43 @@ async def serve_storage_file_route(
     except Exception as e:
         logger.error(f"Failed to serve storage file {file_path}: {str(e)}")
         raise exceptions.HTTPException(status_code=500, detail="Failed to serve file")
+
+
+@router.get("/storage/{file_hash}", status_code=200)
+async def serve_file_by_hash(file_hash: str):
+    """
+    Serve a file by its content hash.
+
+    Looks up the hash in `file_objects`, resolves the file path,
+    and returns the file bytes through storage manager read flow.
+    """
+    try:
+        file_object = api_initializer.database_handler.get_file_object_by_hash(
+            file_hash
+        )
+        if not file_object:
+            raise exceptions.HTTPException(status_code=404, detail="File not found")
+
+        file_path = file_object.file_path
+        storage_path = Path(api_initializer.config.STORAGE_PATH) / file_path
+        if not storage_path.exists() or not storage_path.is_file():
+            raise exceptions.HTTPException(
+                status_code=404, detail="File not found on disk"
+            )
+
+        content_type, _ = mimetypes.guess_type(storage_path.name)
+        if not content_type:
+            content_type = file_object.mime_type or "application/octet-stream"
+
+        content = await api_initializer.storage_manager.read_file_content(file_path)
+
+        return responses.Response(
+            content=content,
+            media_type=content_type,
+            headers={"Content-Disposition": f"inline; filename={storage_path.name}"},
+        )
+    except exceptions.HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve file by hash {file_hash}: {str(e)}")
+        raise exceptions.HTTPException(status_code=500, detail="Failed to serve file")

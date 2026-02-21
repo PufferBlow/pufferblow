@@ -35,6 +35,7 @@ class Participant:
     websocket_connection_id: str | None = None
 
     def __post_init__(self):
+        """Post init special method."""
         if self.joined_at is None:
             self.joined_at = datetime.now()
 
@@ -49,6 +50,7 @@ class VoiceChannel:
     max_participants: int = 50  # Default limit for scalability
 
     def __post_init__(self):
+        """Post init special method."""
         if self.participants is None:
             self.participants = {}
         if self.created_at is None:
@@ -64,6 +66,7 @@ class WebRTCManager:
     """
 
     def __init__(self, database_handler: DatabaseHandler):
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.voice_channels: dict[str, VoiceChannel] = {}
         self.media_relay = MediaRelay() if AIORTC_AVAILABLE else None
@@ -318,6 +321,7 @@ class WebRTCManager:
             # Set up event handlers
             @pc.on("connectionstatechange")
             async def on_connection_state_change():
+                """On connection state change."""
                 logger.info(f"PC connection state for {user_id}: {pc.connectionState}")
                 if pc.connectionState == "connected":
                     logger.info(
@@ -333,6 +337,7 @@ class WebRTCManager:
             @pc.on("icecandidate")
             async def on_ice_candidate(candidate):
                 # This would signal to other peers - simplified in mesh approach
+                """On ice candidate."""
                 logger.debug(f"ICE candidate for {user_id}: {candidate}")
 
             # For mesh WebRTC (all-to-all connections), we'll need to create offers

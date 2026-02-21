@@ -76,6 +76,7 @@ class Users(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"Users(user_id={self.user_id!r}, username={self.username!r}, "
             f"password={self.password!r}, avatar_url={self.avatar_url!r}, "
@@ -88,6 +89,7 @@ class Users(Base):
         )
 
     def to_dict(self) -> dict:
+        """To dict."""
         return {
             "user_id": self.user_id,
             "username": self.username,

@@ -31,6 +31,7 @@ class MessageReadHistory(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"MessageReadHistory(user_id={self.user_id!r}, "
             f"viewed_messages_ids={self.viewed_messages_ids!r}, "
@@ -39,6 +40,7 @@ class MessageReadHistory(Base):
         )
 
     def to_dict(self) -> dict:
+        """To dict."""
         return {
             "user_id": self.user_id,
             "viewed_messages_ids": self.viewed_messages_ids,

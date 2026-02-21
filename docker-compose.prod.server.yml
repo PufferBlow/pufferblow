@@ -1,0 +1,47 @@
+services:
+  pufferblow-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: pufferblow-server
+    restart: unless-stopped
+    ports:
+      - "7575:7575"
+    environment:
+      PUFFERBLOW_JWT_SECRET: ${PUFFERBLOW_JWT_SECRET}
+      PUFFERBLOW_JWT_ACCESS_TTL_MINUTES: ${PUFFERBLOW_JWT_ACCESS_TTL_MINUTES:-15}
+      PUFFERBLOW_JWT_REFRESH_TTL_DAYS: ${PUFFERBLOW_JWT_REFRESH_TTL_DAYS:-30}
+      PUFFERBLOW_STORAGE_SSE_KEY: ${PUFFERBLOW_STORAGE_SSE_KEY}
+    volumes:
+      - pufferblow_data:/root/.pufferblow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pufferblow-server-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pufferblow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pufferblow}
+      POSTGRES_USER: ${POSTGRES_USER:-pufferblow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pufferblow_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pufferblow} -d ${POSTGRES_DB:-pufferblow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pufferblow-server-net
+
+volumes:
+  pufferblow_data:
+  pufferblow_postgres:
+
+networks:
+  pufferblow-server-net:
+    driver: bridge

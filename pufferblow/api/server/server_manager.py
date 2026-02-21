@@ -16,6 +16,7 @@ class ServerManager:
     """
 
     def __init__(self, database_handler: DatabaseHandler) -> None:
+        """Initialize the instance."""
         self.database_handler = database_handler
 
     def create_server(

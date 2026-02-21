@@ -1,9 +1,10 @@
+"""Package-wide constants for the PufferBlow server runtime."""
+
 import os
 import platform
 
 from rich import print
 
-# Package info
 PACKAGE_NAME = "pufferblow"
 VERSION = "0.0.1-beta"
 AUTHOR = "ramsy0dev"
@@ -18,18 +19,18 @@ BANNER = f"""
     | | | | |_| | |  | | ( (/ /| |   | |_) ) | |_| | | | |
     | | |_/\\____|_|  |_|  \\____)_|   |____/|_|\\___/ \\____|
     |_|
-                 Made with [bold red]❤️[reset] by [bold bright_green]'{AUTHOR}'[reset]
-        - Escape [bold red]surveillance[reset] and gain [bold green]anonymity[reset] -
+                 Made with love by '{AUTHOR}'
+        - Escape surveillance and gain anonymity -
 """
 
 
 def banner() -> None:
+    """Render the package banner in the terminal."""
     print(BANNER)
 
 
 CURRENT_PLATFORM = platform.system()
 
-# The $HOME path
 if CURRENT_PLATFORM == "Windows":
     HOME = os.environ["USERPROFILE"]
     SLASH = "\\"

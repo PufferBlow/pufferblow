@@ -17,20 +17,24 @@ class DecentralizedAuthManager:
     """
 
     def __init__(self, database_handler: DatabaseHandler) -> None:
+        """Initialize the instance."""
         self.database_handler = database_handler
 
     @staticmethod
     def _utcnow() -> datetime.datetime:
+        """Utcnow."""
         return datetime.datetime.now(datetime.timezone.utc)
 
     @staticmethod
     def _hash_session_token(raw_token: str) -> str:
+        """Hash session token."""
         return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _verify_challenge_signature(
         challenge_nonce: str, signature: str, shared_secret: str
     ) -> bool:
+        """Verify challenge signature."""
         expected = hmac.new(
             shared_secret.encode("utf-8"),
             challenge_nonce.encode("utf-8"),
@@ -39,6 +43,7 @@ class DecentralizedAuthManager:
         return hmac.compare_digest(expected, signature)
 
     def issue_challenge(self, user_id: str, node_id: str, ttl_seconds: int = 120) -> dict:
+        """Issue challenge."""
         try:
             UUID(str(user_id))
         except ValueError as exc:
@@ -67,6 +72,7 @@ class DecentralizedAuthManager:
         shared_secret: str,
         session_ttl_hours: int = 24,
     ) -> dict:
+        """Verify challenge and issue session."""
         challenge = self.database_handler.get_decentralized_auth_challenge(challenge_id)
         if challenge is None:
             raise HTTPException(status_code=404, detail="Challenge not found")
@@ -107,6 +113,7 @@ class DecentralizedAuthManager:
         }
 
     def introspect_session(self, session_token: str) -> dict:
+        """Introspect session."""
         token_hash = self._hash_session_token(session_token)
         session_obj = self.database_handler.get_decentralized_node_session_by_hash(
             token_hash

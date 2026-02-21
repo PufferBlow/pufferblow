@@ -192,7 +192,7 @@ class TestCDNUploads:
         # This would ideally test that the CDN is using database settings
         # For now, we verify the CDN manager loads settings successfully
 
-        from pufferblow.api_initializer import api_initializer
+        from pufferblow.core.bootstrap import api_initializer
 
         # Ensure CDN manager has server settings loaded
         assert api_initializer.cdn_manager.MAX_IMAGE_SIZE_MB == 5  # Default

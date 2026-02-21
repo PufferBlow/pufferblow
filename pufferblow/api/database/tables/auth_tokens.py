@@ -30,6 +30,7 @@ class AuthTokens(Base):
     )
 
     def __repr__(self):
+        """Repr special method."""
         return (
             f"AuthTokens("
             f"auth_token={self.auth_token!r}, "

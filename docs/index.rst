@@ -6,6 +6,8 @@ Welcome to **pufferblow**'s documentation!
     :caption: Contents:
 
     introduction
+    server_wiki
+    decentralization
     api
     get_started
     api_reference

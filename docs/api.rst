@@ -88,13 +88,17 @@ The API provides REST endpoints across several main categories:
 Connecting to Multiple Servers
 ==============================
 
-One of PufferBlow's powerful features is **federation** (planned for future releases). While not yet implemented, the design allows users to:
+PufferBlow includes an ActivityPub federation layer for cross-instance identity and direct messaging:
 
-* Maintain accounts on multiple independent servers
-* Communicate seamlessly across server boundaries
-* Discover new communities through server networks
+* Resolve users across servers via WebFinger/actor documents
+* Follow remote actors
+* Send direct messages between different PufferBlow instances
 
-This approach is inspired by the Fediverse (like Mastodon for social media) and represents the next evolution of online communities.
+At the same time, server/community features remain local by design:
+
+* Channels and voice channels are instance-local
+* Server moderation and settings are instance-local
+* User sign-in is bound to account origin instance
 
 Getting Started with the API
 ============================

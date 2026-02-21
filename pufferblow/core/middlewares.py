@@ -14,25 +14,29 @@ from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 
 # Log messages
 from pufferblow.api.logger.msgs import info, warnings
-from pufferblow.api_initializer import api_initializer
+from pufferblow.core.bootstrap import api_initializer
 
 
 # Pydantic models for query parameters validation in middleware
 class AuthTokenQuery(BaseModel):
+    """AuthTokenQuery class."""
     auth_token: str = Field(min_length=1)
 
 
 class SigninQuery(BaseModel):
+    """SigninQuery class."""
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
 
 
 class UserProfileQuery(BaseModel):
+    """UserProfileQuery class."""
     user_id: str = Field(min_length=1)
     auth_token: str = Field(min_length=1)
 
 
 class EditProfileQuery(BaseModel):
+    """EditProfileQuery class."""
     auth_token: str = Field(min_length=1)
     new_username: str | None = None
     status: str | None = None
@@ -42,28 +46,33 @@ class EditProfileQuery(BaseModel):
 
 
 class ChannelOperationsQuery(BaseModel):
+    """ChannelOperationsQuery class."""
     auth_token: str = Field(min_length=1)
     target_user_id: str = Field(min_length=1)
 
 
 class CreateChannelQuery(BaseModel):
+    """CreateChannelQuery class."""
     auth_token: str = Field(min_length=1)
     channel_name: str = Field(min_length=1)
     is_private: bool = False
 
 
 class LoadMessagesQuery(BaseModel):
+    """LoadMessagesQuery class."""
     auth_token: str = Field(min_length=1)
     page: int = Field(default=1, ge=1)
     messages_per_page: int = Field(default=20, ge=1, le=50)
 
 
 class SendMessageQuery(BaseModel):
+    """SendMessageQuery class."""
     auth_token: str = Field(min_length=1)
     message: str = Field(min_length=1)
 
 
 class MessageOperationsQuery(BaseModel):
+    """MessageOperationsQuery class."""
     auth_token: str = Field(min_length=1)
     message_id: str = Field(min_length=1)
 
@@ -78,6 +87,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app):
+        """Initialize the instance."""
         super().__init__(app)
         self.request_timestamps_per_ip = defaultdict(deque)
         self.cooldowns_per_ip = {}
@@ -85,6 +95,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         self.rate_limit_lock = asyncio.Lock()
 
     async def dispatch(self, request, call_next):
+        """Dispatch."""
         if request.client is None:
             return await call_next(request)
 
@@ -204,6 +215,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _get_bucket(path: str) -> str:
+        """Get bucket."""
         if "/signin" in path or "/signup" in path or "/auth/" in path:
             return "auth"
         if "/upload" in path or "/storage/" in path or "/cdn/" in path:
@@ -215,15 +227,16 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     """
-    This is a security middleware that handles checks related to auth_token, user_id, user's password ...etc
-    before, these checks were done at each api route level, which creates alot of code repitition and it's hard
-    to maintain, but now all the requests that are going to the api routes that can be accessed only by users, admins,
-    or server owner will be protected from outsiders and non server users.
+    Centralized security middleware for privileged API routes.
+
+    The middleware applies request-level checks in a deterministic order:
+    1. Skip rules (test clients, CORS preflight, non-privileged routes)
+    2. Route-specific query validation with Pydantic (when configured)
+    3. Parameter-level security checks delegated to `security_checks_handler`
     """
 
-    PREVELEIDGED_API_ROUTES: list[str] = [
+    PRIVILEGED_API_ROUTES: tuple[str, ...] = (
         "/api/v1/users/signup",
-        "/api/v1/users/profile",
         "/api/v1/users/profile",
         "/api/v1/users/profile/reset-auth-token",
         "/api/v1/users/list",
@@ -236,171 +249,186 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         "/api/v1/channel/*/send_message",
         "/api/v1/channel/*/mark_message_as_read",
         "/api/v1/channel/*/delete_message",
-    ]
+    )
 
-    route_to_model = {
+    ROUTE_TO_MODEL: dict[str, type[BaseModel]] = {
         "/api/v1/users/signin": SigninQuery,
         "/api/v1/users/list": AuthTokenQuery,
         "/api/v1/channels/list/": AuthTokenQuery,
         "/api/v1/channels/create/": CreateChannelQuery,
     }
 
-    # Routes that should skip query parameter validation (they use form data)
-    form_data_routes = [
+    FORM_DATA_ROUTE_PATTERNS: tuple[str, ...] = (
         "/api/v1/channels/*/send_message",
         "/api/v1/users/profile/avatar",
         "/api/v1/users/profile/banner",
         "/api/v1/cdn/upload",
         "/api/v1/system/upload-avatar",
         "/api/v1/system/upload-banner",
-    ]
+    )
 
     def __init__(self, app) -> None:
+        """Initialize the instance."""
         super().__init__(app)
+        self._privileged_route_regexes = self._compile_route_patterns(
+            self.PRIVILEGED_API_ROUTES
+        )
+        self._form_data_route_regexes = self._compile_route_patterns(
+            self.FORM_DATA_ROUTE_PATTERNS
+        )
+        self._param_check_handlers = {
+            "auth_token": self._check_auth_token,
+            "user_id": self._check_user_id,
+            "username": self._check_username,
+            "password": self._check_password,
+            "old_password": self._check_old_password,
+            "status": self._check_status,
+            "channel_name": self._check_channel_name,
+            "channel_id": self._check_channel_id,
+            "to_add_user_id": self._check_to_add_user_id,
+            "to_remove_user_id": self._check_to_remove_user_id,
+        }
+
+    @staticmethod
+    def _compile_route_patterns(route_patterns: list[str] | tuple[str, ...]) -> list:
+        """Compile wildcard route patterns (`*`) to anchored regex patterns."""
+        compiled_patterns = []
+        for route_pattern in route_patterns:
+            escaped_route = re.escape(route_pattern).replace(r"\*", ".*")
+            compiled_patterns.append(re.compile(rf"^{escaped_route}$"))
+        return compiled_patterns
 
     def is_form_data_route(self, url: str) -> bool:
-        """
-        Check if a route uses form data instead of query parameters.
-        """
-        for route_pattern in self.form_data_routes:
-            route_regex = route_pattern.replace("*", ".*")
-            if re.match(route_regex, url):
-                return True
-        return False
+        """Check whether route uses form data and should skip query validation."""
+        return any(pattern.match(url) for pattern in self._form_data_route_regexes)
+
+    def _is_privileged_route(self, url: str) -> bool:
+        """Check whether route requires middleware security checks."""
+        return any(pattern.match(url) for pattern in self._privileged_route_regexes)
+
+    def _validate_query_params(self, request_url: str, query_params):
+        """Validate query parameters with route-bound Pydantic models."""
+        model = self.ROUTE_TO_MODEL.get(request_url)
+        if model is None:
+            return None
+        try:
+            model(**dict(query_params))
+        except ValidationError as e:
+            return ORJSONResponse(
+                status_code=422, content={"message": f"Validation error: {e}"}
+            )
+        return None
+
+    def _run_param_checks(self, request_url: str, query_params):
+        """Run configured security checks for each known query parameter."""
+        for param_name in query_params:
+            handler = self._param_check_handlers.get(param_name)
+            if handler is None:
+                continue
+
+            exception = handler(request_url, query_params)
+            if exception is not None:
+                return exception
+        return None
 
     async def dispatch(self, request, call_next):
-        # This statements will get triggered when running
-        # tests, beside that, it will just continue.
+        """Dispatch."""
         if request.client is None:
             return await call_next(request)
 
-        # Skip OPTIONS requests entirely - let CORS middleware handle preflight requests
         if request.method == "OPTIONS":
             return await call_next(request)
 
         request_url = request.url.path
 
-        url_match = self.match_request_url(url=request_url, method=request.method)
-
-        if not url_match:
+        if not self._is_privileged_route(request_url):
             return await call_next(request)
 
-        # Skip query parameter validation for form data routes (they handle validation at endpoint level)
         if self.is_form_data_route(request_url):
             return await call_next(request)
 
         query_params = request.query_params
 
-        # Validate query params with pydantic if a model is defined for the route
-        if request_url in self.route_to_model:
-            model = self.route_to_model[request_url]
-            try:
-                model(**dict(query_params))
-            except ValidationError as e:
-                return ORJSONResponse(
-                    status_code=422, content={"message": f"Validation error: {e}"}
-                )
+        validation_error = self._validate_query_params(request_url, query_params)
+        if validation_error is not None:
+            return validation_error
 
-        for param in query_params:
-            exception = None
-
-            match param:
-                case "auth_token":
-                    exception = (
-                        api_initializer.security_checks_handler.check_auth_token_format(
-                            auth_token=query_params.get("auth_token")
-                        )
-                    )
-                    # Return the exception right away to break the loop
-                    # and to not continue to the next check
-                    if exception is not None:
-                        return exception
-
-                    exception = api_initializer.security_checks_handler.check_user(
-                        auth_token=query_params.get("auth_token")
-                    )
-                case "user_id":
-                    exception = api_initializer.security_checks_handler.check_user(
-                        user_id=query_params.get("user_id")
-                    )
-                case "username":
-                    exception = api_initializer.security_checks_handler.check_username_existence(
-                        username=query_params.get("username")
-                    )
-                case "password":
-                    if "/signup" in request_url:
-                        continue
-                    exception = (
-                        api_initializer.security_checks_handler.check_auth_token_format(
-                            auth_token=query_params.get("auth_token")
-                        )
-                    )
-
-                    if exception is not None:
-                        return exception
-
-                    exception = (
-                        api_initializer.security_checks_handler.check_user_password(
-                            auth_token=query_params.get("auth_token"),
-                            password=query_params.get("password"),
-                        )
-                    )
-                case "old_password":
-                    exception = (
-                        api_initializer.security_checks_handler.check_user_password(
-                            auth_token=query_params.get("auth_token"),
-                            password=query_params.get("old_password"),
-                        )
-                    )
-                case "status":
-                    exception = (
-                        api_initializer.security_checks_handler.check_user_status_value(
-                            status=query_params.get("status")
-                        )
-                    )
-                case "channel_name":
-                    exception = (
-                        api_initializer.security_checks_handler.check_channel_name(
-                            channel_name=query_params.get("channel_name")
-                        )
-                    )
-                case "channel_id":
-                    exception = (
-                        api_initializer.security_checks_handler.check_channel_id(
-                            channel_id=query_params.get("channel_id")
-                        )
-                    )
-                case "to_add_user_id":
-                    exception = api_initializer.security_checks_handler.check_user(
-                        user_id=query_params.get("to_add_user_id")
-                    )
-                case "to_remove_user_id":
-                    exception = api_initializer.security_checks_handler.check_user(
-                        user_id=query_params.get("to_remove_user_id")
-                    )
-
-            if exception is not None:
-                return exception
+        exception = self._run_param_checks(request_url, query_params)
+        if exception is not None:
+            return exception
 
         return await call_next(request)
 
-    def match_request_url(self, url: str, method: str) -> bool:
-        """
-        Tries to retrive the index of the matched url from
-        self.PREVELEIDGED_API_ROUTES
+    def _check_auth_token(self, request_url: str, query_params):
+        """Validate auth token format, then validate user existence by token."""
+        auth_token = query_params.get("auth_token")
+        exception = api_initializer.security_checks_handler.check_auth_token_format(
+            auth_token=auth_token
+        )
+        if exception is not None:
+            return exception
+        return api_initializer.security_checks_handler.check_user(auth_token=auth_token)
 
-        Args:
-            url (str): The url to check if we have a match for.
+    def _check_user_id(self, request_url: str, query_params):
+        """Validate `user_id` existence."""
+        return api_initializer.security_checks_handler.check_user(
+            user_id=query_params.get("user_id")
+        )
 
-        Returns:
-            bool: True if the url matches, otherwise False.
-        """
-        for route in self.PREVELEIDGED_API_ROUTES:
-            route_pattern = route.replace("*", ".*")
+    def _check_username(self, request_url: str, query_params):
+        """Validate username existence."""
+        return api_initializer.security_checks_handler.check_username_existence(
+            username=query_params.get("username")
+        )
 
-            pattern = re.compile(route_pattern)
+    def _check_password(self, request_url: str, query_params):
+        """Validate password against auth token, excluding signup endpoint."""
+        if "/signup" in request_url:
+            return None
+        auth_token = query_params.get("auth_token")
+        exception = api_initializer.security_checks_handler.check_auth_token_format(
+            auth_token=auth_token
+        )
+        if exception is not None:
+            return exception
+        return api_initializer.security_checks_handler.check_user_password(
+            auth_token=auth_token,
+            password=query_params.get("password"),
+        )
 
-            if pattern.match(url) or url == route:
-                return True
+    def _check_old_password(self, request_url: str, query_params):
+        """Validate `old_password` against token-bound user."""
+        return api_initializer.security_checks_handler.check_user_password(
+            auth_token=query_params.get("auth_token"),
+            password=query_params.get("old_password"),
+        )
 
-        return False
+    def _check_status(self, request_url: str, query_params):
+        """Validate status against allowed enum values."""
+        return api_initializer.security_checks_handler.check_user_status_value(
+            status=query_params.get("status")
+        )
+
+    def _check_channel_name(self, request_url: str, query_params):
+        """Validate channel name format/constraints."""
+        return api_initializer.security_checks_handler.check_channel_name(
+            channel_name=query_params.get("channel_name")
+        )
+
+    def _check_channel_id(self, request_url: str, query_params):
+        """Validate channel existence by id."""
+        return api_initializer.security_checks_handler.check_channel_id(
+            channel_id=query_params.get("channel_id")
+        )
+
+    def _check_to_add_user_id(self, request_url: str, query_params):
+        """Validate target user for add-user channel operation."""
+        return api_initializer.security_checks_handler.check_user(
+            user_id=query_params.get("to_add_user_id")
+        )
+
+    def _check_to_remove_user_id(self, request_url: str, query_params):
+        """Validate target user for remove-user channel operation."""
+        return api_initializer.security_checks_handler.check_user(
+            user_id=query_params.get("to_remove_user_id")
+        )

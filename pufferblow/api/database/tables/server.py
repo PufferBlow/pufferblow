@@ -34,6 +34,7 @@ class Server(Base):
     )
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"Server(server_id={self.server_id!r}, server_name={self.server_name!r}, "
             f"description={self.description!r}, avatar_url={self.avatar_url!r}, "

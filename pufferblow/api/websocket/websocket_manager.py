@@ -1,35 +1,152 @@
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
 from loguru import logger
+from pufferblow.api.user.status import normalize_user_status
 from pufferblow.api.utils.extract_user_id import extract_user_id
+
+if TYPE_CHECKING:
+    from pufferblow.api.user.user_manager import UserManager
 
 
 class WebSocketsManager:
     """WebSocketManager class is responsible for managing websockets"""
 
-    def __init__(self):
-        # Active connections now store user permissions
-        # Format: {websocket: {"user_id": str, "auth_token": str, "accessible_channels": list[str]}}
+    def __init__(self, user_manager: "UserManager | None" = None):
+        # Format:
+        # {websocket: {"user_id": str, "auth_token": str, "scope": "global"|"channel",
+        #              "channel_id": str|None, "accessible_channels": list[str]}}
+        """Initialize the instance."""
         self.active_connections: dict[WebSocket, dict] = {}
+        self.user_manager = user_manager
 
     @staticmethod
     def _connection_context(connection_info) -> tuple[str, str]:
         """
-        Normalize connection metadata for both legacy(list) and global(dict) formats.
+        Resolve (user_id, channel_or_scope) from normalized connection metadata.
         Returns (user_id, channel_id_or_scope).
         """
-        if isinstance(connection_info, dict):
-            return (
-                str(connection_info.get("user_id", "unknown")),
-                "global",
-            )
-        if isinstance(connection_info, list) and len(connection_info) >= 2:
-            auth_token, channel_id = connection_info[0], connection_info[1]
+        if not isinstance(connection_info, dict):
+            return ("unknown", "unknown")
+
+        user_id = str(connection_info.get("user_id", "unknown"))
+        if connection_info.get("scope") == "channel":
+            return (user_id, str(connection_info.get("channel_id", "unknown")))
+        return (user_id, "global")
+
+    def _count_connections_for_user(self, user_id: str) -> int:
+        """Return active websocket connections count for a specific user."""
+        target = str(user_id)
+        return sum(
+            1
+            for connection_info in self.active_connections.values()
+            if isinstance(connection_info, dict)
+            and str(connection_info.get("user_id")) == target
+        )
+
+    @staticmethod
+    def _build_presence_message(user_id: str, status: str, source: str) -> dict:
+        """Build canonical status update payload for websocket clients."""
+        return {
+            "type": "user_status_changed",
+            "user_id": str(user_id),
+            "status": status,
+            "source": source,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def _broadcast_presence_message(self, message: dict) -> None:
+        """Broadcast a presence update message to all active websocket clients."""
+        active_connections_copy = self.active_connections.copy()
+        total_recipients = len(active_connections_copy)
+
+        if total_recipients == 0:
+            return
+
+        sent_count = 0
+        failed_count = 0
+
+        for websocket in active_connections_copy:
             try:
-                return extract_user_id(auth_token), str(channel_id)
-            except Exception:
-                return ("unknown", str(channel_id))
-        return ("unknown", "unknown")
+                await websocket.send_json(message)
+                sent_count += 1
+            except Exception as exc:
+                failed_count += 1
+                logger.warning(
+                    f"Presence broadcast failed for one connection: {str(exc)}"
+                )
+
+        logger.info(
+            f"Presence broadcast completed | Type: {message.get('type')} | User: {message.get('user_id')} | Status: {message.get('status')} | Sent: {sent_count} | Failed: {failed_count}"
+        )
+
+    async def update_user_presence_status(
+        self, user_id: str, status: str, source: str = "client"
+    ) -> str:
+        """
+        Persist and broadcast a user presence status.
+
+        Args:
+            user_id (str): Target user.
+            status (str): Raw status value from caller/client.
+            source (str): Source marker for telemetry.
+
+        Returns:
+            str: Normalized/canonical status.
+
+        Raises:
+            ValueError: If status is invalid or user manager is not configured.
+        """
+        if self.user_manager is None:
+            raise ValueError("User manager is not configured for presence updates.")
+
+        normalized_status = normalize_user_status(status)
+        is_changed = self.user_manager.update_user_status(
+            user_id=user_id, status=normalized_status
+        )
+
+        if is_changed:
+            message = self._build_presence_message(
+                user_id=user_id, status=normalized_status, source=source
+            )
+            await self._broadcast_presence_message(message)
+
+        return normalized_status
+
+    async def ensure_user_online(self, user_id: str, source: str = "ws_connect") -> None:
+        """
+        Mark user online when they establish their first websocket connection.
+        """
+        if self._count_connections_for_user(user_id) != 1:
+            return
+
+        try:
+            await self.update_user_presence_status(
+                user_id=user_id, status="online", source=source
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Failed to set user online on websocket connect | User: {user_id} | Error: {str(exc)}"
+            )
+
+    async def ensure_user_offline_if_no_connections(
+        self, user_id: str, source: str = "ws_disconnect"
+    ) -> None:
+        """
+        Mark user offline when all websocket connections are gone.
+        """
+        if self._count_connections_for_user(user_id) != 0:
+            return
+
+        try:
+            await self.update_user_presence_status(
+                user_id=user_id, status="offline", source=source
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Failed to set user offline on websocket disconnect | User: {user_id} | Error: {str(exc)}"
+            )
 
     async def connect(
         self, websocket: WebSocket, auth_token: str, channel_id: str
@@ -48,16 +165,24 @@ class WebSocketsManager:
         """
         try:
             await websocket.accept()
-            self.active_connections[websocket] = [auth_token, channel_id]
 
             try:
                 user_id = extract_user_id(auth_token)
             except Exception:
                 user_id = auth_token[:8]
 
+            self.active_connections[websocket] = {
+                "user_id": user_id,
+                "auth_token": auth_token,
+                "scope": "channel",
+                "channel_id": channel_id,
+                "accessible_channels": [channel_id],
+            }
+
             logger.info(
                 f"WebSocket connected | User: {user_id} | Channel: {channel_id} | Total connections: {len(self.active_connections)}"
             )
+            await self.ensure_user_online(user_id=user_id, source="ws_channel_connect")
         except Exception as e:
             logger.error(
                 f"WebSocket connection failed | Auth: {auth_token[:8]}... | Channel: {channel_id} | Error: {str(e)}"
@@ -90,12 +215,15 @@ class WebSocketsManager:
             self.active_connections[websocket] = {
                 "user_id": user_id,
                 "auth_token": auth_token,
+                "scope": "global",
+                "channel_id": None,
                 "accessible_channels": accessible_channels,
             }
 
             logger.info(
                 f"Global WebSocket connected | User: {user_id} | Accessible channels: {len(accessible_channels)} | Total connections: {len(self.active_connections)}"
             )
+            await self.ensure_user_online(user_id=user_id, source="ws_global_connect")
         except Exception as e:
             logger.error(
                 f"Global WebSocket connection failed | Auth: {auth_token[:8]}... | Error: {str(e)}"
@@ -112,28 +240,29 @@ class WebSocketsManager:
         Returns:
             None.
         """
+        connection_info = self.active_connections.get(websocket)
+        user_id = None
+
+        if connection_info:
+            user_id, channel_id = self._connection_context(connection_info)
+            logger.info(
+                f"WebSocket disconnected | User: {user_id} | Channel: {channel_id} | Remaining connections: {len(self.active_connections) - 1}"
+            )
+
         try:
             # Check if websocket is already closed
             if websocket.client_state != 3:  # 3 = CLOSED
                 await websocket.close()
-
-            # Get connection info before removing from active connections
-            connection_info = self.active_connections.get(websocket)
-            if connection_info:
-                user_id, channel_id = self._connection_context(connection_info)
-                logger.info(
-                    f"WebSocket disconnected | User: {user_id} | Channel: {channel_id} | Remaining connections: {len(self.active_connections) - 1}"
-                )
-
-            # Remove from active connections
-            if websocket in self.active_connections:
-                del self.active_connections[websocket]
-
         except Exception as e:
             logger.error(f"WebSocket disconnect error: {str(e)}")
-            # Still remove from active connections even if close failed
+        finally:
             if websocket in self.active_connections:
                 del self.active_connections[websocket]
+
+        if user_id is not None:
+            await self.ensure_user_offline_if_no_connections(
+                user_id=user_id, source="ws_disconnect"
+            )
 
     async def send_message(
         self,
@@ -227,10 +356,19 @@ class WebSocketsManager:
         # Count recipients first
         recipients = []
         for ws, connection_info in active_connections_copy.items():
-            if isinstance(connection_info, list) and len(connection_info) >= 2:
-                auth_token, ws_channel_id = connection_info[0], connection_info[1]
-                if ws_channel_id == channel_id:
-                    recipients.append((ws, auth_token))
+            if not isinstance(connection_info, dict):
+                continue
+
+            scope = connection_info.get("scope")
+            user_id = str(connection_info.get("user_id", "unknown"))
+            if scope == "channel" and connection_info.get("channel_id") == channel_id:
+                recipients.append((ws, user_id))
+                continue
+
+            if scope == "global":
+                accessible_channels = connection_info.get("accessible_channels", [])
+                if channel_id in accessible_channels:
+                    recipients.append((ws, user_id))
         total_recipients = len(recipients)
 
         # Get message type info for logging
@@ -255,11 +393,8 @@ class WebSocketsManager:
         sent_count = 0
         failed_count = 0
 
-        for websocket, auth_token in recipients:
+        for websocket, user_id in recipients:
             try:
-                user_id = (
-                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
-                )
                 logger.debug(
                     f"Sending message to user {user_id} in channel {channel_id}"
                 )
@@ -326,6 +461,39 @@ class WebSocketsManager:
             if websocket in self.active_connections:
                 await self.disconnect(websocket)
 
+    async def broadcast_to_user(self, user_id: str, message: dict) -> None:
+        """
+        Broadcast a JSON message to all active websocket connections of one user.
+        """
+        active_connections_copy = self.active_connections.copy()
+        recipients: list[WebSocket] = []
+
+        for websocket, connection_info in active_connections_copy.items():
+            if not isinstance(connection_info, dict):
+                continue
+            if str(connection_info.get("user_id")) == str(user_id):
+                recipients.append(websocket)
+
+        if not recipients:
+            logger.debug(f"No websocket recipients for user {user_id}")
+            return
+
+        sent_count = 0
+        failed_count = 0
+        for websocket in recipients:
+            try:
+                await websocket.send_json(message)
+                sent_count += 1
+            except Exception as exc:
+                failed_count += 1
+                logger.error(
+                    f"Failed to broadcast personal message to user {user_id}: {str(exc)}"
+                )
+
+        logger.info(
+            f"Personal broadcast completed | User: {user_id} | Sent: {sent_count} | Failed: {failed_count}"
+        )
+
     async def broadcast_to_eligible_users(
         self, channel_id: str, message: dict, database_handler=None
     ) -> None:
@@ -356,29 +524,26 @@ class WebSocketsManager:
         # Count recipients and determine accessibility
         recipients = []
         total_global_connections = 0
-        total_legacy_connections = 0
+        total_channel_connections = 0
 
         for websocket, connection_info in active_connections_copy.items():
-            # Check if this is a global connection (new format with user permissions)
-            if isinstance(connection_info, dict) and "user_id" in connection_info:
+            if not isinstance(connection_info, dict) or "user_id" not in connection_info:
+                continue
+
+            scope = connection_info.get("scope")
+            user_id = str(connection_info.get("user_id", "unknown"))
+
+            if scope == "global":
                 total_global_connections += 1
-                # For global connections, check if user has access to this channel
                 accessible_channels = connection_info.get("accessible_channels", [])
                 if channel_id in accessible_channels:
-                    recipients.append((websocket, connection_info["user_id"], "global"))
-            # Handle legacy connections (old format for backwards compatibility)
-            elif isinstance(connection_info, list) and len(connection_info) >= 2:
-                total_legacy_connections += 1
-                auth_token, connected_channel_id = (
-                    connection_info[0],
-                    connection_info[1],
-                )
-                user_id = (
-                    auth_token.split(".")[0] if "." in auth_token else auth_token[:8]
-                )
-                # Legacy connections only receive messages for their specific channel
-                if connected_channel_id == channel_id:
-                    recipients.append((websocket, user_id, "legacy"))
+                    recipients.append((websocket, user_id, "global"))
+                continue
+
+            if scope == "channel":
+                total_channel_connections += 1
+                if connection_info.get("channel_id") == channel_id:
+                    recipients.append((websocket, user_id, "channel"))
 
         total_recipients = len(recipients)
 
@@ -386,7 +551,7 @@ class WebSocketsManager:
             f"Global broadcast | Channel: {channel_id} | Recipients: {total_recipients} | Message-Type: {message_type} | ID: {message_id} | Content: {content_preview}"
         )
         logger.debug(
-            f"Connection types: {total_global_connections} global, {total_legacy_connections} legacy"
+            f"Connection types: {total_global_connections} global, {total_channel_connections} channel"
         )
 
         if total_recipients == 0:

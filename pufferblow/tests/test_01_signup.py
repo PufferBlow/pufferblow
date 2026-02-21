@@ -11,6 +11,7 @@ route = "/api/v1/users/signup"
 
 
 def test_signup(client: TestClient):
+    """Test signup."""
     data = {"username": ValueStorage.username, "password": ValueStorage.password}
 
     response = client.post(route, json=data)

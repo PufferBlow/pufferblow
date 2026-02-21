@@ -19,7 +19,7 @@ from loguru import logger
 from pufferblow.api.storage.local_storage import LocalStorageBackend
 from pufferblow.api.storage.s3_storage import S3StorageBackend
 from pufferblow.api.storage.storage_backend import StorageBackend
-from pufferblow.api_initializer import APIInitializer
+from pufferblow.core.bootstrap import APIInitializer
 
 
 class StorageMigrator:

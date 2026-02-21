@@ -59,6 +59,7 @@ class Messages(Base):
         }
 
     def __repr__(self) -> str:
+        """Repr special method."""
         return (
             f"Messages(message_id={self.message_id!r}, "
             f"hashed_message={self.hashed_message!r}, "

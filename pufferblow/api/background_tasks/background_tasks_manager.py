@@ -44,6 +44,7 @@ class BackgroundTasksManager:
         storage_manager: StorageManager | None,
         config: Config,
     ):
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.storage_manager = storage_manager
         self.config = config
@@ -1590,7 +1591,7 @@ class BackgroundTasksManager:
 @asynccontextmanager
 async def lifespan_background_tasks():
     """Lifespan function to start background tasks"""
-    from pufferblow.api_initializer import api_initializer
+    from pufferblow.core.bootstrap import api_initializer
 
     # Start the scheduler in background
     if api_initializer.is_loaded and hasattr(

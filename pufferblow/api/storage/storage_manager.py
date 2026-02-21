@@ -33,6 +33,7 @@ class StorageManager:
     def __init__(
         self, storage_config: dict[str, Any], database_handler: DatabaseHandler
     ):
+        """Initialize the instance."""
         self.database_handler = database_handler
         self.config = storage_config
         self.sse_enabled = bool(self.config.get("sse_enabled", False))
@@ -105,14 +106,15 @@ class StorageManager:
     def _decrypt_from_storage(self, stored_content: bytes) -> bytes:
         """
         Decrypt previously encrypted storage content.
-        If content is not in SSE envelope format, return as-is for backward compatibility.
         """
         if not self.sse_enabled or not self.sse_key:
             return stored_content
 
         if not stored_content.startswith(self.SSE_MAGIC):
-            # Backward compatibility for files stored before SSE was enabled.
-            return stored_content
+            raise HTTPException(
+                status_code=500,
+                detail="Storage object is not encrypted with the configured SSE envelope",
+            )
 
         prefix_len = len(self.SSE_MAGIC)
         if len(stored_content) <= prefix_len + self.SSE_NONCE_SIZE:
@@ -345,7 +347,7 @@ class StorageManager:
         ):
             try:
                 # Import here to avoid circular imports
-                from pufferblow.api_initializer import api_initializer
+                from pufferblow.core.bootstrap import api_initializer
 
                 if (
                     hasattr(api_initializer, "background_tasks_manager")

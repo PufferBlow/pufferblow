@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pufferblow.api_initializer import api_initializer
+from pufferblow.core.bootstrap import api_initializer
 from pufferblow.tests.conftest import ValueStorage
 
 

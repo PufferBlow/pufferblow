@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from loguru import logger
 
 from pufferblow.api.utils.extract_user_id import extract_user_id
-from pufferblow.api_initializer import api_initializer
+from pufferblow.core.bootstrap import api_initializer
 
 
 def _token_preview(auth_token: str) -> str:

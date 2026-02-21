@@ -6,7 +6,7 @@ from fastapi import HTTPException, UploadFile
 from PIL import Image
 
 from pufferblow.api.cdn.cdn_manager import CDNManager
-from pufferblow.api_initializer import api_initializer
+from pufferblow.core.bootstrap import api_initializer
 
 
 class TestCDNManager:
@@ -20,7 +20,9 @@ class TestCDNManager:
 
         # Create test config with temporary paths
         class TestConfig:
+            """TestConfig class."""
             def __init__(self):
+                """Initialize the instance."""
                 self.CDN_STORAGE_PATH = str(tmp_path / "cdn_test")
                 self.CDN_BASE_URL = "/cdn"
 
@@ -209,7 +211,9 @@ class TestCDNManagerCategorization:
 
         # Create test config with temporary paths
         class TestConfig:
+            """TestConfig class."""
             def __init__(self):
+                """Initialize the instance."""
                 self.CDN_STORAGE_PATH = str(tmp_path / "cdn_test")
                 self.CDN_BASE_URL = "/cdn"
 
@@ -533,7 +537,9 @@ class TestCDNManagerFileServing:
 
         # Create test config with temporary paths
         class TestConfig:
+            """TestConfig class."""
             def __init__(self):
+                """Initialize the instance."""
                 self.CDN_STORAGE_PATH = str(tmp_path / "cdn_test")
                 self.CDN_BASE_URL = "/cdn"
 

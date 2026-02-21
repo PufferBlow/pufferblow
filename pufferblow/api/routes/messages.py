@@ -19,7 +19,7 @@ from pufferblow.api.schemas import (
     SendMessageForm,
 )
 from pufferblow.api.dependencies import get_current_user, check_channel_access
-from pufferblow.api_initializer import api_initializer
+from pufferblow.core.bootstrap import api_initializer
 
 # Create router for message-related endpoints
 router = APIRouter(prefix="/api/v1/channels/{channel_id}")
