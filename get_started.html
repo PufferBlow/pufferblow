@@ -1,0 +1,813 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Get started &#8212; pufferblow</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/css/styles.css?v=1edbfd53" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=236ab18f"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'get_started';</script>
+    <link rel="icon" href="_static/favicon.ico"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="PufferBlow API Reference - Developer Documentation" href="api_reference.html" />
+    <link rel="prev" title="Understanding the PufferBlow API" href="api.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">pufferblow</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Quick Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/PufferBlow/pufferblow" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="introduction.html">Introduction to PufferBlow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="server_wiki.html">Server Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="decentralization.html">Decentralization Model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">Understanding the PufferBlow API</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Get started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">PufferBlow API Reference - Developer Documentation</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow/edit/docs/./docs/get_started.rst" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow/issues/new?title=Issue%20on%20page%20%2Fget_started.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/get_started.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Get started</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Table of content </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-you-need-before-starting">What You Need Before Starting</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-1-choose-where-to-host-your-server">Step 1: Choose Where to Host Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-2-install-python-and-system-dependencies">Step 2: Install Python and System Dependencies</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-3-set-up-the-database">Step 3: Set Up the Database</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-4-install-pufferblow">Step 4: Install PufferBlow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-5-configure-your-server">Step 5: Configure Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-6-start-your-server">Step 6: Start Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-7-connect-to-your-server">Step 7: Connect to Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-8-next-steps-and-management">Step 8: Next Steps and Management</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting-common-issues">Troubleshooting Common Issues</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#need-help">Need Help?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-s-next">What’s Next?</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="get-started">
+<h1>Get started<a class="headerlink" href="#get-started" title="Link to this heading">#</a></h1>
+<p>Welcome! This guide will walk you through setting up your own PufferBlow chat server step by step. PufferBlow is a decentralized platform, meaning you get to host your own server and have complete control over your data and community - no relying on big companies like Discord or Slack.</p>
+<p>By the end of this guide, you’ll have your own independent chat server running that your friends, family, or community can use to communicate.</p>
+<section id="what-you-need-before-starting">
+<h2>What You Need Before Starting<a class="headerlink" href="#what-you-need-before-starting" title="Link to this heading">#</a></h2>
+<dl class="simple">
+<dt><strong>Hardware Requirements</strong></dt><dd><ul class="simple">
+<li><p>A computer or VPS running Linux (Ubuntu, Debian, CentOS, etc. work great)</p></li>
+<li><p>At least 2GB RAM (4GB recommended for better performance)</p></li>
+<li><p>10GB free disk space (for messages, files, and system data)</p></li>
+<li><p>Stable internet connection</p></li>
+</ul>
+</dd>
+<dt><strong>Software Skills</strong></dt><dd><ul class="simple">
+<li><p>Basic command line knowledge (don’t worry, we’ll guide you through every command)</p></li>
+<li><p>Ability to install software and follow step-by-step instructions</p></li>
+</ul>
+</dd>
+<dt><strong>Time Required</strong></dt><dd><ul class="simple">
+<li><p>First time setup: 30-60 minutes</p></li>
+<li><p>Daily operation: 5 minutes to start/stop the server</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+<section id="step-1-choose-where-to-host-your-server">
+<h2>Step 1: Choose Where to Host Your Server<a class="headerlink" href="#step-1-choose-where-to-host-your-server" title="Link to this heading">#</a></h2>
+<p>You have several options for where to run your PufferBlow server:</p>
+<dl class="simple">
+<dt><strong>Option A: Your Own Computer (For Testing)</strong></dt><dd><ul class="simple">
+<li><p>Pros: Free, full control, private</p></li>
+<li><p>Cons: Server only runs when your computer is on, may be slow for many users</p></li>
+</ul>
+</dd>
+<dt><strong>Option B: Rent a VPS (Virtual Private Server) - Recommended</strong></dt><dd><ul class="simple">
+<li><p>Pros: Always online, good performance, professional setup</p></li>
+<li><p>Cons: Monthly cost (typically $5-20/month)</p></li>
+</ul>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>For your first server, we recommend renting a VPS. It’s inexpensive and reliable.</p>
+</div>
+<dl class="simple">
+<dt><strong>Recommended VPS Providers</strong></dt><dd><ul class="simple">
+<li><p><a class="reference external" href="https://www.oracle.com/cloud/free">Oracle Cloud Free Tier</a> - Free forever (with usage limits)</p></li>
+<li><p><a class="reference external" href="https://contabo.com/en/">Contabo</a> - Very affordable, starts at $4.99/month</p></li>
+<li><p><a class="reference external" href="https://www.hetzner.com/">Hetzner</a> - Reliable, good performance</p></li>
+<li><p><a class="reference external" href="https://www.digitalocean.com/">DigitalOcean</a> - Easy to use, good documentation</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Once you have your server</strong>, connect to it using SSH:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ssh<span class="w"> </span>username@your-server-ip
+</pre></div>
+</div>
+</section>
+<section id="step-2-install-python-and-system-dependencies">
+<h2>Step 2: Install Python and System Dependencies<a class="headerlink" href="#step-2-install-python-and-system-dependencies" title="Link to this heading">#</a></h2>
+<p>PufferBlow runs on Python, so we need to install it along with some basic tools.</p>
+<p><strong>Update your system (run these commands one by one):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>apt<span class="w"> </span>update
+sudo<span class="w"> </span>apt<span class="w"> </span>upgrade<span class="w"> </span>-y
+</pre></div>
+</div>
+<p><strong>Install Python and pip (the package manager):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>python3<span class="w"> </span>python3-pip<span class="w"> </span>python3-dev
+</pre></div>
+</div>
+<p><strong>Verify Python is installed:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python3<span class="w"> </span>--version
+</pre></div>
+</div>
+<p>You should see something like “Python 3.10.0” or higher. If you get an error, ask in our community for help.</p>
+<p><strong>Install PostgreSQL (the database):</strong></p>
+<p>PostgreSQL is like a smart filing cabinet that stores all your chat messages, user accounts, and settings.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>postgresql<span class="w"> </span>postgresql-contrib
+</pre></div>
+</div>
+<p><strong>Start the PostgreSQL service:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>postgresql
+sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>postgresql
+</pre></div>
+</div>
+<p><strong>Verify PostgreSQL is running:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>systemctl<span class="w"> </span>status<span class="w"> </span>postgresql
+</pre></div>
+</div>
+<p>You should see “active (running)” in green. If not, run:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>postgresql
+</pre></div>
+</div>
+</section>
+<section id="step-3-set-up-the-database">
+<h2>Step 3: Set Up the Database<a class="headerlink" href="#step-3-set-up-the-database" title="Link to this heading">#</a></h2>
+<p>Now we need to create a database for PufferBlow to use.</p>
+<p><strong>Switch to the PostgreSQL user:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>-u<span class="w"> </span>postgres<span class="w"> </span>psql
+</pre></div>
+</div>
+<p><strong>Create a database named ‘pufferblow’ (you can choose any name you like):</strong></p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="k">DATABASE</span><span class="w"> </span><span class="n">pufferblow</span><span class="p">;</span>
+</pre></div>
+</div>
+<p><strong>Create a database user (replace ‘mypassword’ with a secure password):</strong></p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="k">USER</span><span class="w"> </span><span class="n">pufferblow</span><span class="w"> </span><span class="k">WITH</span><span class="w"> </span><span class="n">PASSWORD</span><span class="w"> </span><span class="s1">&#39;mypassword&#39;</span><span class="p">;</span>
+</pre></div>
+</div>
+<p><strong>Give the user permission to use the database:</strong></p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">GRANT</span><span class="w"> </span><span class="k">ALL</span><span class="w"> </span><span class="k">PRIVILEGES</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">DATABASE</span><span class="w"> </span><span class="n">pufferblow</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">pufferblow</span><span class="p">;</span>
+</pre></div>
+</div>
+<p><strong>Exit the PostgreSQL prompt:</strong></p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="err">\</span><span class="n">q</span>
+</pre></div>
+</div>
+<p><strong>Optional: Secure your PostgreSQL installation</strong></p>
+<p>For a production server, you should run:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>-u<span class="w"> </span>postgres<span class="w"> </span>psql
+ALTER<span class="w"> </span>USER<span class="w"> </span>pufferblow<span class="w"> </span>CREATEDB<span class="p">;</span>
+<span class="se">\q</span>
+</pre></div>
+</div>
+<p>And configure PostgreSQL to listen on the right interfaces if needed.</p>
+</section>
+<section id="step-4-install-pufferblow">
+<h2>Step 4: Install PufferBlow<a class="headerlink" href="#step-4-install-pufferblow" title="Link to this heading">#</a></h2>
+<p>Now we’ll install the PufferBlow server software.</p>
+<p><strong>Option A: Install from the official repository (recommended):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip3<span class="w"> </span>install<span class="w"> </span>git+https://github.com/pufferblow/pufferblow.git
+</pre></div>
+</div>
+<p><strong>Option B: Download and install from source (for developers):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/pufferblow/pufferblow.git<span class="w"> </span>--depth<span class="o">=</span><span class="m">1</span>
+<span class="nb">cd</span><span class="w"> </span>pufferblow
+pip3<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+<p><strong>Verify installation:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pufferblow<span class="w"> </span>--version
+</pre></div>
+</div>
+<p>You should see the version number. If you get “command not found”, you may need to add Python’s local bin directory to your PATH:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/.local/bin:</span><span class="nv">$PATH</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+<p>Then try the version command again.</p>
+</section>
+<section id="step-5-configure-your-server">
+<h2>Step 5: Configure Your Server<a class="headerlink" href="#step-5-configure-your-server" title="Link to this heading">#</a></h2>
+<p>PufferBlow has an interactive setup wizard that makes configuration easy.</p>
+<p><strong>Run the setup wizard:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pufferblow<span class="w"> </span>setup
+</pre></div>
+</div>
+<p><strong>Select Option 1 (Full Server Setup)</strong> when prompted.</p>
+<dl class="simple">
+<dt><strong>Enter your database information:</strong></dt><dd><ul class="simple">
+<li><p>Database name: pufferblow (or whatever you named it)</p></li>
+<li><p>Username: pufferblow</p></li>
+<li><p>Password: mypassword (use the password you set earlier)</p></li>
+<li><p>Host: localhost (or 127.0.0.1)</p></li>
+<li><p>Port: 5432 (default PostgreSQL port)</p></li>
+</ul>
+</dd>
+<dt>The wizard will test the database connection. If it fails:</dt><dd><ul class="simple">
+<li><p>Double-check your database name, username, and password</p></li>
+<li><p>Make sure PostgreSQL is running: <code class="docutils literal notranslate"><span class="pre">sudo</span> <span class="pre">systemctl</span> <span class="pre">status</span> <span class="pre">postgresql</span></code></p></li>
+</ul>
+</dd>
+<dt><strong>Configure your server details:</strong></dt><dd><ul class="simple">
+<li><p><strong>Server name</strong>: Give your server a friendly name (e.g., “My Gaming Community” or “Family Chat”)</p></li>
+<li><p><strong>Server description</strong>: A short description of what your server is about</p></li>
+<li><p><strong>Welcome message</strong>: What new users see when they join</p></li>
+</ul>
+</dd>
+<dt><strong>Create your admin account:</strong></dt><dd><ul class="simple">
+<li><p><strong>Username</strong>: Your admin username (this will be your login)</p></li>
+<li><p><strong>Password</strong>: Choose a strong password (it will be hidden while typing)</p></li>
+</ul>
+</dd>
+</dl>
+<p>The setup will complete and show you an <strong>authentication token</strong>. <strong>SAVE THIS TOKEN</strong> - you’ll need it to log into your server as the admin.</p>
+</section>
+<section id="step-6-start-your-server">
+<h2>Step 6: Start Your Server<a class="headerlink" href="#step-6-start-your-server" title="Link to this heading">#</a></h2>
+<p>Now for the exciting part - starting your chat server!</p>
+<p><strong>Start the server:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pufferblow<span class="w"> </span>serve
+</pre></div>
+</div>
+<p>You should see startup messages. The server runs on port 7575 by default.</p>
+<p><strong>Verify it’s running:</strong></p>
+<p>Open a web browser and go to: <code class="docutils literal notranslate"><span class="pre">http://your-server-ip:7575</span></code></p>
+<p>You should see a basic API info page that says the server is running.</p>
+<p><strong>To run in the background (recommended for production):</strong></p>
+<p>Stop the server with Ctrl+C, then run:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nohup<span class="w"> </span>pufferblow<span class="w"> </span>serve<span class="w"> </span>&gt;<span class="w"> </span>server.log<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">&amp;</span>
+</pre></div>
+</div>
+<p><strong>Check if it’s still running:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ps<span class="w"> </span>aux<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>pufferblow
+</pre></div>
+</div>
+<p>You should see the server process running.</p>
+</section>
+<section id="step-7-connect-to-your-server">
+<h2>Step 7: Connect to Your Server<a class="headerlink" href="#step-7-connect-to-your-server" title="Link to this heading">#</a></h2>
+<p>Now you can connect chat clients to your server.</p>
+<dl class="simple">
+<dt><strong>Web Client:</strong></dt><dd><p>Visit: <a class="reference external" href="http://your-server-ip:7575">http://your-server-ip:7575</a> (note: the PufferBlow client might be on a different URL)</p>
+</dd>
+<dt><strong>Desktop/Mobile Clients:</strong></dt><dd><p>Point clients to your server URL: <code class="docutils literal notranslate"><span class="pre">http://your-server-ip:7575</span></code></p>
+</dd>
+<dt><strong>Login with your admin account:</strong></dt><dd><p>Use the username and password you created during setup.</p>
+</dd>
+</dl>
+</section>
+<section id="step-8-next-steps-and-management">
+<h2>Step 8: Next Steps and Management<a class="headerlink" href="#step-8-next-steps-and-management" title="Link to this heading">#</a></h2>
+<p><strong>Congratulations!</strong> Your server is now running. Here are some next steps:</p>
+<dl>
+<dt><strong>Create your first channel:</strong></dt><dd><p>As admin, create channels for different topics (e.g., #general, #gaming, #random)</p>
+</dd>
+<dt><strong>Invite users:</strong></dt><dd><p>Share your server address with friends/family</p>
+</dd>
+<dt><strong>Customize settings:</strong></dt><dd><p>Use the admin dashboard to configure moderation, file limits, etc.</p>
+</dd>
+<dt><strong>Daily operations:</strong></dt><dd><ul class="simple">
+<li><p>Start server: <code class="docutils literal notranslate"><span class="pre">pufferblow</span> <span class="pre">serve</span></code></p></li>
+<li><p>Stop server: Find the process with <code class="docutils literal notranslate"><span class="pre">ps</span> <span class="pre">aux</span> <span class="pre">|</span> <span class="pre">grep</span> <span class="pre">pufferblow</span></code> and <code class="docutils literal notranslate"><span class="pre">kill</span> <span class="pre">&lt;PID&gt;</span></code></p></li>
+<li><p>Update: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">--upgrade</span> <span class="pre">git+https://github.com/pufferblow/pufferblow.git</span></code></p></li>
+</ul>
+</dd>
+<dt><strong>Backup your data:</strong></dt><dd><p>Regularly backup your PostgreSQL database:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pg_dump<span class="w"> </span>pufferblow<span class="w"> </span>&gt;<span class="w"> </span>pufferblow_backup.sql
+</pre></div>
+</div>
+</dd>
+</dl>
+</section>
+<section id="troubleshooting-common-issues">
+<h2>Troubleshooting Common Issues<a class="headerlink" href="#troubleshooting-common-issues" title="Link to this heading">#</a></h2>
+<p><strong>Server won’t start:</strong></p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Check: Are you running as the same user who installed PufferBlow?
+Check: Is port 7575 available? Run: netstat -tlnp | grep 7575
+Check: Are all dependencies installed? Try reinstalling: pip3 install --upgrade --force-reinstall git+https://github.com/pufferblow/pufferblow.git
+</pre></div>
+</div>
+<p><strong>Database connection fails:</strong></p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Check: Is PostgreSQL running? sudo systemctl status postgresql
+Check: Can you connect manually? psql -h localhost -U pufferblow -d pufferblow
+Check: Are the database credentials correct? Rerun setup: pufferblow setup --update-server
+</pre></div>
+</div>
+<p><strong>Can’t access from other computers:</strong></p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Check: Is your firewall blocking port 7575? Ubuntu: sudo ufw allow 7575
+Check: Is your VPS network configuration correct?
+</pre></div>
+</div>
+<p><strong>Performance issues:</strong></p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Check: System resources with: htop or top
+Check: Database connections with: ps aux | grep postgres
+</pre></div>
+</div>
+</section>
+<section id="need-help">
+<h2>Need Help?<a class="headerlink" href="#need-help" title="Link to this heading">#</a></h2>
+<p>If you run into problems:</p>
+<ol class="arabic simple">
+<li><p>Check the server logs in the current directory (<code class="docutils literal notranslate"><span class="pre">server.log</span></code>)</p></li>
+<li><p>Re-run setup: <code class="docutils literal notranslate"><span class="pre">pufferblow</span> <span class="pre">setup</span></code></p></li>
+<li><p>Ask the community at our GitHub issues page</p></li>
+<li><p>Join our official server for support</p></li>
+</ol>
+</section>
+<section id="what-s-next">
+<h2>What’s Next?<a class="headerlink" href="#what-s-next" title="Link to this heading">#</a></h2>
+<p>Now that you have your own server running, you can:</p>
+<ul class="simple">
+<li><p><strong>Invite friends and family</strong> to join your private community</p></li>
+<li><p><strong>Customize the experience</strong> with channels, roles, and settings</p></li>
+<li><p><strong>Add more features</strong> as the PufferBlow platform grows</p></li>
+<li><p><strong>Learn about decentralized tech</strong> and why self-hosting matters</p></li>
+</ul>
+<p>Welcome to the decentralized future of communication! 🎉</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="api.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Understanding the PufferBlow API</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="api_reference.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">PufferBlow API Reference - Developer Documentation</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Table of content
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-you-need-before-starting">What You Need Before Starting</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-1-choose-where-to-host-your-server">Step 1: Choose Where to Host Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-2-install-python-and-system-dependencies">Step 2: Install Python and System Dependencies</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-3-set-up-the-database">Step 3: Set Up the Database</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-4-install-pufferblow">Step 4: Install PufferBlow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-5-configure-your-server">Step 5: Configure Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-6-start-your-server">Step 6: Start Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-7-connect-to-your-server">Step 7: Connect to Your Server</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#step-8-next-steps-and-management">Step 8: Next Steps and Management</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting-common-issues">Troubleshooting Common Issues</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#need-help">Need Help?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-s-next">What’s Next?</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By ramsy0dev
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, ramsy0dev.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

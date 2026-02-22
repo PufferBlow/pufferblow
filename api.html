@@ -1,0 +1,645 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Understanding the PufferBlow API &#8212; pufferblow</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/css/styles.css?v=1edbfd53" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=236ab18f"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api';</script>
+    <link rel="icon" href="_static/favicon.ico"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Get started" href="get_started.html" />
+    <link rel="prev" title="Decentralization Model" href="decentralization.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">pufferblow</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Quick Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/PufferBlow/pufferblow" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="introduction.html">Introduction to PufferBlow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="server_wiki.html">Server Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="decentralization.html">Decentralization Model</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Understanding the PufferBlow API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="get_started.html">Get started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">PufferBlow API Reference - Developer Documentation</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow/edit/docs/./docs/api.rst" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow/issues/new?title=Issue%20on%20page%20%2Fapi.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/api.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Understanding the PufferBlow API</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Table of content </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-is-the-pufferblow-api">What is the PufferBlow API?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features-of-the-api">Key Features of the API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why-self-hosting-matters">Why Self-Hosting Matters</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#how-the-api-works-in-practice">How the API Works in Practice</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-endpoints-overview">API Endpoints Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#connecting-to-multiple-servers">Connecting to Multiple Servers</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#getting-started-with-the-api">Getting Started with the API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#security-privacy">Security &amp; Privacy</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="understanding-the-pufferblow-api">
+<h1>Understanding the PufferBlow API<a class="headerlink" href="#understanding-the-pufferblow-api" title="Link to this heading">#</a></h1>
+<section id="what-is-the-pufferblow-api">
+<h2>What is the PufferBlow API?<a class="headerlink" href="#what-is-the-pufferblow-api" title="Link to this heading">#</a></h2>
+<p>The PufferBlow API is the heart of your self-hosted chat platform. It’s a RESTful web service built with FastAPI that provides all the functionality needed to run a modern chat server. Think of it as the backend that powers features like sending messages, managing channels, handling user accounts, and storing files - just like how Discord or Slack work, but completely under your control.</p>
+<p>Since PufferBlow is <strong>decentralized</strong>, there’s no central server that everyone connects to. Instead, each community or individual hosts their own API server, giving them full control over their data, users, and message history. This approach ensures privacy and prevents any single point of failure or surveillance.</p>
+</section>
+<section id="key-features-of-the-api">
+<h2>Key Features of the API<a class="headerlink" href="#key-features-of-the-api" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table" id="id1">
+<caption><span class="caption-text">API Capabilities</span><a class="headerlink" href="#id1" title="Link to this table">#</a></caption>
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 70.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Feature Category</p></th>
+<th class="head"><p>What It Enables</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>User Management</strong></p></td>
+<td><p>Account creation, login, profile management, avatar/picture uploads, authentication tokens</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Channel Management</strong></p></td>
+<td><p>Create public and private channels, manage memberships, set permissions</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Messaging</strong></p></td>
+<td><p>Send text messages, attachments (images, videos, files), real-time messaging via WebSocket</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>File Sharing</strong></p></td>
+<td><p>Upload and share files, images, and documents with automatic organization and duplicate detection</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Security</strong></p></td>
+<td><p>Encrypted data storage, rate limiting, IP blocking, secure authentication</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Analytics</strong></p></td>
+<td><p>User activity tracking, message statistics, server usage monitoring, charts and reports</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Admin Controls</strong></p></td>
+<td><p>Server configuration, user moderation, content management, system settings</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="why-self-hosting-matters">
+<h2>Why Self-Hosting Matters<a class="headerlink" href="#why-self-hosting-matters" title="Link to this heading">#</a></h2>
+<p>With PufferBlow, your server becomes completely independent:</p>
+<ul class="simple">
+<li><p><strong>Your Data, Your Rules</strong>: All messages, files, and user data are stored on hardware you control</p></li>
+<li><p><strong>No Third-Party Dependencies</strong>: No reliance on Discord, Slack, or other companies’ servers</p></li>
+<li><p><strong>Privacy by Design</strong>: No algorithmic feeds, no data mining, no unnecessary tracking</p></li>
+<li><p><strong>Customization</strong>: Configure server limits, moderation rules, and features to match your needs</p></li>
+<li><p><strong>Censorship Resistance</strong>: Your community stays online as long as you maintain the server</p></li>
+<li><p><strong>Learning Opportunity</strong>: Great way to experiment with distributed systems and modern web APIs</p></li>
+</ul>
+</section>
+<section id="how-the-api-works-in-practice">
+<h2>How the API Works in Practice<a class="headerlink" href="#how-the-api-works-in-practice" title="Link to this heading">#</a></h2>
+<p>When you set up your PufferBlow server:</p>
+<ol class="arabic simple">
+<li><p><strong>The API starts running</strong> on your chosen host and port (default: <a class="reference external" href="http://localhost:7575">http://localhost:7575</a>)</p></li>
+<li><p><strong>Chat clients connect</strong> to your API endpoints to:
+- Authenticate users and manage accounts
+- Create and join chat channels
+- Send and receive messages in real-time
+- Upload and download shared files</p></li>
+<li><p><strong>Your community grows</strong> as more users connect to your specific server instance</p></li>
+<li><p><strong>You retain full control</strong> over server settings, user data, and community guidelines</p></li>
+</ol>
+</section>
+<section id="api-endpoints-overview">
+<h2>API Endpoints Overview<a class="headerlink" href="#api-endpoints-overview" title="Link to this heading">#</a></h2>
+<p>The API provides REST endpoints across several main categories:</p>
+<dl class="simple">
+<dt><strong>Authentication &amp; Users</strong> (<code class="docutils literal notranslate"><span class="pre">/api/v1/users</span></code>)</dt><dd><p>User signup/login, profile management, avatar uploads, account settings</p>
+</dd>
+<dt><strong>Channels</strong> (<code class="docutils literal notranslate"><span class="pre">/api/v1/channels</span></code>)</dt><dd><p>Channel creation, listing, membership management, message loading</p>
+</dd>
+<dt><strong>Messaging</strong> (<code class="docutils literal notranslate"><span class="pre">/api/v1/channels/{channel_id}</span></code>)</dt><dd><p>Send messages, load message history, upload attachments</p>
+</dd>
+<dt><strong>File Management</strong> (<code class="docutils literal notranslate"><span class="pre">/api/v1/cdn</span></code>)</dt><dd><p>File uploads, downloads, organization, duplicate handling</p>
+</dd>
+<dt><strong>Server Administration</strong> (<code class="docutils literal notranslate"><span class="pre">/api/v1/system</span></code>)</dt><dd><p>Server settings, user management, analytics, maintenance</p>
+</dd>
+<dt><strong>Real-time Communication</strong> (WebSocket)</dt><dd><p>Live message delivery, typing indicators, presence updates</p>
+</dd>
+</dl>
+</section>
+<section id="connecting-to-multiple-servers">
+<h2>Connecting to Multiple Servers<a class="headerlink" href="#connecting-to-multiple-servers" title="Link to this heading">#</a></h2>
+<p>PufferBlow includes an ActivityPub federation layer for cross-instance identity and direct messaging:</p>
+<ul class="simple">
+<li><p>Resolve users across servers via WebFinger/actor documents</p></li>
+<li><p>Follow remote actors</p></li>
+<li><p>Send direct messages between different PufferBlow instances</p></li>
+</ul>
+<p>At the same time, server/community features remain local by design:</p>
+<ul class="simple">
+<li><p>Channels and voice channels are instance-local</p></li>
+<li><p>Server moderation and settings are instance-local</p></li>
+<li><p>User sign-in is bound to account origin instance</p></li>
+</ul>
+</section>
+<section id="getting-started-with-the-api">
+<h2>Getting Started with the API<a class="headerlink" href="#getting-started-with-the-api" title="Link to this heading">#</a></h2>
+<p>To start using the PufferBlow API, follow these steps:</p>
+<ol class="arabic simple">
+<li><p><strong>Set up your server</strong> (see the <a class="reference internal" href="get_started.html"><span class="doc">Get started</span></a> guide)</p></li>
+<li><p><strong>Connect a client</strong> (web client, mobile app, or custom integration)</p></li>
+<li><p><strong>Configure your server settings</strong> through the admin interface</p></li>
+<li><p><strong>Invite users</strong> and start building your community</p></li>
+</ol>
+<p>The API is designed to be developer-friendly, with comprehensive documentation available at <code class="docutils literal notranslate"><span class="pre">http://your-server:7575/docs</span></code> when your server is running (using FastAPI’s built-in OpenAPI/Swagger documentation).</p>
+</section>
+<section id="security-privacy">
+<h2>Security &amp; Privacy<a class="headerlink" href="#security-privacy" title="Link to this heading">#</a></h2>
+<p>PufferBlow takes security seriously:</p>
+<ul class="simple">
+<li><p><strong>End-to-end Encryption</strong>: Message contents are encrypted at rest and in transit</p></li>
+<li><p><strong>Strong Authentication</strong>: Bcrypt password hashing and secure token management</p></li>
+<li><p><strong>Rate Limiting</strong>: Protection against abuse and DDoS attacks</p></li>
+<li><p><strong>Input Validation</strong>: Comprehensive validation of all user inputs</p></li>
+<li><p><strong>Audit Logging</strong>: Complete tracking of user and system activities</p></li>
+<li><p><strong>IP Management</strong>: Ability to block problematic IP addresses</p></li>
+</ul>
+<p>Unlike centralized platforms, your self-hosted server gives you direct control over security measures and data handling practices.</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="decentralization.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Decentralization Model</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="get_started.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Get started</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Table of content
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-is-the-pufferblow-api">What is the PufferBlow API?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-features-of-the-api">Key Features of the API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why-self-hosting-matters">Why Self-Hosting Matters</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#how-the-api-works-in-practice">How the API Works in Practice</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-endpoints-overview">API Endpoints Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#connecting-to-multiple-servers">Connecting to Multiple Servers</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#getting-started-with-the-api">Getting Started with the API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#security-privacy">Security &amp; Privacy</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By ramsy0dev
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, ramsy0dev.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

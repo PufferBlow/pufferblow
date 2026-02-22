@@ -1,0 +1,1200 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>PufferBlow API Reference - Developer Documentation &#8212; pufferblow</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/css/styles.css?v=1edbfd53" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=236ab18f"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api_reference';</script>
+    <link rel="icon" href="_static/favicon.ico"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Get started" href="get_started.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">pufferblow</p>
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Quick Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/PufferBlow/pufferblow" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="introduction.html">Introduction to PufferBlow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="server_wiki.html">Server Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="decentralization.html">Decentralization Model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">Understanding the PufferBlow API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="get_started.html">Get started</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">PufferBlow API Reference - Developer Documentation</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow/edit/docs/./docs/api_reference.rst" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/PufferBlow/pufferblow/issues/new?title=Issue%20on%20page%20%2Fapi_reference.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/api_reference.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>PufferBlow API Reference - Developer Documentation</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Table of content </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#authentication">Authentication</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#token-refresh-endpoints">Token Refresh Endpoints</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#decentralized-node-auth-endpoints">Decentralized Node Auth Endpoints</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#user-routes">User Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#channel-routes">Channel Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#voice-channel-routes">Voice Channel Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#federation-and-direct-message-routes">Federation and Direct Message Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-management-storage-cdn-routes">File Management (Storage/CDN) Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-administration-routes">Server Administration Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#analytics-activity-routes">Analytics &amp; Activity Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#background-tasks-routes">Background Tasks Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#general-routes">General Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#websocket-routes">WebSocket Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#error-responses">Error Responses</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#rate-limiting">Rate Limiting</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#development-tips">Development Tips</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="pufferblow-api-reference-developer-documentation">
+<h1>PufferBlow API Reference - Developer Documentation<a class="headerlink" href="#pufferblow-api-reference-developer-documentation" title="Link to this heading">#</a></h1>
+<p>This reference documents the main REST and federation endpoints in the current
+beta server. The API uses standard HTTP methods and JSON payloads.</p>
+<p>Most feature endpoints require an <code class="docutils literal notranslate"><span class="pre">auth_token</span></code> (JWT access token) returned by
+<code class="docutils literal notranslate"><span class="pre">/api/v1/users/signup</span></code> or <code class="docutils literal notranslate"><span class="pre">/api/v1/users/signin</span></code>.</p>
+<section id="authentication">
+<h2>Authentication<a class="headerlink" href="#authentication" title="Link to this heading">#</a></h2>
+<p>PufferBlow uses access + refresh token sessions.</p>
+<ul class="simple">
+<li><p>Access token: short-lived JWT used for API calls.</p></li>
+<li><p>Refresh token: long-lived token used to rotate session tokens.</p></li>
+<li><p>Tokens are instance-bound via <code class="docutils literal notranslate"><span class="pre">origin_server</span></code> claims.</p></li>
+</ul>
+<p>Most endpoints still accept <code class="docutils literal notranslate"><span class="pre">auth_token</span></code> in query params or request body.
+For clients that send <code class="docutils literal notranslate"><span class="pre">Authorization:</span> <span class="pre">Bearer</span></code> headers, normalize to the same
+token value before calling routes.</p>
+<section id="token-refresh-endpoints">
+<h3>Token Refresh Endpoints<a class="headerlink" href="#token-refresh-endpoints" title="Link to this heading">#</a></h3>
+<p><strong>POST /api/v1/auth/refresh</strong></p>
+<p>Rotate refresh token and issue a new access/refresh pair.</p>
+<p><strong>Request Body:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;refresh_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>POST /api/v1/auth/revoke</strong></p>
+<p>Revoke refresh token (logout session).</p>
+<p><strong>Request Body:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;refresh_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="decentralized-node-auth-endpoints">
+<h3>Decentralized Node Auth Endpoints<a class="headerlink" href="#decentralized-node-auth-endpoints" title="Link to this heading">#</a></h3>
+<p>These endpoints are used for node-bound delegated sessions:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/auth/decentralized/challenge</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/auth/decentralized/verify</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/auth/decentralized/introspect</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/auth/decentralized/revoke</span></code></p></li>
+</ul>
+<p>General auth token placement patterns:</p>
+<ol class="arabic simple">
+<li><p><strong>Query Parameter</strong>: <code class="docutils literal notranslate"><span class="pre">?auth_token=your_token_here</span></code></p></li>
+<li><p><strong>Header</strong>: <code class="docutils literal notranslate"><span class="pre">Authorization:</span> <span class="pre">Bearer</span> <span class="pre">your_token_here</span></code></p></li>
+<li><p><strong>Request Body</strong>: Include <code class="docutils literal notranslate"><span class="pre">auth_token</span></code> field in JSON payload</p></li>
+</ol>
+</section>
+</section>
+<section id="user-routes">
+<span id="api-user-routes"></span><h2>User Routes<a class="headerlink" href="#user-routes" title="Link to this heading">#</a></h2>
+<p>These endpoints handle user authentication, account management, and profile operations.</p>
+<p><strong>GET /api/v1/users/signin</strong></p>
+<p>Sign in to an existing account.</p>
+<p><strong>Query Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>username</p></td>
+<td><p>string</p></td>
+<td><p>Account username</p></td>
+</tr>
+<tr class="row-odd"><td><p>password</p></td>
+<td><p>string</p></td>
+<td><p>Account password</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Response (200 OK):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Signin successfully&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;auth_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eyJhbGciOi...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;refresh_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eyJ1aWQiOi...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;token_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Bearer&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;auth_token_expire_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-02-21T10:00:00+00:00&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;refresh_token_expire_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-03-22T10:00:00+00:00&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>POST /api/v1/users/signup</strong></p>
+<p>Create a new user account.</p>
+<p><strong>Request Body:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;johndoe&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mySecurePassword123!&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>Response (201 Created):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">201</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Account created successfully&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;auth_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eyJhbGciOi...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;refresh_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eyJ1aWQiOi...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;token_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Bearer&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;auth_token_expire_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-02-21T10:00:00+00:00&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;refresh_token_expire_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-03-22T10:00:00+00:00&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>POST /api/v1/users/profile</strong></p>
+<p>Get current user’s profile information. Also supports fetching other users’ public profiles.</p>
+<p><strong>Request Body:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;auth_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your_auth_token&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;user_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;optional_other_user_id&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>PUT /api/v1/users/profile</strong></p>
+<p>Update user profile information. Supports username, status, password, and about section updates.</p>
+<p><strong>Query Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>auth_token</p></td>
+<td><p>string</p></td>
+<td><p>User’s authentication token</p></td>
+</tr>
+<tr class="row-odd"><td><p>new_username</p></td>
+<td><p>string</p></td>
+<td><p>Optional new username</p></td>
+</tr>
+<tr class="row-even"><td><p>status</p></td>
+<td><p>string</p></td>
+<td><p>New status message</p></td>
+</tr>
+<tr class="row-odd"><td><p>new_password</p></td>
+<td><p>string</p></td>
+<td><p>New password (requires old_password)</p></td>
+</tr>
+<tr class="row-even"><td><p>old_password</p></td>
+<td><p>string</p></td>
+<td><p>Current password (for password changes)</p></td>
+</tr>
+<tr class="row-odd"><td><p>about</p></td>
+<td><p>string</p></td>
+<td><p>New about/bio text</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>POST /api/v1/users/profile/reset-auth-token</strong></p>
+<p>Reset authentication token (requires password verification).</p>
+<p><strong>Request Body:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;auth_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;current_token&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;current_password&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>POST /api/v1/users/profile/avatar</strong></p>
+<p>Upload user avatar image.</p>
+<p><strong>Form Data:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Field</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>auth_token</p></td>
+<td><p>string</p></td>
+<td><p>User’s authentication token</p></td>
+</tr>
+<tr class="row-odd"><td><p>file</p></td>
+<td><p>file</p></td>
+<td><p>Image file (PNG, JPEG, GIF)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>POST /api/v1/users/profile/banner</strong></p>
+<p>Upload user banner image (same format as avatar).</p>
+</section>
+<section id="channel-routes">
+<h2>Channel Routes<a class="headerlink" href="#channel-routes" title="Link to this heading">#</a></h2>
+<p>These endpoints handle channel management, messaging, and message operations.</p>
+<p><strong>GET /api/v1/channels</strong></p>
+<p>Get information about the channels endpoint.</p>
+<p><strong>POST /api/v1/channels/list/</strong></p>
+<p>List all available channels (excludes private channels unless user has access).</p>
+<p><strong>Request Body:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;auth_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your_auth_token&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>POST /api/v1/channels/create/</strong></p>
+<p>Create a new channel. Only server admins or owners can create channels.</p>
+<p><strong>Request Body:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;auth_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;admin_token&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;channel_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gaming-discussion&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;is_private&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>DELETE /api/v1/channels/{channel_id}/delete</strong></p>
+<p>Delete a channel. Only admins/owners can delete channels.</p>
+<p><strong>PUT /api/v1/channels/{channel_id}/add_user</strong></p>
+<p>Add user to private channel. Admin/owner only.</p>
+<p><strong>URL Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>channel_id</p></td>
+<td><p>string</p></td>
+<td><p>Target channel</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Query Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>auth_token</p></td>
+<td><p>string</p></td>
+<td><p>Admin authentication token</p></td>
+</tr>
+<tr class="row-odd"><td><p>to_add_user_id</p></td>
+<td><p>string</p></td>
+<td><p>User to add to channel</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Response (200 OK):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;User ID: &#39;user_123&#39; added to Channel ID: &#39;channel_456&#39;&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>DELETE /api/v1/channels/{channel_id}/remove_user</strong></p>
+<p>Remove user from private channel. Admin/owner only.</p>
+<p><strong>URL Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>channel_id</p></td>
+<td><p>string</p></td>
+<td><p>Target channel</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Query Parameters:</strong></p>
+<p><strong>Response (200 OK):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;User ID: &#39;user_123&#39; removed from Channel ID: &#39;channel_456&#39;&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>GET /api/v1/channels/{channel_id}/load_messages</strong></p>
+<p>Load paginated messages from a channel.</p>
+<p><strong>URL Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>channel_id</p></td>
+<td><p>string</p></td>
+<td><p>Channel to load messages from</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Query Parameters:</strong></p>
+<p><strong>Response (200 OK):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;messages&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;message_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;msg_123&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;sender_user_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;user_456&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;channel_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;channel_789&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Hello everyone!&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;hashed_message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4...&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;johndoe&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;sent_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2025-10-18T07:00:00Z&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;attachments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;/api/v1/cdn/file/upload_image.jpg&quot;</span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>POST /api/v1/channels/{channel_id}/send_message</strong></p>
+<p>Send a message to a channel. Supports text and file attachments.</p>
+<p><strong>URL Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>channel_id</p></td>
+<td><p>string</p></td>
+<td><p>Channel to send message to</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Form Data:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Field</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>auth_token</p></td>
+<td><p>string</p></td>
+<td><p>User authentication token</p></td>
+</tr>
+<tr class="row-odd"><td><p>message</p></td>
+<td><p>string</p></td>
+<td><p>Message text (optional with attachments)</p></td>
+</tr>
+<tr class="row-even"><td><p>attachments</p></td>
+<td><p>file(s)</p></td>
+<td><p>File attachments (optional)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Response (201 Created):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">201</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;message sent successfully&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;msg_456&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;attachments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;/api/v1/cdn/file/upload_file.jpg&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>PUT /api/v1/channels/{channel_id}/mark_message_as_read</strong></p>
+<p>Mark a message as read for the current user.</p>
+<p><strong>URL Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>channel_id</p></td>
+<td><p>string</p></td>
+<td><p>Channel containing the message</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Query Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>auth_token</p></td>
+<td><p>string</p></td>
+<td><p>User authentication token</p></td>
+</tr>
+<tr class="row-odd"><td><p>message_id</p></td>
+<td><p>string</p></td>
+<td><p>Message to mark as read</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Response (201 Created):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">201</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The message_id was successfully marked as read&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>DELETE /api/v1/channels/{channel_id}/delete_message</strong></p>
+<p>Delete a message from channel. User can delete own messages, admins can delete any.</p>
+<p><strong>URL Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>channel_id</p></td>
+<td><p>string</p></td>
+<td><p>Channel containing the message</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Query Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>auth_token</p></td>
+<td><p>string</p></td>
+<td><p>User authentication token</p></td>
+</tr>
+<tr class="row-odd"><td><p>message_id</p></td>
+<td><p>string</p></td>
+<td><p>Message to delete</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Response (204 No Content):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">204</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The message has been deleted successfully&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="voice-channel-routes">
+<h2>Voice Channel Routes<a class="headerlink" href="#voice-channel-routes" title="Link to this heading">#</a></h2>
+<p>Voice endpoints are attached to channel IDs and use WebRTC/aiortc:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/channels/{channel_id}/join-audio</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/channels/{channel_id}/leave-audio</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/api/v1/channels/{channel_id}/audio-status</span></code></p></li>
+</ul>
+</section>
+<section id="federation-and-direct-message-routes">
+<h2>Federation and Direct Message Routes<a class="headerlink" href="#federation-and-direct-message-routes" title="Link to this heading">#</a></h2>
+<p>These endpoints provide ActivityPub interop and local/remote direct messaging:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/.well-known/webfinger</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/ap/users/{user_id}</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/ap/users/{user_id}/outbox</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/ap/users/{user_id}/inbox</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/ap/inbox</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/federation/follow</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/v1/dms/send</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/api/v1/dms/messages</span></code></p></li>
+</ul>
+</section>
+<section id="file-management-storage-cdn-routes">
+<h2>File Management (Storage/CDN) Routes<a class="headerlink" href="#file-management-storage-cdn-routes" title="Link to this heading">#</a></h2>
+<p>These endpoints handle file uploads, downloads, and CDN management. Most require server owner privileges.</p>
+<p><strong>POST /api/v1/storage/upload</strong></p>
+<p>Upload file to storage. Server owner only.</p>
+<p><strong>POST /api/v1/storage/files</strong></p>
+<p>List files in storage directory. Server owner only.</p>
+<p><strong>POST /api/v1/storage/file-info</strong></p>
+<p>Get detailed file information. Server owner only.</p>
+<p><strong>POST /api/v1/storage/delete-file</strong></p>
+<p>Delete file from storage. Server owner only.</p>
+<p><strong>GET /api/v1/cdn/file/{file_path}</strong></p>
+<p>Serve CDN-compatible file path.</p>
+<p><strong>GET /api/v1/storage/file/{file_path}</strong></p>
+<p>Serve storage file path.</p>
+<p><strong>POST /api/v1/storage/cleanup-orphaned</strong></p>
+<p>Clean up orphaned stored files. Server owner only.</p>
+</section>
+<section id="server-administration-routes">
+<h2>Server Administration Routes<a class="headerlink" href="#server-administration-routes" title="Link to this heading">#</a></h2>
+<p>These endpoints are only available to server owners and administrators for managing server configuration, security, and settings.</p>
+<p><strong>POST /api/v1/blocked-ips/list</strong></p>
+<p>List blocked IP addresses.</p>
+<p><strong>POST /api/v1/blocked-ips/block</strong></p>
+<p>Block an IP address.</p>
+<p><strong>POST /api/v1/blocked-ips/unblock</strong></p>
+<p>Unblock an IP address.</p>
+<p><strong>GET /api/v1/system/server-info</strong></p>
+<p>Get server configuration information.</p>
+<p><strong>GET /api/v1/system/server-stats</strong></p>
+<p>Get server statistics and metrics.</p>
+<p><strong>POST /api/v1/system/server-usage</strong></p>
+<p>Get real-time server resource usage.</p>
+<p><strong>PUT /api/v1/system/server-info</strong></p>
+<p>Update server configuration. Server owner only.</p>
+<p><strong>POST /api/v1/system/upload-avatar</strong></p>
+<p>Upload server avatar. Server owner only.</p>
+<p><strong>POST /api/v1/system/upload-banner</strong></p>
+<p>Upload server banner. Server owner only.</p>
+</section>
+<section id="analytics-activity-routes">
+<h2>Analytics &amp; Activity Routes<a class="headerlink" href="#analytics-activity-routes" title="Link to this heading">#</a></h2>
+<p>These endpoints provide charts, metrics, and activity monitoring for server administrators.</p>
+<p><strong>POST /api/v1/system/charts/user-registrations</strong></p>
+<p>Get user registration chart data.</p>
+<p><strong>POST /api/v1/system/charts/message-activity</strong></p>
+<p>Get message activity chart data.</p>
+<p><strong>POST /api/v1/system/charts/online-users</strong></p>
+<p>Get online users chart data.</p>
+<p><strong>POST /api/v1/system/charts/channel-creation</strong></p>
+<p>Get channel creation chart data.</p>
+<p><strong>POST /api/v1/system/charts/user-status</strong></p>
+<p>Get user status distribution chart data.</p>
+<p><strong>POST /api/v1/system/recent-activity</strong></p>
+<p>Get recent server activity events. Admin only.</p>
+<p><strong>POST /api/v1/system/activity-metrics</strong></p>
+<p>Get current activity metrics. Admin only.</p>
+<p><strong>POST /api/v1/system/server-overview</strong></p>
+<p>Get comprehensive server overview. Admin only.</p>
+</section>
+<section id="background-tasks-routes">
+<h2>Background Tasks Routes<a class="headerlink" href="#background-tasks-routes" title="Link to this heading">#</a></h2>
+<p>These endpoints manage background tasks and automated server operations.</p>
+<p><strong>POST /api/v1/background-tasks/status</strong></p>
+<p>Get status of all background tasks.</p>
+<p><strong>POST /api/v1/background-tasks/run</strong></p>
+<p>Execute a background task on-demand.</p>
+</section>
+<section id="general-routes">
+<h2>General Routes<a class="headerlink" href="#general-routes" title="Link to this heading">#</a></h2>
+<p>Miscellaneous endpoints for general server information.</p>
+<p><strong>GET /api/v1/info</strong></p>
+<p>Get basic server information.</p>
+<p><strong>GET /api/v1/system/latest-release</strong></p>
+<p>Get information about the latest PufferBlow release.</p>
+</section>
+<section id="websocket-routes">
+<h2>WebSocket Routes<a class="headerlink" href="#websocket-routes" title="Link to this heading">#</a></h2>
+<p>PufferBlow uses WebSockets for real-time messaging.</p>
+<p><strong>WebSocket Endpoints:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ws://your-server:7575/ws</span></code> (global stream for all accessible channels)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ws://your-server:7575/ws/channels/{channel_id}</span></code> (channel-scoped stream)</p></li>
+</ul>
+<p><strong>Connection Parameters:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>channel_id</p></td>
+<td><p>string</p></td>
+<td><p>Channel to connect to (channel endpoint only)</p></td>
+</tr>
+<tr class="row-odd"><td><p>auth_token</p></td>
+<td><p>string</p></td>
+<td><p>User authentication token (as query parameter)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Incoming Messages (Server -&gt; Client):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;message_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;msg_123&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;sender_user_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;user_456&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;channel_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;channel_789&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Hello everyone!&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;johndoe&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;sent_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2025-10-18T07:00:00Z&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;attachments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;/api/v1/cdn/file/image.jpg&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong>Outgoing Messages (Client -&gt; Server):</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;read_confirmation&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;msg_123&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="error-responses">
+<h2>Error Responses<a class="headerlink" href="#error-responses" title="Link to this heading">#</a></h2>
+<p>All API endpoints may return error responses in the following format:</p>
+<p><strong>400 Bad Request:</strong>
+.. sourcecode:: json</p>
+<blockquote>
+<div><p>{“detail”: “Error description”}</p>
+</div></blockquote>
+<p><strong>401 Unauthorized:</strong>
+.. sourcecode:: json</p>
+<blockquote>
+<div><p>{“detail”: “Authentication required”}</p>
+</div></blockquote>
+<p><strong>403 Forbidden:</strong>
+.. sourcecode:: json</p>
+<blockquote>
+<div><p>{“detail”: “Access forbidden”}</p>
+</div></blockquote>
+<p><strong>404 Not Found:</strong>
+.. sourcecode:: json</p>
+<blockquote>
+<div><p>{“detail”: “Resource not found”}</p>
+</div></blockquote>
+<p><strong>409 Conflict:</strong>
+.. sourcecode:: json</p>
+<blockquote>
+<div><p>{“detail”: “Resource conflict”}</p>
+</div></blockquote>
+<p><strong>500 Internal Server Error:</strong>
+.. sourcecode:: json</p>
+<blockquote>
+<div><p>{“detail”: “Internal server error”}</p>
+</div></blockquote>
+</section>
+<section id="rate-limiting">
+<h2>Rate Limiting<a class="headerlink" href="#rate-limiting" title="Link to this heading">#</a></h2>
+<p>The API uses a sliding-window rate limiter with endpoint buckets:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">auth</span></code> endpoints (stricter)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">uploads</span></code> endpoints</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">messages</span></code> endpoints</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">default</span></code> endpoints</p></li>
+</ul>
+<p>Rate limit headers are included in responses:</p>
+<p>Final thresholds are derived from server settings (<code class="docutils literal notranslate"><span class="pre">server_settings</span></code> table)
+and can trigger cooldowns and eventual automatic IP blocking.</p>
+</section>
+<section id="development-tips">
+<h2>Development Tips<a class="headerlink" href="#development-tips" title="Link to this heading">#</a></h2>
+<p><strong>API Base URL:</strong> <code class="docutils literal notranslate"><span class="pre">http://your-server:7575/api/v1</span></code></p>
+<p><strong>Debug Mode:</strong> Add <code class="docutils literal notranslate"><span class="pre">?debug=1</span></code> to see additional error information</p>
+<p><strong>API Documentation:</strong> Visit <code class="docutils literal notranslate"><span class="pre">http://your-server:7575/docs</span></code> for interactive OpenAPI documentation</p>
+<p><strong>Testing:</strong> Use tools like curl, Postman, or HTTPie for testing endpoints</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example API call</span>
+curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:7575/api/v1/users/signin<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;username&quot;:&quot;test&quot;,&quot;password&quot;:&quot;test&quot;}&#39;</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="get_started.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Get started</p>
+      </div>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Table of content
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#authentication">Authentication</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#token-refresh-endpoints">Token Refresh Endpoints</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#decentralized-node-auth-endpoints">Decentralized Node Auth Endpoints</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#user-routes">User Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#channel-routes">Channel Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#voice-channel-routes">Voice Channel Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#federation-and-direct-message-routes">Federation and Direct Message Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-management-storage-cdn-routes">File Management (Storage/CDN) Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-administration-routes">Server Administration Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#analytics-activity-routes">Analytics &amp; Activity Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#background-tasks-routes">Background Tasks Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#general-routes">General Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#websocket-routes">WebSocket Routes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#error-responses">Error Responses</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#rate-limiting">Rate Limiting</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#development-tips">Development Tips</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By ramsy0dev
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, ramsy0dev.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
