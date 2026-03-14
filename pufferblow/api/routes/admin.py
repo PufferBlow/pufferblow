@@ -14,8 +14,8 @@ from typing import Any
 from fastapi import APIRouter, exceptions
 
 from pufferblow.api.database.tables.blocked_ips import BlockedIPS
-from pufferblow.api.dependencies import require_server_owner
 from pufferblow.api.logger.logger import logger
+from pufferblow.api.routes.system_routes.shared import require_privilege
 from pufferblow.api.schemas import (
     AuthTokenQuery,
     BlockIPRequest,
@@ -52,7 +52,7 @@ async def list_blocked_ips_route(request: AuthTokenQuery) -> dict:
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
-    user_id = require_server_owner(request.auth_token)
+    user_id = require_privilege(request.auth_token, "manage_blocked_ips")
 
     try:
         blocked_ips = api_initializer.database_handler.fetch_blocked_ips()
@@ -79,7 +79,7 @@ async def block_ip_route(request: BlockIPRequest) -> dict:
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
-    user_id = require_server_owner(request.auth_token)
+    user_id = require_privilege(request.auth_token, "manage_blocked_ips")
 
     try:
         # Check if IP is already blocked
@@ -126,7 +126,7 @@ async def unblock_ip_route(request: UnblockIPRequest) -> dict:
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
-    user_id = require_server_owner(request.auth_token)
+    user_id = require_privilege(request.auth_token, "manage_blocked_ips")
 
     try:
         # Check if IP is blocked
@@ -168,7 +168,7 @@ async def get_background_tasks_status_route(request: AuthTokenQuery) -> dict:
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
-    user_id = require_server_owner(request.auth_token)
+    user_id = require_privilege(request.auth_token, "manage_background_tasks")
 
     try:
         if hasattr(api_initializer, "background_tasks_manager"):
@@ -201,7 +201,7 @@ async def run_background_task_route(request: RunTaskRequest) -> dict:
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
-    user_id = require_server_owner(request.auth_token)
+    user_id = require_privilege(request.auth_token, "manage_background_tasks")
 
     try:
         if not hasattr(api_initializer, "background_tasks_manager"):

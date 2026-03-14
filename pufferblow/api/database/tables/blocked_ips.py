@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.utils.current_date import date_in_gmt
-
-
 class BlockedIPS(Base):
     """BlockedIPS table"""
 
@@ -19,7 +16,7 @@ class BlockedIPS(Base):
     block_reason: Mapped[str] = mapped_column(String, nullable=False)
     blocked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: date_in_gmt("%Y-%m-%d %H:%M:%S"),
+        default=lambda: datetime.now(timezone.utc),
         nullable=False,
         index=True,
     )

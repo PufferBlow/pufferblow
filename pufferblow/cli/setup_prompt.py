@@ -52,7 +52,7 @@ def _get_setup_mode(has_existing_config: bool) -> str | None:
     if has_existing_config:
         console.print("2. Server configuration only (update existing database)")
         console.print("3. Update existing server information")
-        console.print("4. Media-SFU configuration only")
+        console.print("4. Shared Pufferblow config only ([media-sfu] section)")
         menu_offset = 5
 
     while True:
@@ -206,8 +206,8 @@ def _confirm_test_database(host: str, port: str, username: str, password: str, d
 
 
 def _get_media_sfu_config() -> dict[str, str | int] | None:
-    """Prompt for media-sfu configuration."""
-    console.print("\n[bold cyan]Media-SFU Configuration[/bold cyan]")
+    """Prompt for the shared Pufferblow config [media-sfu] section."""
+    console.print("\n[bold cyan]Shared Pufferblow Config: [media-sfu][/bold cyan]")
 
     try:
         bootstrap_secret = typer.prompt(
@@ -232,13 +232,13 @@ def _get_media_sfu_config() -> dict[str, str | int] | None:
         max_total_peers = typer.prompt(
             "Max total peers across all rooms",
             type=int,
-            default=200,
+            default=1000,
         )
 
         max_room_peers = typer.prompt(
             "Max peers per room",
             type=int,
-            default=60,
+            default=100,
         )
 
         event_workers = typer.prompt(
@@ -281,13 +281,13 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
                 return None
 
             # Summary
-            console.print("\n[bold cyan]Media-SFU Configuration Summary[/bold cyan]")
+            console.print("\n[bold cyan]Shared Pufferblow Config Summary: [media-sfu][/bold cyan]")
             console.print(f"  Bootstrap URL: {media_sfu_config['bootstrap_config_url']}")
             console.print(f"  Bind Address: {media_sfu_config['bind_addr']}")
             console.print(f"  Max Total Peers: {media_sfu_config['max_total_peers']}")
             console.print(f"  Max Room Peers: {media_sfu_config['max_room_peers']}")
 
-            if not typer.confirm("\nProceed with media-sfu configuration?", default=True):
+            if not typer.confirm("\nProceed with updating the shared Pufferblow config [media-sfu] section?", default=True):
                 console.print("[dim]Setup cancelled.[/dim]")
                 return None
 

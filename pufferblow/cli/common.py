@@ -5,23 +5,22 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
 from rich.console import Console
 
-from pufferblow.api.config.config_handler import ConfigHandler
-from pufferblow.api.database.database import Database
-from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.logger.levels import LOG_LEVEL_MAP
-from pufferblow.api.logger.logger import (
-    WORKERS,
-    InterceptHandler,
-    StandaloneApplication,
-    StubbedGunicornLogger,
-)
-from pufferblow.api.models.config_model import Config
-from pufferblow.core.bootstrap import api_initializer
+LOG_LEVEL_MAP = {
+    0: "INFO",
+    1: "DEBUG",
+    2: "ERROR",
+    3: "CRITICAL",
+}
+
+if TYPE_CHECKING:
+    from pufferblow.api.config.config_handler import ConfigHandler
+    from pufferblow.api.models.config_model import Config
 
 console = Console()
 
@@ -57,6 +56,27 @@ class DatabaseCredentials:
     port: int
 
 
+class InterceptHandler(logging.Handler):
+    """Forward stdlib logging records to Loguru without importing Gunicorn helpers."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a stdlib log record through Loguru."""
+        try:
+            level: str | int = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame = sys._getframe(6)
+        depth = 6
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
+
+
 def enrich_log_record(record: dict) -> None:
     """Ensure expected structured log fields are always present."""
     extra = record["extra"]
@@ -70,6 +90,8 @@ def enrich_log_record(record: dict) -> None:
 
 def build_database_uri_from_config(config: Config) -> str:
     """Build a database URI from a config object."""
+    from pufferblow.api.database.database import Database
+
     return Database._create_database_uri(
         username=config.USERNAME,
         password=config.DATABASE_PASSWORD,
@@ -85,6 +107,8 @@ def build_database_uri_from_config(config: Config) -> str:
 
 def build_database_uri_from_credentials(credentials: DatabaseCredentials) -> str:
     """Build a database URI from explicit credential inputs."""
+    from pufferblow.api.database.database import Database
+
     return Database._create_database_uri(
         username=credentials.username,
         password=credentials.password,
@@ -96,6 +120,8 @@ def build_database_uri_from_credentials(credentials: DatabaseCredentials) -> str
 
 def ensure_database_exists(database_uri: str) -> None:
     """Exit with a useful message if the target database is unreachable."""
+    from pufferblow.api.database.database import Database
+
     if not Database.check_database_existense(database_uri):
         logger.error(
             "The specified database does not exist or is unreachable. "
@@ -106,6 +132,8 @@ def ensure_database_exists(database_uri: str) -> None:
 
 def load_config_or_exit(config_handler: ConfigHandler | None = None) -> Config:
     """Load bootstrap config from environment or exit with guidance."""
+    from pufferblow.api.config.config_handler import ConfigHandler
+
     handler = config_handler or ConfigHandler()
     if not handler.resolve_database_uri():
         logger.error(
@@ -117,6 +145,9 @@ def load_config_or_exit(config_handler: ConfigHandler | None = None) -> Config:
 
 def load_runtime(*, database_uri: str | None = None, setup_tables: bool = False) -> None:
     """Initialize shared managers and optionally ensure DB tables exist."""
+    from pufferblow.api.database.tables.declarative_base import Base
+    from pufferblow.core.bootstrap import api_initializer
+
     api_initializer.load_objects(database_uri=database_uri)
     if setup_tables:
         api_initializer.database_handler.setup_tables(Base)
@@ -175,6 +206,12 @@ def configure_structured_logging(
 
 def run_gunicorn_server(*, app, config: Config, log_level_name: str) -> None:
     """Run the production API process via Gunicorn + Uvicorn workers."""
+    from pufferblow.api.logger.logger import (
+        WORKERS,
+        StandaloneApplication,
+        StubbedGunicornLogger,
+    )
+
     StubbedGunicornLogger.log_level = log_level_name
     options = {
         "bind": f"{config.API_HOST}:{config.API_PORT}",

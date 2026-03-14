@@ -40,15 +40,22 @@ class Database:
         Returns:
             Engine: A database engine object.
         """
+        engine_kwargs = {"url": self.database_uri}
+        if self.database_uri and str(self.database_uri).startswith("sqlite://"):
+            engine_kwargs["connect_args"] = {"check_same_thread": False}
+        else:
+            engine_kwargs.update(
+                {
+                    "pool_size": 20,
+                    "max_overflow": 10,
+                    "pool_recycle": 3600 * 3,  # recycled every three hours
+                    "pool_timeout": 27,
+                    "pool_pre_ping": True,  # prevents stale connections
+                }
+            )
 
-        database_engine = sqlalchemy.create_engine(
-            url=self.database_uri,
-            pool_size=20,
-            max_overflow=10,
-            pool_recycle=3600 * 3,  # recycled every three hours
-            pool_timeout=27,
-            pool_pre_ping=True,  # prevents stale connections
-        )
+        database_engine = sqlalchemy.create_engine(**engine_kwargs)
+        self.database_engine = database_engine
 
         return database_engine
 

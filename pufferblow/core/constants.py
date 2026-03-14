@@ -3,8 +3,6 @@
 import os
 import platform
 
-from rich import print
-
 PACKAGE_NAME = "pufferblow"
 VERSION = "0.0.1-beta"
 AUTHOR = "ramsy0dev"
@@ -26,6 +24,8 @@ BANNER = f"""
 
 def banner() -> None:
     """Render the package banner in the terminal."""
+    from rich import print
+
     print(BANNER)
 
 

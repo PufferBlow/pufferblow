@@ -85,6 +85,9 @@ The API provides REST endpoints across several main categories:
 **Real-time Communication** (WebSocket)
     Live message delivery, typing indicators, presence updates
 
+**Health & Ops**
+    Instance health, readiness, and mirrored media-plane status
+
 Connecting to Multiple Servers
 ==============================
 
@@ -93,6 +96,12 @@ PufferBlow includes an ActivityPub federation layer for cross-instance identity 
 * Resolve users across servers via WebFinger/actor documents
 * Follow remote actors
 * Send direct messages between different PufferBlow instances
+
+The current client model is **home-instance first**:
+
+* users authenticate against one selected home instance
+* WebFinger, actor, follow, and DM requests are sent to that home instance
+* the home instance then resolves and communicates with remote ActivityPub peers
 
 At the same time, server/community features remain local by design:
 
@@ -125,3 +134,17 @@ PufferBlow takes security seriously:
 * **IP Management**: Ability to block problematic IP addresses
 
 Unlike centralized platforms, your self-hosted server gives you direct control over security measures and data handling practices.
+
+Operational Health
+==================
+
+PufferBlow now exposes lightweight health endpoints for both the API control
+plane and the attached SFU media plane:
+
+* ``GET /healthz``
+* ``GET /readyz``
+* ``GET /api/v1/system/instance-health``
+
+When RTC is configured, ``/api/v1/system/instance-health`` includes the
+mirrored ``media-sfu /healthz`` payload so operators can inspect instance and
+media readiness together.

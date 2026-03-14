@@ -246,6 +246,7 @@ class SecurityChecksHandler:
         user_id: str,
         check_if_server_owner: bool | None = True,
         check_if_admin: bool | None = True,
+        privilege_id: str | None = None,
     ) -> None:
         """
         Checks if the user is privileged weither that be he is an admin or the server the owner, if not then an HTTPException will
@@ -259,10 +260,25 @@ class SecurityChecksHandler:
         Returns:
             None.
         """
-        if (check_if_admin and not self.user_manager.is_admin(user_id=user_id)) or (
-            check_if_server_owner
-            and not self.user_manager.is_server_owner(user_id=user_id)
-        ):
+        if privilege_id is not None:
+            if not self.user_manager.has_privilege(
+                user_id=user_id, privilege_id=privilege_id
+            ):
+                return ORJSONResponse(
+                    status_code=403,
+                    content={
+                        "error": f"Access forbidden. Missing required privilege: {privilege_id}"
+                    },
+                )
+            return None
+
+        is_admin = self.user_manager.is_admin(user_id=user_id)
+        is_server_owner = self.user_manager.is_server_owner(user_id=user_id)
+        is_allowed = (
+            (check_if_admin and is_admin)
+            or (check_if_server_owner and is_server_owner)
+        )
+        if not is_allowed:
             return ORJSONResponse(
                 status_code=403,
                 content={

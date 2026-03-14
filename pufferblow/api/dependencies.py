@@ -61,6 +61,17 @@ def get_current_user(auth_token: str) -> str:
         user_id=user_id,
         token_preview=_token_preview(auth_token),
     )
+
+    moderation_state = api_initializer.user_manager.get_user_moderation_state(
+        user_id=user_id
+    )
+    if moderation_state.get("is_banned"):
+        logger.warning("AUTH_VALIDATE_BANNED user_id={user_id}", user_id=user_id)
+        raise HTTPException(
+            status_code=403,
+            detail="This account has been banned from this home instance.",
+        )
+
     return user_id
 
 
@@ -129,6 +140,60 @@ def require_admin(auth_token: str) -> str:
     return user_id
 
 
+def require_privilege(auth_token: str, privilege_id: str) -> str:
+    """
+    Require that the current user has a resolved instance privilege.
+
+    Args:
+        auth_token: The authentication token
+        privilege_id: The privilege to require
+
+    Returns:
+        str: The authenticated user id
+    """
+    user_id = get_current_user(auth_token)
+    has_privilege = api_initializer.user_manager.has_privilege(
+        user_id=user_id, privilege_id=privilege_id
+    )
+    if not has_privilege:
+        logger.warning(
+            "AUTHZ_PRIVILEGE_DENIED user_id={user_id} privilege_id={privilege_id}",
+            user_id=user_id,
+            privilege_id=privilege_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access forbidden. Missing required privilege: {privilege_id}.",
+        )
+
+    logger.info(
+        "AUTHZ_PRIVILEGE_GRANTED user_id={user_id} privilege_id={privilege_id}",
+        user_id=user_id,
+        privilege_id=privilege_id,
+    )
+    return user_id
+
+
+def ensure_user_not_timed_out(user_id: str, action: str = "perform this action") -> None:
+    """
+    Ensure the user is not under an active timeout for interactive actions.
+    """
+    timeout_until = api_initializer.user_manager.get_active_timeout_until(user_id)
+    if timeout_until is None:
+        return
+
+    logger.warning(
+        "AUTHZ_TIMEOUT_DENIED user_id={user_id} action={action} timeout_until={timeout_until}",
+        user_id=user_id,
+        action=action,
+        timeout_until=timeout_until.isoformat(),
+    )
+    raise HTTPException(
+        status_code=403,
+        detail=f"You are timed out until {timeout_until.isoformat()} and cannot {action}.",
+    )
+
+
 def check_channel_access(user_id: str, channel_id: str) -> None:
     """
     Check if user has access to a channel (handles private channels).
@@ -154,17 +219,15 @@ def check_channel_access(user_id: str, channel_id: str) -> None:
 
     # Check if channel is private
     if api_initializer.channels_manager.is_private(channel_id=channel_id):
-        # Private channels require admin or server owner access
-        is_admin = api_initializer.user_manager.is_admin(user_id=user_id)
-        is_owner = api_initializer.user_manager.is_server_owner(user_id=user_id)
+        has_private_access = api_initializer.user_manager.has_privilege(
+            user_id=user_id, privilege_id="view_private_channels"
+        )
 
-        if not (is_admin or is_owner):
+        if not has_private_access:
             logger.warning(
-                "CHANNEL_ACCESS_DENIED_PRIVATE user_id={user_id} channel_id={channel_id} is_admin={is_admin} is_owner={is_owner}",
+                "CHANNEL_ACCESS_DENIED_PRIVATE user_id={user_id} channel_id={channel_id}",
                 user_id=user_id,
                 channel_id=channel_id,
-                is_admin=is_admin,
-                is_owner=is_owner,
             )
             # Return 404 instead of 403 to avoid revealing private channel existence
             raise HTTPException(

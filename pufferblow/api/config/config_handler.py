@@ -29,6 +29,42 @@ def _env_int(name: str, fallback: int) -> int:
         return fallback
 
 
+def _config_list(raw_value: object) -> tuple[str, ...]:
+    """Normalize config values written as a TOML list or comma-separated string."""
+    if raw_value is None:
+        return ()
+
+    if isinstance(raw_value, str):
+        parts = [item.strip() for item in raw_value.split(",")]
+        return tuple(item for item in parts if item)
+
+    if isinstance(raw_value, (list, tuple)):
+        normalized = []
+        for item in raw_value:
+            value = str(item).strip()
+            if value:
+                normalized.append(value)
+        return tuple(normalized)
+
+    value = str(raw_value).strip()
+    return (value,) if value else ()
+
+
+def _config_bool(raw_value: object, fallback: bool) -> bool:
+    """Normalize config booleans and common string representations."""
+    if raw_value is None:
+        return fallback
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(raw_value)
+
+
 class ConfigHandler:
     """Load bootstrap config and persist runtime config in database."""
 
@@ -98,6 +134,7 @@ class ConfigHandler:
         """
         config = Config()
         config_toml = self._load_config_toml()
+        security_config = config_toml.get("security", {})
 
         # Network/process bootstrap values
         # Priority: config.toml > env var > default
@@ -120,6 +157,27 @@ class ConfigHandler:
                 "PUFFERBLOW_LOGS_PATH",
                 f"{constants.HOME}/.pufferblow/logs/pufferblow.log",
             )
+        )
+        config.CORS_ALLOWED_ORIGINS = _config_list(
+            security_config.get("cors_origins")
+            if isinstance(security_config, dict)
+            else None
+        )
+        config.CORS_ALLOWED_METHODS = _config_list(
+            security_config.get("cors_allow_methods")
+            if isinstance(security_config, dict)
+            else None
+        ) or config.CORS_ALLOWED_METHODS
+        config.CORS_ALLOWED_HEADERS = _config_list(
+            security_config.get("cors_allow_headers")
+            if isinstance(security_config, dict)
+            else None
+        ) or config.CORS_ALLOWED_HEADERS
+        config.CORS_ALLOW_CREDENTIALS = _config_bool(
+            security_config.get("cors_allow_credentials")
+            if isinstance(security_config, dict)
+            else None,
+            config.CORS_ALLOW_CREDENTIALS,
         )
         return config
 
@@ -183,11 +241,12 @@ class ConfigHandler:
         media_sfu_config: dict[str, object] | None = None,
     ) -> None:
         """
-        Write or update config.toml with database and media-sfu sections.
+        Write or update the shared Pufferblow config.toml.
         
         Args:
             database_config: Dict with keys like host, port, username, password, database
-            media_sfu_config: Dict with media-sfu configuration (bootstrap_secret, bind_addr, etc.)
+            media_sfu_config: Dict for the shared config [media-sfu] section
+                (bootstrap_secret, bind_addr, and related SFU settings)
         """
         # Read existing config if it exists
         existing_config = self._load_config_toml()
@@ -196,7 +255,7 @@ class ConfigHandler:
         if database_config:
             existing_config["database"] = database_config
         
-        # Update media-sfu section if provided
+        # Update the shared config [media-sfu] section if provided.
         if media_sfu_config:
             existing_config["media-sfu"] = media_sfu_config
         

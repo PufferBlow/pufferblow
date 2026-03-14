@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.utils.current_date import date_in_gmt
-
-
 class Privileges(Base):
     """Privileges table"""
 
@@ -19,7 +16,7 @@ class Privileges(Base):
     category: Mapped[str] = mapped_column(String, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=date_in_gmt, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

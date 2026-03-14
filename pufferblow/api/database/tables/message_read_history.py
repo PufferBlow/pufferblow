@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import ARRAY, DateTime, ForeignKey, String
+from sqlalchemy import ARRAY, JSON, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID as SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.utils.current_date import date_in_gmt
 
 
 class MessageReadHistory(Base):
@@ -17,16 +16,20 @@ class MessageReadHistory(Base):
     __tablename__ = "message_read_history"
 
     user_id: Mapped[UUID] = mapped_column(
-        SA_UUID(as_uuid=True),
+        SA_UUID(as_uuid=True).with_variant(String(36), "sqlite"),
         ForeignKey("users.user_id", ondelete="CASCADE"),
         primary_key=True,
         nullable=False,
     )
     viewed_messages_ids: Mapped[list[str]] = mapped_column(
-        ARRAY(String), default=list, nullable=False  # Avoid mutable default
+        ARRAY(String).with_variant(JSON(), "sqlite"),
+        default=list,
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=date_in_gmt, nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

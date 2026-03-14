@@ -11,6 +11,7 @@ This module handles all channel-related operations including:
 
 import uuid
 import json
+
 from datetime import datetime
 from fastapi import APIRouter, exceptions
 from loguru import logger
@@ -23,8 +24,9 @@ from pufferblow.api.schemas import (
 )
 from pufferblow.api.dependencies import (
     get_current_user,
-    require_admin,
+    require_privilege,
     check_channel_access,
+    ensure_user_not_timed_out,
 )
 from pufferblow.core.bootstrap import api_initializer
 from pufferblow.api.logger.msgs import info
@@ -57,7 +59,12 @@ async def list_channels_route(request: AuthTokenQuery):
     user_id = get_current_user(request.auth_token)
 
     try:
-        channels_list = api_initializer.channels_manager.list_channels(user_id=user_id)
+        channels_list = api_initializer.channels_manager.list_channels(
+            user_id=user_id,
+            include_private_channels=api_initializer.user_manager.has_privilege(
+                user_id=user_id, privilege_id="view_private_channels"
+            ),
+        )
 
         logger.info(
             f"Successfully retrieved {len(channels_list) if channels_list else 0} channels for user {user_id}"
@@ -69,6 +76,37 @@ async def list_channels_route(request: AuthTokenQuery):
         raise exceptions.HTTPException(
             status_code=500, detail="Internal server error while fetching channels"
         )
+
+
+@router.get("/read-history", status_code=200)
+async def get_read_history_route(auth_token: str):
+    """
+    Return the current user's read-message history and unread counts per accessible channel.
+    """
+    user_id = get_current_user(auth_token)
+    accessible_channels = api_initializer.channels_manager.list_channels(
+        user_id=user_id,
+        include_private_channels=api_initializer.user_manager.has_privilege(
+            user_id=user_id, privilege_id="view_private_channels"
+        ),
+    )
+    accessible_channel_ids = [
+        channel.get("channel_id")
+        for channel in accessible_channels or []
+        if isinstance(channel, dict) and channel.get("channel_id")
+    ]
+
+    viewed_message_ids = api_initializer.database_handler.get_user_read_messages_ids(user_id)
+    unread_counts = api_initializer.database_handler.get_unread_message_counts_by_channel(
+        user_id=user_id,
+        channel_ids=accessible_channel_ids,
+    )
+
+    return {
+        "status_code": 200,
+        "viewed_message_ids": viewed_message_ids,
+        "unread_counts": unread_counts,
+    }
 
 
 @router.post("/create/", status_code=200)
@@ -88,8 +126,7 @@ async def create_new_channel_route(request: CreateChannelRequest):
     logger.debug(f"Channel name: {request.channel_name}")
     logger.debug(f"Is private: {request.is_private}")
 
-    # Require admin permission using dependency
-    user_id = require_admin(request.auth_token)
+    user_id = require_privilege(request.auth_token, "create_channels")
     logger.debug(f"User {user_id} is authorized to create channels")
 
     # Check if channel name already exists
@@ -161,8 +198,7 @@ async def delete_channel_route(auth_token: str, channel_id: str):
         403 FORBIDDEN: User is not admin/owner
         404 NOT FOUND: Channel not found
     """
-    # Require admin permission
-    user_id = require_admin(auth_token)
+    user_id = require_privilege(auth_token, "delete_channels")
 
     # Delete the channel
     api_initializer.channels_manager.delete_channel(channel_id=channel_id)
@@ -192,8 +228,7 @@ async def add_user_to_private_channel_route(
         403 FORBIDDEN: User is not admin/owner
         404 NOT FOUND: Channel or user not found
     """
-    # Require admin permission
-    user_id = require_admin(auth_token)
+    user_id = require_privilege(auth_token, "manage_channel_users")
 
     # Check if targeted user exists
     if not api_initializer.user_manager.check_user(user_id=to_add_user_id):
@@ -202,18 +237,13 @@ async def add_user_to_private_channel_route(
             status_code=404,
         )
 
-    # Skip if targeted user is admin
-    if api_initializer.user_manager.is_admin(user_id=to_add_user_id):
+    # Skip if targeted user already has instance-wide private-channel access.
+    if api_initializer.user_manager.has_privilege(
+        user_id=to_add_user_id, privilege_id="view_private_channels"
+    ):
         return {
             "status_code": 200,
-            "message": "Skipping the operation, the targeted user is an admin.",
-        }
-
-    # Skip if targeted user is server owner
-    if api_initializer.user_manager.is_server_owner(user_id=to_add_user_id):
-        return {
-            "status_code": 200,
-            "message": "Skipping the operation, the targeted user is the server owner.",
+            "message": "Skipping the operation, the targeted user already has private-channel access through their instance roles.",
         }
 
     # Check if channel is private
@@ -226,7 +256,7 @@ async def add_user_to_private_channel_route(
 
         raise exceptions.HTTPException(
             detail=f"Channel with Channel ID: '{channel_id}' is not private. Only private channels are allowed.",
-            status_code=200,
+            status_code=400,
         )
 
     # Add user to channel
@@ -257,11 +287,11 @@ async def remove_user_from_channel_route(
         403 FORBIDDEN: User is not admin/owner or trying to remove admin/owner
         404 NOT FOUND: Channel or user not found
     """
-    # Require admin permission
-    user_id = require_admin(auth_token)
+    user_id = require_privilege(auth_token, "manage_channel_users")
 
-    # Check if targeted user is admin
-    if api_initializer.user_manager.is_admin(user_id=to_remove_user_id):
+    if api_initializer.user_manager.has_privilege(
+        user_id=to_remove_user_id, privilege_id="view_private_channels"
+    ):
         import pufferblow.core.constants as constants
 
         logger.warning(
@@ -273,24 +303,7 @@ async def remove_user_from_channel_route(
         )
 
         raise exceptions.HTTPException(
-            detail=f"Error removing Admin User ID: '{to_remove_user_id}'. The user is an admin",
-            status_code=403,
-        )
-
-    # Check if targeted user is server owner
-    if api_initializer.user_manager.is_server_owner(user_id=to_remove_user_id):
-        import pufferblow.core.constants as constants
-
-        logger.warning(
-            constants.FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_SERVER_OWNER(
-                user_id=user_id,
-                channel_id=channel_id,
-                to_remove_user_id=to_remove_user_id,
-            )
-        )
-
-        raise exceptions.HTTPException(
-            detail=f"Error removing User ID: '{to_remove_user_id}', this user is the server owner.",
+            detail=f"Error removing User ID: '{to_remove_user_id}'. This user already has instance-wide private-channel access.",
             status_code=403,
         )
 
@@ -304,7 +317,7 @@ async def remove_user_from_channel_route(
 
         raise exceptions.HTTPException(
             detail=f"Channel with Channel ID: '{channel_id}' is not private. Only private channels are allowed.",
-            status_code=200,
+            status_code=400,
         )
 
     # Remove user from channel
@@ -330,6 +343,7 @@ async def join_voice_channel_route(auth_token: str, channel_id: str):
     """Join a voice channel."""
     user_id = get_current_user(auth_token)
     check_channel_access(user_id, channel_id)
+    ensure_user_not_timed_out(user_id, "join voice channels")
 
     try:
         result = api_initializer.voice_session_manager.create_or_join_session(

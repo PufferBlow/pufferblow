@@ -5,16 +5,6 @@ from __future__ import annotations
 import typer
 from loguru import logger
 
-from pufferblow.api.config.config_handler import ConfigHandler
-from pufferblow.cli.common import (
-    configure_structured_logging,
-    ensure_database_exists,
-    load_config_or_exit,
-    load_runtime,
-    run_gunicorn_server,
-)
-from pufferblow.core.bootstrap import api_initializer
-
 
 def serve_command(
     log_level: int = typer.Option(
@@ -30,6 +20,16 @@ def serve_command(
     ),
 ) -> None:
     """Start the API server."""
+    from pufferblow.api.config.config_handler import ConfigHandler
+    from pufferblow.cli.common import (
+        configure_structured_logging,
+        ensure_database_exists,
+        load_config_or_exit,
+        load_runtime,
+        run_gunicorn_server,
+    )
+    from pufferblow.core.bootstrap import api_initializer
+
     if debug:
         log_level = 1
 

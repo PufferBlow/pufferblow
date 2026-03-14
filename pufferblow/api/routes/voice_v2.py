@@ -5,7 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from pufferblow.api.dependencies import check_channel_access, get_current_user
+from pufferblow.api.dependencies import (
+    check_channel_access,
+    ensure_user_not_timed_out,
+    get_current_user,
+)
 from pufferblow.api.schemas import (
     VoiceSessionActionRequest,
     VoiceSessionCreateRequest,
@@ -21,6 +25,7 @@ async def create_or_join_voice_session(channel_id: str, request: VoiceSessionCre
     """Create or join active SFU voice session for a channel."""
     user_id = get_current_user(request.auth_token)
     check_channel_access(user_id=user_id, channel_id=channel_id)
+    ensure_user_not_timed_out(user_id, "join voice channels")
 
     try:
         payload = api_initializer.voice_session_manager.create_or_join_session(
@@ -30,18 +35,6 @@ async def create_or_join_voice_session(channel_id: str, request: VoiceSessionCre
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    await api_initializer.websockets_manager.broadcast_to_channel(
-        channel_id,
-        {
-            "type": "voice_session_event",
-            "event_type": "participant_joined",
-            "session_id": payload["session_id"],
-            "channel_id": channel_id,
-            "user_id": user_id,
-            "participant_count": payload.get("participant_count", 0),
-        },
-    )
 
     return {
         "status_code": 200,
@@ -61,19 +54,6 @@ async def leave_voice_session(session_id: str, request: VoiceSessionLeaveRequest
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    await api_initializer.websockets_manager.broadcast_to_channel(
-        payload["channel_id"],
-        {
-            "type": "voice_session_event",
-            "event_type": "participant_left",
-            "session_id": session_id,
-            "channel_id": payload["channel_id"],
-            "user_id": user_id,
-            "participant_count": payload.get("participant_count", 0),
-            "session_ended": payload.get("session_ended", False),
-        },
-    )
 
     return {
         "status_code": 200,
@@ -112,23 +92,6 @@ async def apply_voice_session_action(session_id: str, request: VoiceSessionActio
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    session_payload = api_initializer.voice_session_manager.get_session_status(session_id)
-    channel_id = session_payload["channel_id"] if session_payload else None
-
-    if channel_id:
-        await api_initializer.websockets_manager.broadcast_to_channel(
-            channel_id,
-            {
-                "type": "voice_session_event",
-                "event_type": "state_changed",
-                "session_id": session_id,
-                "channel_id": channel_id,
-                "user_id": user_id,
-                "action": request.action,
-                "payload": request.payload,
-            },
-        )
 
     logger.debug(
         "VOICE_ACTION_APPLIED session_id={session_id} user_id={user_id} action={action}",

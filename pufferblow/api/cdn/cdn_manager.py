@@ -4,13 +4,35 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 
-import magic  # python-magic for MIME detection
 from fastapi import HTTPException, UploadFile
 from PIL import Image
+
+try:
+    import magic  # python-magic for MIME detection
+
+    MAGIC_AVAILABLE = True
+except ImportError:
+    magic = None
+    MAGIC_AVAILABLE = False
 
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.models.config_model import Config
 
+class _FallbackMimeDetector:
+    """Minimal MIME detector used when libmagic is unavailable."""
+
+    def from_buffer(self, content: bytes) -> str:
+        """Best-effort MIME detection from bytes."""
+        try:
+            with Image.open(BytesIO(content)) as image:
+                image_format = (image.format or "").lower()
+                if image_format:
+                    return f"image/{'jpeg' if image_format == 'jpg' else image_format}"
+        except Exception:
+            pass
+
+        guessed = mimetypes.guess_type("file.bin")[0]
+        return guessed or "application/octet-stream"
 
 class CDNManager:
     """CDN Manager for handling file uploads and serving"""
@@ -24,7 +46,9 @@ class CDNManager:
         Path(self.config.CDN_STORAGE_PATH).mkdir(parents=True, exist_ok=True)
 
         # Initialize MIME detector
-        self.mime_detector = magic.Magic(mime=True)
+        self.mime_detector = (
+            magic.Magic(mime=True) if MAGIC_AVAILABLE else _FallbackMimeDetector()
+        )
 
         # File type validation - defaults, will be updated from server settings
         self.IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"]
@@ -37,7 +61,6 @@ class CDNManager:
         self.MAX_STICKER_SIZE_MB = 5
         self.MAX_GIF_SIZE_MB = 10
         self.MAX_DOCUMENT_SIZE_MB = 10
-
     def compute_file_hash(self, content: bytes) -> str:
         """
         Compute SHA-256 hash of file content

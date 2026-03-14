@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import ARRAY, Boolean, DateTime, String
+from sqlalchemy import ARRAY, JSON, Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.utils.current_date import date_in_gmt
-
-
 class Channels(Base):
     """Channels table"""
 
@@ -20,18 +17,18 @@ class Channels(Base):
         String(24), default="text", index=True
     )  # text, voice, mixed
     messages_ids: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), default=list
+        ARRAY(String).with_variant(JSON(), "sqlite"), default=list
     )
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     allowed_users: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), default=list
+        ARRAY(String).with_variant(JSON(), "sqlite"), default=list
     )
     participant_ids: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), default=list
+        ARRAY(String).with_variant(JSON(), "sqlite"), default=list
     )  # Active voice participants
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: date_in_gmt("%Y-%m-%d %H:%M:%S"),
+        default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
 

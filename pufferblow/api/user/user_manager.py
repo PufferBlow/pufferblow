@@ -1,6 +1,7 @@
 import base64
 import datetime
 import hashlib
+import json
 import random
 import string
 import uuid
@@ -24,6 +25,7 @@ from pufferblow.api.logger.msgs import debug, info
 
 # Models
 from pufferblow.api.models.config_model import Config
+from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, OWNER_ROLE_ID
 from pufferblow.api.user.status import normalize_user_status
 
 
@@ -102,11 +104,11 @@ class UserManager:
 
         # Set user roles based on parameters
         if is_owner:
-            new_user.roles_ids = ["owner"]
+            new_user.roles_ids = [OWNER_ROLE_ID]
         elif is_admin:
             new_user.roles_ids = ["admin"]
         else:
-            new_user.roles_ids = ["user"]
+            new_user.roles_ids = [DEFAULT_ROLE_ID]
 
         # Use datetime objects with UTC timezone for database compatibility
         new_user.created_at = datetime.datetime.now(datetime.timezone.utc)
@@ -142,6 +144,9 @@ class UserManager:
         current_instance = f"{self.config.API_HOST}:{self.config.API_PORT}"
         if str(user.origin_server) != current_instance:
             return (None, False, "instance_mismatch")
+
+        if self.is_banned(str(user.user_id)):
+            return (None, False, "banned")
 
         if password == user_password:
             return (user, True, None)
@@ -213,6 +218,15 @@ class UserManager:
         for data in element_to_pop:
             user_data.pop(data)
 
+        resolved_roles = self.get_user_roles(user_id=str(user_data["user_id"]))
+        user_data["resolved_roles"] = resolved_roles
+        user_data["resolved_privileges"] = sorted(
+            self.get_user_privileges(user_id=str(user_data["user_id"]))
+        )
+        user_data["moderation_state"] = self.get_user_moderation_state(
+            user_id=str(user_data["user_id"])
+        )
+
         logger.info(
             info.INFO_REQUEST_USER_PROFILE(user_data=user_data, viewer_user_id=user_id)
         )
@@ -280,7 +294,7 @@ class UserManager:
         )
 
         # Check if 'owner' role is in the user's roles_ids
-        return "owner" in user_data.roles_ids if user_data.roles_ids else False
+        return OWNER_ROLE_ID in user_data.roles_ids if user_data.roles_ids else False
 
     def is_admin(self, user_id: str) -> bool:
         """
@@ -297,6 +311,177 @@ class UserManager:
         # Check if 'admin' role is in the user's roles_ids
         return "admin" in user_data.roles_ids if user_data.roles_ids else False
 
+    def get_user_role_ids(self, user_id: str) -> list[str]:
+        """Return normalized role ids for a user."""
+        user_data = self.database_handler.get_user(user_id=user_id)
+        role_ids = list(user_data.roles_ids or [])
+        return role_ids or [DEFAULT_ROLE_ID]
+
+    def get_user_roles(self, user_id: str) -> list[dict]:
+        """Return resolved role payloads for a user."""
+        resolved_roles: list[dict] = []
+        for role_id in self.get_user_role_ids(user_id=user_id):
+            role = self.database_handler.get_role(role_id=role_id)
+            if role is None:
+                continue
+            resolved_roles.append(
+                {
+                    "role_id": role.role_id,
+                    "role_name": role.role_name,
+                    "privileges_ids": list(role.privileges_ids or []),
+                    "is_system": self.database_handler.is_system_role(role.role_id),
+                }
+            )
+        return resolved_roles
+
+    def get_user_privileges(self, user_id: str) -> set[str]:
+        """Return the effective privilege set for a user."""
+        privilege_ids: set[str] = set()
+        for role in self.get_user_roles(user_id=user_id):
+            privilege_ids.update(role.get("privileges_ids") or [])
+        return privilege_ids
+
+    def has_privilege(self, user_id: str, privilege_id: str) -> bool:
+        """Check whether a user has a resolved privilege."""
+        return privilege_id in self.get_user_privileges(user_id=user_id)
+
+    def get_user_moderation_state(self, user_id: str) -> dict:
+        """Resolve ban and timeout state for a user from audit history."""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        relevant_entries = self.database_handler.list_activity_audit_entries(
+            activity_types=[
+                "user_banned",
+                "user_unbanned",
+                "user_timed_out",
+                "user_timeout_cleared",
+            ],
+            limit=500,
+        )
+
+        is_banned = False
+        ban_reason: str | None = None
+        banned_at: str | None = None
+        timeout_until: str | None = None
+        timeout_reason: str | None = None
+
+        for entry in relevant_entries:
+            try:
+                metadata = json.loads(entry.metadata_json or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+
+            if str(metadata.get("target_user_id")) != str(user_id):
+                continue
+
+            if entry.activity_type == "user_unbanned":
+                is_banned = False
+                ban_reason = None
+                banned_at = None
+                break
+
+            if entry.activity_type == "user_banned":
+                is_banned = True
+                ban_reason = metadata.get("reason")
+                banned_at = (
+                    entry.created_at.isoformat()
+                    if getattr(entry, "created_at", None) is not None
+                    else None
+                )
+                break
+
+        for entry in relevant_entries:
+            try:
+                metadata = json.loads(entry.metadata_json or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+
+            if str(metadata.get("target_user_id")) != str(user_id):
+                continue
+
+            if entry.activity_type == "user_timeout_cleared":
+                timeout_until = None
+                timeout_reason = None
+                break
+
+            if entry.activity_type != "user_timed_out":
+                continue
+
+            expires_at_raw = metadata.get("expires_at")
+            if not expires_at_raw:
+                continue
+
+            try:
+                expires_at = datetime.datetime.fromisoformat(
+                    str(expires_at_raw).replace("Z", "+00:00")
+                )
+            except ValueError:
+                continue
+
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
+
+            if expires_at > now:
+                timeout_until = expires_at.isoformat()
+                timeout_reason = metadata.get("reason")
+            break
+
+        return {
+            "is_banned": is_banned,
+            "ban_reason": ban_reason,
+            "banned_at": banned_at,
+            "timeout_until": timeout_until,
+            "timeout_reason": timeout_reason,
+            "is_timed_out": bool(timeout_until),
+        }
+
+    def is_banned(self, user_id: str) -> bool:
+        """Return whether the user is currently banned."""
+        return bool(self.get_user_moderation_state(user_id).get("is_banned"))
+
+    def get_active_timeout_until(self, user_id: str) -> datetime.datetime | None:
+        """Return active timeout expiry for a user, if any."""
+        timeout_until = self.get_user_moderation_state(user_id).get("timeout_until")
+        if not timeout_until:
+            return None
+        try:
+            expires_at = datetime.datetime.fromisoformat(
+                str(timeout_until).replace("Z", "+00:00")
+            )
+        except ValueError:
+            return None
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
+        return expires_at
+
+    def is_timed_out(self, user_id: str) -> bool:
+        """Return whether the user is currently timed out."""
+        expires_at = self.get_active_timeout_until(user_id)
+        if expires_at is None:
+            return False
+        return expires_at > datetime.datetime.now(datetime.timezone.utc)
+
+    def update_user_roles(self, target_user_id: str, role_ids: list[str]) -> Users:
+        """Replace a user's roles while preserving owner uniqueness semantics."""
+        target_user = self.database_handler.get_user(user_id=target_user_id)
+        current_role_ids = set(target_user.roles_ids or [])
+        normalized_role_ids = list(dict.fromkeys(role_ids or [DEFAULT_ROLE_ID]))
+
+        if OWNER_ROLE_ID in normalized_role_ids and OWNER_ROLE_ID not in current_role_ids:
+            raise ValueError("The owner role cannot be assigned through role management.")
+
+        if OWNER_ROLE_ID in current_role_ids and OWNER_ROLE_ID not in normalized_role_ids:
+            normalized_role_ids.insert(0, OWNER_ROLE_ID)
+
+        if not normalized_role_ids:
+            normalized_role_ids = [DEFAULT_ROLE_ID]
+
+        updated_user = self.database_handler.update_user_roles(
+            user_id=target_user_id, role_ids=normalized_role_ids
+        )
+        if updated_user is None:
+            raise ValueError("Target user was not found.")
+        return updated_user
+
     def check_username(self, username: str) -> bool:
         """
         Check if the `username` already exists or not
@@ -307,12 +492,10 @@ class UserManager:
         Returns:
             bool: True is the username exists, otherwise False.
         """
-        # For SQLite tests where users table may not exist, return False
-        database_uri = str(self.database_handler.database_engine.url)
-        if database_uri.startswith("sqlite://"):
+        try:
+            usernames = self.database_handler.get_usernames()
+        except Exception:
             return False
-
-        usernames = self.database_handler.get_usernames()
 
         return username in usernames
 

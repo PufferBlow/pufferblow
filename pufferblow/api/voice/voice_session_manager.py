@@ -7,6 +7,7 @@ import hmac
 import json
 import secrets
 import threading
+from urllib.parse import urlsplit, urlunsplit
 import uuid
 from typing import Any
 
@@ -58,7 +59,7 @@ class VoiceSessionManager:
         self.bootstrap_signature_ttl_seconds = 120
         self._bootstrap_nonce_lock = threading.Lock()
         self._bootstrap_seen_nonces: dict[str, int] = {}
-        self.signaling_url = (
+        self.signaling_url = self._normalize_signaling_url(
             getattr(cfg, "RTC_SIGNALING_URL", None) or self._default_signaling_url()
         )
 
@@ -84,6 +85,64 @@ class VoiceSessionManager:
         port = int(getattr(cfg, "API_PORT", 7575))
         return f"http://{host}:{port}/api/internal/v1/voice"
 
+    @staticmethod
+    def _normalize_signaling_url(raw_url: str) -> str:
+        """Normalize configured SFU signaling URL to the current websocket route."""
+        trimmed = str(raw_url or "").strip()
+        if not trimmed:
+            raise ValueError("RTC signaling URL cannot be empty")
+
+        candidate = trimmed
+        if "://" not in candidate:
+            candidate = f"ws://{candidate.lstrip('/')}"
+        elif candidate.startswith("http://") or candidate.startswith("https://"):
+            candidate = candidate.replace("http://", "ws://", 1).replace(
+                "https://", "wss://", 1
+            )
+
+        parsed = urlsplit(candidate)
+        path = parsed.path or ""
+        normalized_path = path.rstrip("/")
+        if normalized_path in {"", "/ws", "/rtc", "/rtc/ws"}:
+            normalized_path = "/rtc/v1/ws"
+        elif normalized_path == "/rtc/v1":
+            normalized_path = "/rtc/v1/ws"
+
+        return urlunsplit(
+            (
+                parsed.scheme or "ws",
+                parsed.netloc,
+                normalized_path or "/rtc/v1/ws",
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+    def _normalized_internal_api_base(self) -> str:
+        """Normalize server callback base for the current media-sfu contract."""
+        raw_base = getattr(
+            self.database_handler.config,
+            "RTC_INTERNAL_API_BASE",
+            self._default_internal_api_base(),
+        ) or self._default_internal_api_base()
+        trimmed = str(raw_base).strip().rstrip("/")
+        if not trimmed:
+            return self._default_internal_api_base()
+
+        parsed = urlsplit(trimmed)
+        path = parsed.path.rstrip("/")
+        if path in {"", "/api/internal", "/api/internal/voice", "/api/internal/v1"}:
+            path = "/api/internal/v1/voice"
+        return urlunsplit(
+            (
+                parsed.scheme or "http",
+                parsed.netloc,
+                path or "/api/internal/v1/voice",
+                parsed.query,
+                parsed.fragment,
+            )
+        ).rstrip("/")
+
     def _build_ice_servers(self) -> list[dict[str, Any]]:
         """Build RTC ICE config returned to clients."""
         cfg = self.database_handler.config
@@ -106,6 +165,75 @@ class VoiceSessionManager:
             servers.append(turn_payload)
 
         return servers
+
+    def _build_media_quality_payload(self) -> dict[str, Any]:
+        """Build instance-authoritative media quality defaults."""
+        cfg = self.database_handler.config
+        default_profile = str(
+            getattr(cfg, "RTC_DEFAULT_QUALITY_PROFILE", "balanced")
+        ).strip().lower()
+        if default_profile not in {"low", "balanced", "high"}:
+            default_profile = "balanced"
+
+        return {
+            "default_profile": default_profile,
+            "audio": {
+                "sample_rate_hz": int(getattr(cfg, "RTC_AUDIO_SAMPLE_RATE_HZ", 48000)),
+                "channels": int(getattr(cfg, "RTC_AUDIO_CHANNELS", 1)),
+                "stereo_enabled": bool(
+                    getattr(cfg, "RTC_AUDIO_STEREO_ENABLED", False)
+                ),
+                "dtx_enabled": bool(getattr(cfg, "RTC_AUDIO_DTX_ENABLED", True)),
+                "fec_enabled": bool(getattr(cfg, "RTC_AUDIO_FEC_ENABLED", True)),
+                "profiles": {
+                    "low": {
+                        "bitrate_kbps": int(
+                            getattr(cfg, "RTC_AUDIO_BITRATE_LOW_KBPS", 24)
+                        )
+                    },
+                    "balanced": {
+                        "bitrate_kbps": int(
+                            getattr(cfg, "RTC_AUDIO_BITRATE_BALANCED_KBPS", 48)
+                        )
+                    },
+                    "high": {
+                        "bitrate_kbps": int(
+                            getattr(cfg, "RTC_AUDIO_BITRATE_HIGH_KBPS", 64)
+                        )
+                    },
+                },
+            },
+            "video": {
+                "profiles": {
+                    "low": {
+                        "bitrate_kbps": int(
+                            getattr(cfg, "RTC_VIDEO_BITRATE_LOW_KBPS", 800)
+                        ),
+                        "width": int(getattr(cfg, "RTC_VIDEO_WIDTH_LOW", 640)),
+                        "height": int(getattr(cfg, "RTC_VIDEO_HEIGHT_LOW", 360)),
+                        "fps": int(getattr(cfg, "RTC_VIDEO_FPS_LOW", 15)),
+                    },
+                    "balanced": {
+                        "bitrate_kbps": int(
+                            getattr(cfg, "RTC_VIDEO_BITRATE_BALANCED_KBPS", 1500)
+                        ),
+                        "width": int(getattr(cfg, "RTC_VIDEO_WIDTH_BALANCED", 1280)),
+                        "height": int(
+                            getattr(cfg, "RTC_VIDEO_HEIGHT_BALANCED", 720)
+                        ),
+                        "fps": int(getattr(cfg, "RTC_VIDEO_FPS_BALANCED", 30)),
+                    },
+                    "high": {
+                        "bitrate_kbps": int(
+                            getattr(cfg, "RTC_VIDEO_BITRATE_HIGH_KBPS", 2500)
+                        ),
+                        "width": int(getattr(cfg, "RTC_VIDEO_WIDTH_HIGH", 1920)),
+                        "height": int(getattr(cfg, "RTC_VIDEO_HEIGHT_HIGH", 1080)),
+                        "fps": int(getattr(cfg, "RTC_VIDEO_FPS_HIGH", 60)),
+                    },
+                }
+            },
+        }
 
     @staticmethod
     def _b64url_encode(data: bytes) -> str:
@@ -131,6 +259,7 @@ class VoiceSessionManager:
         self,
         *,
         user_id: str,
+        username: str,
         server_id: str,
         channel_id: str,
         session_id: str,
@@ -143,11 +272,12 @@ class VoiceSessionManager:
         header = {"alg": "HS256", "typ": "JWT"}
         payload = {
             "sub": str(user_id),
+            "username": username,
             "instance_id": self._instance_id(),
             "server_id": str(server_id),
             "channel_id": str(channel_id),
             "session_id": str(session_id),
-            "scope": "voice:join",
+            "scope": "recv send_audio",
             "iat": int(now.timestamp()),
             "exp": int(exp.timestamp()),
             "jti": jti,
@@ -179,7 +309,8 @@ class VoiceSessionManager:
 
         payload = json.loads(self._b64url_decode(payload_segment).decode("utf-8"))
 
-        if payload.get("scope") != "voice:join":
+        scope_tokens = set(str(payload.get("scope", "")).split())
+        if not scope_tokens.intersection({"recv", "send_audio", "send_video"}):
             raise ValueError("Invalid join token scope")
 
         if payload.get("instance_id") != self._instance_id():
@@ -242,7 +373,13 @@ class VoiceSessionManager:
         if channel.channel_type not in {"voice", "mixed"}:
             raise ValueError("Channel does not support voice sessions")
 
-        profile = quality_profile if quality_profile in {"low", "balanced", "high"} else "balanced"
+        media_quality = self._build_media_quality_payload()
+        default_profile = media_quality["default_profile"]
+        profile = (
+            quality_profile
+            if quality_profile in {"low", "balanced", "high"}
+            else default_profile
+        )
 
         user = self.database_handler.get_user(user_id=user_id)
         username = user.username if user is not None else str(user_id)
@@ -268,6 +405,12 @@ class VoiceSessionManager:
                 )
                 db_session.add(session_row)
                 db_session.flush()
+            else:
+                normalized_signaling_url = self._normalize_signaling_url(
+                    session_row.signaling_url or self.signaling_url
+                )
+                if session_row.signaling_url != normalized_signaling_url:
+                    session_row.signaling_url = normalized_signaling_url
 
             participant_stmt = select(VoiceSessionParticipant).where(
                 and_(
@@ -306,6 +449,7 @@ class VoiceSessionManager:
 
             join_token, token_payload, token_exp = self._create_join_token(
                 user_id=str(user_id),
+                username=username,
                 server_id=str(server_id),
                 channel_id=channel_id,
                 session_id=session_row.session_id,
@@ -336,11 +480,12 @@ class VoiceSessionManager:
             "session_id": session_row.session_id,
             "channel_id": channel_id,
             "join_token": join_token,
-            "signaling_url": session_row.signaling_url,
+            "signaling_url": self._normalize_signaling_url(session_row.signaling_url),
             "ice_servers": self._build_ice_servers(),
             "expires_at": token_exp.isoformat(),
             "participant_count": participant_count,
             "quality_profile": session_row.quality_profile,
+            "media_quality": media_quality,
             "backend": "sfu_v2",
         }
 
@@ -414,6 +559,7 @@ class VoiceSessionManager:
             ]
 
             participant_count = sum(1 for row in participant_rows if row.is_connected)
+            signaling_url = self._normalize_signaling_url(session_row.signaling_url)
 
             return {
                 "session_id": session_row.session_id,
@@ -421,7 +567,7 @@ class VoiceSessionManager:
                 "is_active": session_row.is_active,
                 "quality_profile": session_row.quality_profile,
                 "backend": session_row.backend,
-                "signaling_url": session_row.signaling_url,
+                "signaling_url": signaling_url,
                 "participants": participants,
                 "participant_count": participant_count,
             }
@@ -594,8 +740,15 @@ class VoiceSessionManager:
                     )
                     db_session.add(participant)
                 else:
+                    participant.username = str(payload.get("username") or participant.username or user_id)
                     participant.is_connected = True
                     participant.disconnected_at = None
+                if "is_muted" in payload:
+                    participant.is_muted = bool(payload.get("is_muted"))
+                if "is_deafened" in payload:
+                    participant.is_deafened = bool(payload.get("is_deafened"))
+                if "is_speaking" in payload:
+                    participant.is_speaking = bool(payload.get("is_speaking"))
 
             elif event_type == "participant_left" and user_id:
                 participant_stmt = select(VoiceSessionParticipant).where(
@@ -606,6 +759,7 @@ class VoiceSessionManager:
                 )
                 participant = db_session.execute(participant_stmt).scalar_one_or_none()
                 if participant is not None:
+                    participant.username = str(payload.get("username") or participant.username or user_id)
                     participant.is_connected = False
                     participant.is_speaking = False
                     participant.disconnected_at = now
@@ -648,6 +802,14 @@ class VoiceSessionManager:
                 payload=payload,
             )
 
+            connected_count_stmt = select(func.count(VoiceSessionParticipant.id)).where(
+                and_(
+                    VoiceSessionParticipant.session_id == session_id,
+                    VoiceSessionParticipant.is_connected.is_(True),
+                )
+            )
+            participant_count = int(db_session.execute(connected_count_stmt).scalar() or 0)
+
             db_session.commit()
 
             return {
@@ -655,6 +817,9 @@ class VoiceSessionManager:
                 "channel_id": session_row.channel_id,
                 "event_type": event_type,
                 "user_id": user_id,
+                "participant_count": participant_count,
+                "session_ended": event_type == "session_ended" or not session_row.is_active,
+                "payload": payload,
             }
 
     def verify_internal_signature(self, body: bytes, signature_header: str | None) -> bool:
@@ -739,13 +904,10 @@ class VoiceSessionManager:
         """
         cfg = self.database_handler.config
         return {
-            "internal_api_base": getattr(
-                cfg, "RTC_INTERNAL_API_BASE", self._default_internal_api_base()
-            )
-            or self._default_internal_api_base(),
+            "internal_api_base": self._normalized_internal_api_base(),
             "internal_secret": self.internal_secret,
-            "max_total_peers": int(getattr(cfg, "RTC_MAX_TOTAL_PEERS", 200)),
-            "max_room_peers": int(getattr(cfg, "RTC_MAX_ROOM_PEERS", 60)),
+            "max_total_peers": int(getattr(cfg, "RTC_MAX_TOTAL_PEERS", 1000)),
+            "max_room_peers": int(getattr(cfg, "RTC_MAX_ROOM_PEERS", 100)),
             "room_end_grace_seconds": int(
                 getattr(cfg, "RTC_ROOM_END_GRACE_SECONDS", 15)
             ),
@@ -753,7 +915,7 @@ class VoiceSessionManager:
                 getattr(cfg, "RTC_INTERNAL_EVENT_WORKERS", 4)
             ),
             "internal_event_queue_size": int(
-                getattr(cfg, "RTC_INTERNAL_EVENT_QUEUE_SIZE", 4096)
+                getattr(cfg, "RTC_INTERNAL_EVENT_QUEUE_SIZE", 8192)
             ),
             "internal_http_timeout_seconds": int(
                 getattr(cfg, "RTC_INTERNAL_HTTP_TIMEOUT_SECONDS", 5)
@@ -771,6 +933,7 @@ class VoiceSessionManager:
                 getattr(cfg, "RTC_WS_READ_LIMIT_BYTES", 1_048_576)
             ),
             "udp_port_min": int(getattr(cfg, "RTC_UDP_PORT_MIN", 50000)),
-            "udp_port_max": int(getattr(cfg, "RTC_UDP_PORT_MAX", 50199)),
+            "udp_port_max": int(getattr(cfg, "RTC_UDP_PORT_MAX", 51999)),
             "ice_servers": self._build_ice_servers(),
+            "media_quality": self._build_media_quality_payload(),
         }

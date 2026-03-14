@@ -15,6 +15,16 @@ class Config:
     JWT_SECRET: str = "change-this-jwt-secret-in-production"
     JWT_ACCESS_TTL_MINUTES: int = 15
     JWT_REFRESH_TTL_DAYS: int = 30
+    CORS_ALLOWED_ORIGINS: tuple[str, ...] = ()
+    CORS_ALLOWED_METHODS: tuple[str, ...] = (
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "OPTIONS",
+    )
+    CORS_ALLOWED_HEADERS: tuple[str, ...] = ("*",)
+    CORS_ALLOW_CREDENTIALS: bool = True
 
     # RTC/voice related parameters
     VOICE_BACKEND: str = "sfu_v2"
@@ -28,18 +38,39 @@ class Config:
     TURN_URL: str | None = None
     TURN_USERNAME: str | None = None
     TURN_PASSWORD: str | None = None
-    RTC_MAX_TOTAL_PEERS: int = 200
-    RTC_MAX_ROOM_PEERS: int = 60
+    RTC_MAX_TOTAL_PEERS: int = 1000
+    RTC_MAX_ROOM_PEERS: int = 100
     RTC_ROOM_END_GRACE_SECONDS: int = 15
     RTC_INTERNAL_EVENT_WORKERS: int = 4
-    RTC_INTERNAL_EVENT_QUEUE_SIZE: int = 4096
+    RTC_INTERNAL_EVENT_QUEUE_SIZE: int = 8192
     RTC_INTERNAL_HTTP_TIMEOUT_SECONDS: int = 5
     RTC_WS_WRITE_TIMEOUT_SECONDS: int = 4
     RTC_WS_PING_INTERVAL_SECONDS: int = 20
     RTC_WS_PONG_WAIT_SECONDS: int = 45
     RTC_WS_READ_LIMIT_BYTES: int = 1_048_576
     RTC_UDP_PORT_MIN: int = 50000
-    RTC_UDP_PORT_MAX: int = 50199
+    RTC_UDP_PORT_MAX: int = 51999
+    RTC_DEFAULT_QUALITY_PROFILE: str = "balanced"
+    RTC_AUDIO_SAMPLE_RATE_HZ: int = 48000
+    RTC_AUDIO_CHANNELS: int = 1
+    RTC_AUDIO_STEREO_ENABLED: bool = False
+    RTC_AUDIO_DTX_ENABLED: bool = True
+    RTC_AUDIO_FEC_ENABLED: bool = True
+    RTC_AUDIO_BITRATE_LOW_KBPS: int = 24
+    RTC_AUDIO_BITRATE_BALANCED_KBPS: int = 48
+    RTC_AUDIO_BITRATE_HIGH_KBPS: int = 64
+    RTC_VIDEO_BITRATE_LOW_KBPS: int = 800
+    RTC_VIDEO_BITRATE_BALANCED_KBPS: int = 1500
+    RTC_VIDEO_BITRATE_HIGH_KBPS: int = 2500
+    RTC_VIDEO_WIDTH_LOW: int = 640
+    RTC_VIDEO_WIDTH_BALANCED: int = 1280
+    RTC_VIDEO_WIDTH_HIGH: int = 1920
+    RTC_VIDEO_HEIGHT_LOW: int = 360
+    RTC_VIDEO_HEIGHT_BALANCED: int = 720
+    RTC_VIDEO_HEIGHT_HIGH: int = 1080
+    RTC_VIDEO_FPS_LOW: int = 15
+    RTC_VIDEO_FPS_BALANCED: int = 30
+    RTC_VIDEO_FPS_HIGH: int = 60
 
     # PostgreSQL Database
     DATABASE_NAME: str
@@ -100,6 +131,20 @@ class Config:
         )
         self.JWT_ACCESS_TTL_MINUTES = config["api"].get("jwt_access_ttl_minutes", 15)
         self.JWT_REFRESH_TTL_DAYS = config["api"].get("jwt_refresh_ttl_days", 30)
+        security_section = config.get("security", {})
+        self.CORS_ALLOWED_ORIGINS = tuple(security_section.get("cors_origins", ()))
+        self.CORS_ALLOWED_METHODS = tuple(
+            security_section.get(
+                "cors_allow_methods",
+                ("GET", "POST", "PUT", "DELETE", "OPTIONS"),
+            )
+        )
+        self.CORS_ALLOWED_HEADERS = tuple(
+            security_section.get("cors_allow_headers", ("*",))
+        )
+        self.CORS_ALLOW_CREDENTIALS = bool(
+            security_section.get("cors_allow_credentials", True)
+        )
 
         rtc_section = config.get("rtc", {})
         self.VOICE_BACKEND = rtc_section.get("voice_backend", "sfu_v2")
@@ -127,8 +172,8 @@ class Config:
         self.TURN_URL = rtc_section.get("turn_url")
         self.TURN_USERNAME = rtc_section.get("turn_username")
         self.TURN_PASSWORD = rtc_section.get("turn_password")
-        self.RTC_MAX_TOTAL_PEERS = int(rtc_section.get("max_total_peers", 200))
-        self.RTC_MAX_ROOM_PEERS = int(rtc_section.get("max_room_peers", 60))
+        self.RTC_MAX_TOTAL_PEERS = int(rtc_section.get("max_total_peers", 1000))
+        self.RTC_MAX_ROOM_PEERS = int(rtc_section.get("max_room_peers", 100))
         self.RTC_ROOM_END_GRACE_SECONDS = int(
             rtc_section.get("room_end_grace_seconds", 15)
         )
@@ -136,7 +181,7 @@ class Config:
             rtc_section.get("internal_event_workers", 4)
         )
         self.RTC_INTERNAL_EVENT_QUEUE_SIZE = int(
-            rtc_section.get("internal_event_queue_size", 4096)
+            rtc_section.get("internal_event_queue_size", 8192)
         )
         self.RTC_INTERNAL_HTTP_TIMEOUT_SECONDS = int(
             rtc_section.get("internal_http_timeout_seconds", 5)
@@ -154,7 +199,54 @@ class Config:
             rtc_section.get("ws_read_limit_bytes", 1_048_576)
         )
         self.RTC_UDP_PORT_MIN = int(rtc_section.get("udp_port_min", 50000))
-        self.RTC_UDP_PORT_MAX = int(rtc_section.get("udp_port_max", 50199))
+        self.RTC_UDP_PORT_MAX = int(rtc_section.get("udp_port_max", 51999))
+        self.RTC_DEFAULT_QUALITY_PROFILE = str(
+            rtc_section.get("default_quality_profile", "balanced")
+        ).strip() or "balanced"
+        self.RTC_AUDIO_SAMPLE_RATE_HZ = int(
+            rtc_section.get("audio_sample_rate_hz", 48000)
+        )
+        self.RTC_AUDIO_CHANNELS = int(rtc_section.get("audio_channels", 1))
+        self.RTC_AUDIO_STEREO_ENABLED = bool(
+            rtc_section.get("audio_stereo_enabled", False)
+        )
+        self.RTC_AUDIO_DTX_ENABLED = bool(
+            rtc_section.get("audio_dtx_enabled", True)
+        )
+        self.RTC_AUDIO_FEC_ENABLED = bool(
+            rtc_section.get("audio_fec_enabled", True)
+        )
+        self.RTC_AUDIO_BITRATE_LOW_KBPS = int(
+            rtc_section.get("audio_bitrate_low_kbps", 24)
+        )
+        self.RTC_AUDIO_BITRATE_BALANCED_KBPS = int(
+            rtc_section.get("audio_bitrate_balanced_kbps", 48)
+        )
+        self.RTC_AUDIO_BITRATE_HIGH_KBPS = int(
+            rtc_section.get("audio_bitrate_high_kbps", 64)
+        )
+        self.RTC_VIDEO_BITRATE_LOW_KBPS = int(
+            rtc_section.get("video_bitrate_low_kbps", 800)
+        )
+        self.RTC_VIDEO_BITRATE_BALANCED_KBPS = int(
+            rtc_section.get("video_bitrate_balanced_kbps", 1500)
+        )
+        self.RTC_VIDEO_BITRATE_HIGH_KBPS = int(
+            rtc_section.get("video_bitrate_high_kbps", 2500)
+        )
+        self.RTC_VIDEO_WIDTH_LOW = int(rtc_section.get("video_width_low", 640))
+        self.RTC_VIDEO_WIDTH_BALANCED = int(
+            rtc_section.get("video_width_balanced", 1280)
+        )
+        self.RTC_VIDEO_WIDTH_HIGH = int(rtc_section.get("video_width_high", 1920))
+        self.RTC_VIDEO_HEIGHT_LOW = int(rtc_section.get("video_height_low", 360))
+        self.RTC_VIDEO_HEIGHT_BALANCED = int(
+            rtc_section.get("video_height_balanced", 720)
+        )
+        self.RTC_VIDEO_HEIGHT_HIGH = int(rtc_section.get("video_height_high", 1080))
+        self.RTC_VIDEO_FPS_LOW = int(rtc_section.get("video_fps_low", 15))
+        self.RTC_VIDEO_FPS_BALANCED = int(rtc_section.get("video_fps_balanced", 30))
+        self.RTC_VIDEO_FPS_HIGH = int(rtc_section.get("video_fps_high", 60))
 
         db_section = config.get("postgresql")
         if not db_section:

@@ -29,6 +29,14 @@ except ImportError:
     STORAGE_AVAILABLE = False
     StorageManager = None
 
+try:
+    from pufferblow.api.cdn.cdn_manager import CDNManager
+
+    CDN_AVAILABLE = True
+except ImportError:
+    CDN_AVAILABLE = False
+    CDNManager = None
+
 
 class APIInitializer:
     """
@@ -38,29 +46,51 @@ class APIInitializer:
     (`api_initializer`) so routes and managers share one runtime container.
     """
 
-    config: Config = None
-    encrypt_manager: Encrypt = None
-    database: Database = None
-    database_handler: DatabaseHandler = None
-    server_manager: ServerManager = None
-    auth_token_manager: AuthTokenManager = None
-    user_manager: UserManager = None
-    channels_manager: ChannelsManager = None
-    messages_manager: MessagesManager = None
-    websockets_manager: WebSocketsManager = None
-    voice_session_manager: VoiceSessionManager = None
-    storage_manager: StorageManager = None
-    background_tasks_manager: BackgroundTasksManager = None
-    security_checks_handler: SecurityChecksHandler = None
-    decentralized_auth_manager: DecentralizedAuthManager = None
-    activitypub_manager: ActivityPubManager = None
-    config_handler: ConfigHandler = None
-
-    is_loaded: bool = False
-
     def __init__(self) -> None:
         """Initialize the instance."""
-        pass
+        self.config: Config | None = None
+        self.encrypt_manager: Encrypt | None = None
+        self.database: Database | None = None
+        self.database_handler: DatabaseHandler | None = None
+        self.server_manager: ServerManager | None = None
+        self.auth_token_manager: AuthTokenManager | None = None
+        self.user_manager: UserManager | None = None
+        self.channels_manager: ChannelsManager | None = None
+        self.messages_manager: MessagesManager | None = None
+        self.websockets_manager: WebSocketsManager | None = None
+        self.voice_session_manager: VoiceSessionManager | None = None
+        self.storage_manager: StorageManager | None = None
+        self.cdn_manager: CDNManager | None = None
+        self.background_tasks_manager: BackgroundTasksManager | None = None
+        self.security_checks_handler: SecurityChecksHandler | None = None
+        self.decentralized_auth_manager: DecentralizedAuthManager | None = None
+        self.activitypub_manager: ActivityPubManager | None = None
+        self.config_handler: ConfigHandler | None = None
+        self.is_loaded = False
+
+    def is_ready(self, *components: str) -> bool:
+        """Return whether the initializer and selected components are available."""
+        if not self.is_loaded:
+            return False
+
+        return all(getattr(self, component, None) is not None for component in components)
+
+    def reset(self) -> None:
+        """Dispose current runtime state so the initializer can be reloaded safely."""
+        if self.database is not None:
+            try:
+                if hasattr(self.database, "database_engine") and self.database.database_engine:
+                    self.database.database_engine.dispose()
+            except Exception:
+                pass
+
+        if self.database_handler is not None:
+            try:
+                self.database_handler.database_engine.dispose()
+            except Exception:
+                pass
+
+        self.__init__()
 
     @staticmethod
     def _is_cli_setup_mode() -> bool:
@@ -74,12 +104,19 @@ class APIInitializer:
         Args:
             database_uri: Optional database URI override, mainly used by setup.
         """
+        resolved_database_uri = database_uri
+        current_database_uri = None
+        if self.database_handler is not None:
+            current_database_uri = str(self.database_handler.database_engine.url)
+
         if self.is_loaded:
-            return
+            if resolved_database_uri is None or resolved_database_uri == current_database_uri:
+                return
+            self.reset()
 
         self.load_config()
         self.encrypt_manager = Encrypt()
-        self.load_database(database_uri=database_uri)
+        self.load_database(database_uri=resolved_database_uri)
 
         database_uri_check = str(self.database_handler.database_engine.url)
         if not database_uri_check.startswith("sqlite://"):
@@ -140,6 +177,22 @@ class APIInitializer:
             logger.warning(
                 "Storage manager not available - file upload features are disabled."
             )
+
+        if CDN_AVAILABLE and CDNManager:
+            try:
+                self.cdn_manager = CDNManager(
+                    database_handler=self.database_handler,
+                    config=self.config,
+                )
+                self.cdn_manager.update_server_limits()
+            except Exception as exc:
+                self.cdn_manager = None
+                logger.warning(
+                    "CDN manager not available - legacy CDN features are disabled. reason={reason}",
+                    reason=str(exc),
+                )
+        else:
+            self.cdn_manager = None
 
         self.background_tasks_manager = BackgroundTasksManager(
             database_handler=self.database_handler,

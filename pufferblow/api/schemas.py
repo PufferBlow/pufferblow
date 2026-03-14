@@ -234,6 +234,13 @@ class InternalVoiceEventRequest(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
+class InternalVoiceBootstrapRequest(BaseModel):
+    """Signed bootstrap request emitted by media-sfu at startup."""
+
+    service: str = Field(min_length=1)
+    nonce: str = Field(min_length=1)
+
+
 # ============================================================================
 # Message Schemas
 # ============================================================================
@@ -331,6 +338,39 @@ class MessageOperationsQuery(BaseModel):
     """MessageOperationsQuery class."""
     auth_token: str = Field(min_length=1)
     message_id: str = Field(min_length=1)
+
+
+class MessageReportRequest(BaseModel):
+    """Submit one or more message reports."""
+
+    auth_token: str = Field(min_length=1)
+    message_ids: list[str] = Field(min_length=1)
+    category: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class UserReportRequest(BaseModel):
+    """Submit a report against a user."""
+
+    auth_token: str = Field(min_length=1)
+    target_user_id: str = Field(min_length=1)
+    category: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class UserBanRequest(BaseModel):
+    """Ban a user from the current home instance."""
+
+    auth_token: str = Field(min_length=1)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class UserTimeoutRequest(BaseModel):
+    """Apply a temporary communication timeout to a user."""
+
+    auth_token: str = Field(min_length=1)
+    duration_minutes: int = Field(ge=1, le=40320)
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class DirectMessageSendRequest(BaseModel):
@@ -450,6 +490,15 @@ class ServerSettingsRequest(BaseModel):
     is_private: bool | None = None
     max_users: int | None = None
     max_message_length: int | None = None
+    max_image_size: int | None = Field(default=None, ge=1)
+    max_video_size: int | None = Field(default=None, ge=1)
+    max_sticker_size: int | None = Field(default=None, ge=1)
+    max_gif_size: int | None = Field(default=None, ge=1)
+    allowed_image_types: list[str] | None = None
+    allowed_video_types: list[str] | None = None
+    allowed_file_types: list[str] | None = None
+    allowed_sticker_types: list[str] | None = None
+    allowed_gif_types: list[str] | None = None
 
 
 class RunTaskRequest(BaseModel):
@@ -500,4 +549,39 @@ class RuntimeConfigUpdateRequest(BaseModel):
 
     auth_token: str = Field(min_length=1)
     settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class RoleListRequest(BaseModel):
+    """List instance roles."""
+
+    auth_token: str = Field(min_length=1)
+
+
+class PrivilegeListRequest(BaseModel):
+    """List available privileges for role composition."""
+
+    auth_token: str = Field(min_length=1)
+
+
+class RoleCreateRequest(BaseModel):
+    """Create a custom instance role."""
+
+    auth_token: str = Field(min_length=1)
+    role_name: str = Field(min_length=1, max_length=64)
+    privileges_ids: list[str] = Field(default_factory=list)
+
+
+class RoleUpdateRequest(BaseModel):
+    """Update an existing custom instance role."""
+
+    auth_token: str = Field(min_length=1)
+    role_name: str = Field(min_length=1, max_length=64)
+    privileges_ids: list[str] = Field(default_factory=list)
+
+
+class UserRolesUpdateRequest(BaseModel):
+    """Replace a user's role assignments."""
+
+    auth_token: str = Field(min_length=1)
+    roles_ids: list[str] = Field(default_factory=list)
 

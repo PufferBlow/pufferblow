@@ -50,12 +50,15 @@ class StorageManager:
         self.STICKER_EXTENSIONS = ["png", "gif"]
         self.GIF_EXTENSIONS = ["gif"]
         self.VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi"]
+        self.AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"]
         self.DOCUMENT_EXTENSIONS = ["pdf", "doc", "docx", "txt", "zip"]
         self.MAX_IMAGE_SIZE_MB = 5
         self.MAX_VIDEO_SIZE_MB = 50
         self.MAX_STICKER_SIZE_MB = 5
         self.MAX_GIF_SIZE_MB = 10
+        self.MAX_AUDIO_SIZE_MB = 10
         self.MAX_DOCUMENT_SIZE_MB = 10
+        self.MAX_TOTAL_ATTACHMENT_SIZE_MB = 50
 
     def _load_sse_key(self) -> bytes | None:
         """
@@ -202,6 +205,7 @@ class StorageManager:
         force_category: str | None = None,
     ) -> tuple[str, bool]:
         """Validate and save file with categorization"""
+        self.update_server_limits()
         content = file.file.read()
         filename = file.filename or "unknown"
         extension = filename.split(".")[-1].lower() if "." in filename else ""
@@ -232,6 +236,9 @@ class StorageManager:
         elif category == "videos":
             max_size_mb = self.MAX_VIDEO_SIZE_MB
             allowed_extensions = self.VIDEO_EXTENSIONS
+        elif category == "audio":
+            max_size_mb = self.MAX_AUDIO_SIZE_MB
+            allowed_extensions = self.AUDIO_EXTENSIONS
         elif category == "documents":
             max_size_mb = self.MAX_DOCUMENT_SIZE_MB
             allowed_extensions = self.DOCUMENT_EXTENSIONS
@@ -415,6 +422,7 @@ class StorageManager:
                 self.MAX_DOCUMENT_SIZE_MB = (
                     server_settings.max_message_length // 1000 or 10
                 )
+                self.MAX_AUDIO_SIZE_MB = self.MAX_DOCUMENT_SIZE_MB
                 self.IMAGE_EXTENSIONS = server_settings.allowed_images_extensions or [
                     "png",
                     "jpg",
@@ -429,6 +437,15 @@ class StorageManager:
                 self.VIDEO_EXTENSIONS = server_settings.allowed_videos_extensions or [
                     "mp4",
                     "webm",
+                ]
+                self.AUDIO_EXTENSIONS = self.AUDIO_EXTENSIONS or [
+                    "mp3",
+                    "wav",
+                    "ogg",
+                    "m4a",
+                    "aac",
+                    "flac",
+                    "opus",
                 ]
                 self.DOCUMENT_EXTENSIONS = server_settings.allowed_doc_extensions or [
                     "pdf",

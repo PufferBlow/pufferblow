@@ -342,12 +342,12 @@ async def channels_messages_websocket(
             reason="'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again.",
         )
 
-    if not api_initializer.user_manager.is_admin(
-        user_id=user_id
-    ) and not api_initializer.user_manager.is_server_owner(user_id=user_id):
+    if not api_initializer.user_manager.has_privilege(
+        user_id=user_id, privilege_id="view_private_channels"
+    ):
         raise exceptions.WebSocketException(
             code=1001,
-            reason="Access forbidden. Only admins and server owners can access channel WebSocket endpoints.",
+            reason="Access forbidden. Missing required privilege: view_private_channels.",
         )
 
     if not api_initializer.channels_manager.check_channel(channel_id=channel_id):

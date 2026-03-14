@@ -4,36 +4,47 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
 from rich.prompt import Confirm, Prompt
 
-from pufferblow.api.config.config_handler import ConfigHandler
-from pufferblow.api.models.config_model import Config
-from pufferblow.api.storage.local_storage import LocalStorageBackend
-from pufferblow.api.storage.s3_storage import S3StorageBackend
-from pufferblow.cli.common import console
-from pufferblow.core.bootstrap import api_initializer
+if TYPE_CHECKING:
+    from pufferblow.api.models.config_model import Config
+
+
+def _console():
+    from pufferblow.cli.common import console
+
+    return console
+
+
+def _api_initializer():
+    from pufferblow.core.bootstrap import api_initializer
+
+    return api_initializer
 
 
 def _load_runtime_config_or_exit() -> Config:
     """Load runtime config using bootstrap database URI."""
+    from pufferblow.api.config.config_handler import ConfigHandler
+    from pufferblow.cli.common import ensure_database_exists, load_runtime
+
     config_handler = ConfigHandler()
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
         logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
         raise typer.Exit(code=1)
 
-    from pufferblow.cli.common import ensure_database_exists, load_runtime
-
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri)
-    return api_initializer.config
+    return _api_initializer().config
 
 
 def _prompt_provider() -> str:
     """Prompt for selected storage provider."""
+    console = _console()
     console.print("[bold]Storage provider[/bold]")
     console.print("1. Local")
     console.print("2. AWS S3")
@@ -99,6 +110,7 @@ def _prompt_s3_config(*, is_aws: bool) -> dict:
 
 def _save_storage_config(storage_config: dict) -> None:
     """Persist storage configuration in database runtime config."""
+    api_initializer = _api_initializer()
     config = _load_runtime_config_or_exit()
 
     config.STORAGE_PROVIDER = storage_config["provider"]
@@ -139,6 +151,9 @@ def _save_storage_config(storage_config: dict) -> None:
 
 async def _exercise_storage_backend(storage_config: dict) -> tuple[bool, str]:
     """Run upload/read/delete smoke checks against a storage backend."""
+    from pufferblow.api.storage.local_storage import LocalStorageBackend
+    from pufferblow.api.storage.s3_storage import S3StorageBackend
+
     backend = (
         LocalStorageBackend(storage_config)
         if storage_config["provider"] == "local"
@@ -172,6 +187,7 @@ def _config_to_storage_dict(config: Config) -> dict:
 
 def setup_storage_command() -> None:
     """Interactive storage backend setup wizard."""
+    console = _console()
     provider_choice = _prompt_provider()
     if provider_choice == "4":
         console.print("[dim]Storage setup cancelled.[/dim]")
@@ -203,6 +219,7 @@ def setup_storage_command() -> None:
 
 def test_storage_command() -> None:
     """Test the currently configured storage backend."""
+    console = _console()
     config = _load_runtime_config_or_exit()
     storage_config = _config_to_storage_dict(config)
 
@@ -239,6 +256,7 @@ def migrate_storage_command(
         raise typer.Exit(code=1)
 
     config = _load_runtime_config_or_exit()
+    console = _console()
 
     try:
         from scripts.migrate_storage import StorageMigrator
@@ -254,7 +272,7 @@ def migrate_storage_command(
     migrator = StorageMigrator(
         source_config=source_config,
         target_config=target_config,
-        database_handler=api_initializer.database_handler,
+        database_handler=_api_initializer().database_handler,
     )
     stats = asyncio.run(migrator.migrate_all_files(batch_size=batch_size, dry_run=dry_run))
 

@@ -9,6 +9,8 @@ from loguru import logger
 from sqlalchemy import and_, delete, func, select, text, update
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
+from pufferblow.api.database.metrics_files_mixin import DatabaseMetricsFilesMixin
+from pufferblow.api.database.runtime_config_mixin import DatabaseRuntimeConfigMixin
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.database.tables.activity_metrics import ActivityMetrics
 from pufferblow.api.database.tables.activitypub import (
@@ -21,8 +23,6 @@ from pufferblow.api.database.tables.auth_tokens import AuthTokens
 from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 from pufferblow.api.database.tables.channels import Channels
 from pufferblow.api.database.tables.chart_data import ChartData
-
-# Tables
 from pufferblow.api.database.tables.decentralized_sessions import (
     DecentralizedAuthChallenge,
     DecentralizedNodeSession,
@@ -45,23 +45,15 @@ from pufferblow.api.database.tables.voice_sessions import (
     VoiceSessionParticipant,
 )
 from pufferblow.api.database.tables.users import Users
-
-# Encryption manager
 from pufferblow.api.encrypt.encrypt import Encrypt
-
-# Log messages
 from pufferblow.api.logger.msgs import debug, info
-
-# Config model
 from pufferblow.api.models.config_model import Config
-
-# Utils
+from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, IMMUTABLE_ROLE_IDS
 from pufferblow.api.utils.current_date import date_in_gmt
 
 
-class DatabaseHandler:
+class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
     """Database handler for PufferBlow's API"""
-
     def __init__(
         self, database_engine: sqlalchemy.create_engine, encrypt_manager: Encrypt, config: Config
     ) -> None:
@@ -75,6 +67,10 @@ class DatabaseHandler:
 
         self.setup_tables(base=Base)
 
+    def _is_sqlite(self) -> bool:
+        """Return True when the active engine is SQLite."""
+        return str(self.database_engine.url).startswith("sqlite://")
+
     def setup_tables(self, base: DeclarativeBase) -> None:
         """
         Setup the needed database tables
@@ -85,9 +81,7 @@ class DatabaseHandler:
         Returns:
             `None`.
         """
-        # Check if we're using SQLite (for testing)
-        database_uri = str(self.database_engine.url)
-        is_sqlite = database_uri.startswith("sqlite://")
+        is_sqlite = self._is_sqlite()
 
         # Test the connection first
         try:
@@ -99,28 +93,17 @@ class DatabaseHandler:
 
         if is_sqlite:
             logger.debug("Setting up SQLite tables for testing")
-            # For SQLite tests, exclude PostgreSQL-specific tables and tables with ARRAY/datetime columns
+            # For SQLite tests, exclude PostgreSQL-specific tables and tables with unsupported features.
             postgresql_only_tables = {
-                Privileges.__tablename__,
-                Roles.__tablename__,
                 ServerSettings.__tablename__,
-                # Tables with ARRAY columns that SQLite doesn't support
-                "channels",
-                "message_read_history",  # Has DateTime columns which SQLite handles poorly in tests
-                "messages",
                 # Tables with UUID columns that SQLite doesn't handle properly for tests
-                "server",
                 "server_stickers",
                 "server_gifs",
-                "keys",  # Keys table uses UUID columns which SQLite doesn't support
-                "auth_tokens",  # AuthTokens table has UUID user_id column
                 # File reference system tables (for testing, we'll use basic hashing without references)
                 "file_objects",
                 "file_references",
                 # Chart data table uses advanced date functions that SQLite doesn't handle well
                 "chart_data",
-                # Activity audit table uses UUID columns which SQLite doesn't support well for tests
-                "activity_audit",
                 "decentralized_auth_challenges",
                 "decentralized_node_sessions",
                 "activitypub_actors",
@@ -169,253 +152,6 @@ class DatabaseHandler:
             logger.error(f"Table creation failed: {str(e)}")
             raise
 
-    def _ensure_default_server_settings(self) -> None:
-        """
-        Ensure that default server settings exist in the database.
-        This is called during table setup to guarantee server settings are available.
-        """
-        # Skip for SQLite tests where server_settings table is not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        try:
-            with self.database_session() as session:
-                # Check if server settings already exist
-                existing_settings = session.query(ServerSettings).first()
-
-                if existing_settings:
-                    logger.debug(
-                        "Server settings already exist, skipping initialization"
-                    )
-                    return
-
-                logger.info("Inserting default server settings")
-
-                # Create default server settings
-                server_settings = ServerSettings(
-                    server_settings_id="global_settings",
-                    is_private=False,
-                    max_message_length=50000,
-                    max_image_size=5,  # 5MB
-                    max_video_size=50,  # 50MB
-                    max_sticker_size=5,  # 5MB
-                    max_gif_size=10,  # 10MB for animated GIFs
-                    allowed_images_extensions=["png", "jpg", "jpeg", "gif", "webp"],
-                    allowed_stickers_extensions=[
-                        "png",
-                        "gif",
-                    ],  # Stickers support PNG and GIF
-                    allowed_gif_extensions=["gif"],  # Standalone GIFs
-                    allowed_videos_extensions=["mp4", "webm"],
-                    allowed_doc_extensions=["pdf", "doc", "docx", "txt", "zip"],
-                    rate_limit_duration=5,  # 5 minutes
-                    max_rate_limit_requests=6000,  # 6000 requests per window
-                    max_rate_limit_warnings=15,  # 15 warnings before blocking
-                )
-
-                session.add(server_settings)
-                session.commit()
-
-                logger.info("Default server settings inserted successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to ensure default server settings: {str(e)}")
-            raise
-
-    def _runtime_defaults(self) -> dict[str, tuple[object, bool]]:
-        """
-        Build default runtime config map from the current config model.
-
-        Returns:
-            dict[str, tuple[object, bool]]: Runtime setting key -> (value, is_secret)
-        """
-        cfg = self.config
-        return {
-            "API_HOST": (cfg.API_HOST, False),
-            "API_PORT": (cfg.API_PORT, False),
-            "LOGS_PATH": (cfg.LOGS_PATH, False),
-            "WORKERS": (cfg.WORKERS, False),
-            "RATE_LIMIT_DURATION": (cfg.RATE_LIMIT_DURATION, False),
-            "MAX_RATE_LIMIT_REQUESTS": (cfg.MAX_RATE_LIMIT_REQUESTS, False),
-            "MAX_RATE_LIMIT_WARNINGS": (cfg.MAX_RATE_LIMIT_WARNINGS, False),
-            "JWT_SECRET": (cfg.JWT_SECRET, True),
-            "JWT_ACCESS_TTL_MINUTES": (cfg.JWT_ACCESS_TTL_MINUTES, False),
-            "JWT_REFRESH_TTL_DAYS": (cfg.JWT_REFRESH_TTL_DAYS, False),
-            "VOICE_BACKEND": (cfg.VOICE_BACKEND, False),
-            "RTC_SIGNALING_URL": (cfg.RTC_SIGNALING_URL, False),
-            "RTC_JOIN_TOKEN_TTL_SECONDS": (cfg.RTC_JOIN_TOKEN_TTL_SECONDS, False),
-            "RTC_JOIN_SECRET": (cfg.RTC_JOIN_SECRET, True),
-            "RTC_INTERNAL_SECRET": (cfg.RTC_INTERNAL_SECRET, True),
-            "RTC_BOOTSTRAP_SECRET": (cfg.RTC_BOOTSTRAP_SECRET, True),
-            "RTC_INTERNAL_API_BASE": (cfg.RTC_INTERNAL_API_BASE, False),
-            "RTC_STUN_SERVERS": (cfg.RTC_STUN_SERVERS, False),
-            "TURN_URL": (cfg.TURN_URL, False),
-            "TURN_USERNAME": (cfg.TURN_USERNAME, False),
-            "TURN_PASSWORD": (cfg.TURN_PASSWORD, True),
-            "RTC_MAX_TOTAL_PEERS": (cfg.RTC_MAX_TOTAL_PEERS, False),
-            "RTC_MAX_ROOM_PEERS": (cfg.RTC_MAX_ROOM_PEERS, False),
-            "RTC_ROOM_END_GRACE_SECONDS": (cfg.RTC_ROOM_END_GRACE_SECONDS, False),
-            "RTC_INTERNAL_EVENT_WORKERS": (cfg.RTC_INTERNAL_EVENT_WORKERS, False),
-            "RTC_INTERNAL_EVENT_QUEUE_SIZE": (cfg.RTC_INTERNAL_EVENT_QUEUE_SIZE, False),
-            "RTC_INTERNAL_HTTP_TIMEOUT_SECONDS": (cfg.RTC_INTERNAL_HTTP_TIMEOUT_SECONDS, False),
-            "RTC_WS_WRITE_TIMEOUT_SECONDS": (cfg.RTC_WS_WRITE_TIMEOUT_SECONDS, False),
-            "RTC_WS_PING_INTERVAL_SECONDS": (cfg.RTC_WS_PING_INTERVAL_SECONDS, False),
-            "RTC_WS_PONG_WAIT_SECONDS": (cfg.RTC_WS_PONG_WAIT_SECONDS, False),
-            "RTC_WS_READ_LIMIT_BYTES": (cfg.RTC_WS_READ_LIMIT_BYTES, False),
-            "RTC_UDP_PORT_MIN": (cfg.RTC_UDP_PORT_MIN, False),
-            "RTC_UDP_PORT_MAX": (cfg.RTC_UDP_PORT_MAX, False),
-            "DERIVED_KEY_BYTES": (cfg.DERIVED_KEY_BYTES, False),
-            "DERIVED_KEY_ROUNDS": (cfg.DERIVED_KEY_ROUNDS, False),
-            "MAX_MESSAGE_SIZE": (cfg.MAX_MESSAGE_SIZE, False),
-            "MAX_MESSAGES_PER_PAGE": (cfg.MAX_MESSAGES_PER_PAGE, False),
-            "MIN_MESSAGES_PER_PAGE": (cfg.MIN_MESSAGES_PER_PAGE, False),
-            "STORAGE_PROVIDER": (cfg.STORAGE_PROVIDER, False),
-            "STORAGE_PATH": (cfg.STORAGE_PATH, False),
-            "STORAGE_BASE_URL": (cfg.STORAGE_BASE_URL, False),
-            "STORAGE_ALLOCATED_GB": (cfg.STORAGE_ALLOCATED_GB, False),
-            "STORAGE_SSE_ENABLED": (cfg.STORAGE_SSE_ENABLED, False),
-            "STORAGE_SSE_KEY": (cfg.STORAGE_SSE_KEY, True),
-            "S3_BUCKET_NAME": (cfg.S3_BUCKET_NAME, False),
-            "S3_REGION": (cfg.S3_REGION, False),
-            "S3_ACCESS_KEY": (cfg.S3_ACCESS_KEY, True),
-            "S3_SECRET_KEY": (cfg.S3_SECRET_KEY, True),
-            "S3_ENDPOINT_URL": (cfg.S3_ENDPOINT_URL, False),
-        }
-
-    def get_runtime_default_map(self) -> dict[str, tuple[object, bool]]:
-        """
-        Return default runtime key metadata map.
-        """
-        return self._runtime_defaults()
-
-    def _ensure_default_runtime_config(self) -> None:
-        """
-        Ensure runtime config keys are present in database.
-        """
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        defaults = self._runtime_defaults()
-        inserted = 0
-
-        with self.database_session() as session:
-            existing_rows = session.query(InstanceRuntimeConfig.config_key).all()
-            existing_keys = {row[0] for row in existing_rows}
-
-            for key, (value, is_secret) in defaults.items():
-                if key in existing_keys:
-                    continue
-
-                session.add(
-                    InstanceRuntimeConfig(
-                        config_key=key,
-                        config_value=json.dumps(value),
-                        is_secret=is_secret,
-                    )
-                )
-                inserted += 1
-
-            if inserted > 0:
-                session.commit()
-                logger.info(
-                    "Inserted default runtime config rows: {count}",
-                    count=inserted,
-                )
-
-    def get_runtime_config(self, include_secrets: bool = True) -> dict[str, object]:
-        """
-        Fetch runtime configuration key/value pairs from database.
-
-        Args:
-            include_secrets: Whether secret rows should be returned.
-
-        Returns:
-            dict[str, object]: Runtime settings map.
-        """
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return {
-                key: value
-                for key, (value, is_secret) in self._runtime_defaults().items()
-                if include_secrets or not is_secret
-            }
-
-        with self.database_session() as session:
-            query = session.query(InstanceRuntimeConfig)
-            if not include_secrets:
-                query = query.filter(InstanceRuntimeConfig.is_secret.is_(False))
-
-            rows = query.all()
-
-            parsed: dict[str, object] = {}
-            for row in rows:
-                try:
-                    parsed[row.config_key] = json.loads(row.config_value)
-                except json.JSONDecodeError:
-                    parsed[row.config_key] = row.config_value
-
-            return parsed
-
-    def update_runtime_config(
-        self, settings_updates: dict[str, object], secret_keys: set[str] | None = None
-    ) -> None:
-        """
-        Upsert runtime settings into instance runtime config table.
-
-        Args:
-            settings_updates: Key/value updates.
-            secret_keys: Optional explicit secret key set for inserted rows.
-        """
-        if not settings_updates:
-            return
-
-        secret_keys = secret_keys or set()
-        known_defaults = self._runtime_defaults()
-        now = datetime.datetime.now(datetime.timezone.utc)
-
-        with self.database_session() as session:
-            existing_rows = (
-                session.query(InstanceRuntimeConfig)
-                .filter(InstanceRuntimeConfig.config_key.in_(list(settings_updates.keys())))
-                .all()
-            )
-            existing_by_key = {row.config_key: row for row in existing_rows}
-
-            for key, value in settings_updates.items():
-                encoded = json.dumps(value)
-                existing = existing_by_key.get(key)
-
-                if existing is not None:
-                    existing.config_value = encoded
-                    existing.updated_at = now
-                    continue
-
-                is_secret = (
-                    key in secret_keys
-                    or key in {
-                        default_key
-                        for default_key, (_, default_secret) in known_defaults.items()
-                        if default_secret
-                    }
-                )
-
-                session.add(
-                    InstanceRuntimeConfig(
-                        config_key=key,
-                        config_value=encoded,
-                        is_secret=is_secret,
-                    )
-                )
-
-            session.commit()
-
-        logger.info(
-            "Runtime config updated keys={keys}",
-            keys=sorted(settings_updates.keys()),
-        )
-
     def sign_up(self, user_data: Users) -> None:
         """
         Sign up a new user
@@ -432,22 +168,18 @@ class DatabaseHandler:
             )
         )
 
-        # Check if we're using SQLite (for testing)
-        database_uri = str(self.database_engine.url)
-        is_sqlite = database_uri.startswith("sqlite://")
+        is_sqlite = self._is_sqlite()
 
         with self.database_session() as session:
             # Add user first
             session.add(user_data)
             session.flush()  # Ensure user is inserted first
 
-            # Only add message_read_history for PostgreSQL production
-            if not is_sqlite:
-                message_read_history = MessageReadHistory(
-                    user_id=user_data.user_id,
-                    viewed_messages_ids=list(),
-                )
-                session.add(message_read_history)
+            message_read_history = MessageReadHistory(
+                user_id=str(user_data.user_id) if is_sqlite else user_data.user_id,
+                viewed_messages_ids=list(),
+            )
+            session.add(message_read_history)
 
             # Handle encryption for non-SQLite databases
             if not is_sqlite:
@@ -517,10 +249,17 @@ class DatabaseHandler:
 
         logger.debug(debug.DEBUG_GET_USER_START(user_id=user_id, username=username))
 
+        normalized_user_id = user_id
+        if user_id is not None and not isinstance(user_id, uuid.UUID):
+            try:
+                normalized_user_id = uuid.UUID(str(user_id))
+            except (TypeError, ValueError):
+                normalized_user_id = user_id
+
         with self.database_session() as session:
             stmt = select(Users).where(
-                Users.user_id == user_id
-                if user_id is not None
+                Users.user_id == normalized_user_id
+                if normalized_user_id is not None
                 else Users.username == username
             )
 
@@ -573,9 +312,38 @@ class DatabaseHandler:
 
             result = session.execute(stmt).fetchone()
             if result is not None:
-                messages_ids = result[0]
+                messages_ids = result[0] or []
 
         return messages_ids
+
+    def get_unread_message_counts_by_channel(
+        self, user_id: str, channel_ids: list[str] | None = None
+    ) -> dict[str, int]:
+        """Return unread message counts grouped by channel for the given user."""
+        if channel_ids is not None and len(channel_ids) == 0:
+            return {}
+
+        viewed_messages_ids = self.get_user_read_messages_ids(user_id)
+        counts: dict[str, int] = {}
+
+        with self.database_session() as session:
+            query = session.query(
+                Messages.channel_id,
+                func.count(Messages.message_id),
+            )
+
+            if channel_ids:
+                query = query.filter(Messages.channel_id.in_(channel_ids))
+
+            if viewed_messages_ids:
+                query = query.filter(Messages.message_id.not_in(viewed_messages_ids))
+
+            rows = query.group_by(Messages.channel_id).all()
+            for channel_id, count in rows:
+                if channel_id:
+                    counts[str(channel_id)] = int(count)
+
+        return counts
 
     def delete_auth_token(self, user_id: str, auth_token: str) -> None:
         """
@@ -757,11 +525,6 @@ class DatabaseHandler:
             list[str]: A list containing all the usernames in the database.
         """
         usernames = list()
-
-        # For SQLite tests where users table may not exist, return empty list
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return usernames
 
         with self.database_session() as session:
             stmt = select(Users.username)
@@ -1514,6 +1277,103 @@ class DatabaseHandler:
             session.execute(stmt)
             session.commit()
 
+    def list_roles(self) -> list[Roles]:
+        """Return all instance roles ordered by creation time."""
+        with self.database_session() as session:
+            stmt = select(Roles).order_by(Roles.created_at.asc(), Roles.role_name.asc())
+            return [row[0] for row in session.execute(stmt).fetchall()]
+
+    def get_role(self, role_id: str) -> Roles | None:
+        """Return a role by id."""
+        with self.database_session() as session:
+            stmt = select(Roles).where(Roles.role_id == role_id)
+            row = session.execute(stmt).fetchone()
+            return row[0] if row else None
+
+    def role_exists(self, role_id: str) -> bool:
+        """Return whether a role exists."""
+        return self.get_role(role_id=role_id) is not None
+
+    def list_privileges(self) -> list[Privileges]:
+        """Return all known privileges ordered by category then name."""
+        with self.database_session() as session:
+            stmt = select(Privileges).order_by(
+                Privileges.category.asc(), Privileges.privilege_name.asc()
+            )
+            return [row[0] for row in session.execute(stmt).fetchall()]
+
+    def get_privilege_ids(self) -> set[str]:
+        """Return the set of valid privilege ids."""
+        with self.database_session() as session:
+            stmt = select(Privileges.privilege_id)
+            return {row[0] for row in session.execute(stmt).fetchall()}
+
+    def create_role(
+        self, role_id: str, role_name: str, privileges_ids: list[str]
+    ) -> Roles:
+        """Create a custom role."""
+        role = Roles(
+            role_id=role_id,
+            role_name=role_name,
+            privileges_ids=sorted(set(privileges_ids)),
+        )
+        with self.database_session() as session:
+            session.add(role)
+            session.commit()
+            session.refresh(role)
+            return role
+
+    def update_role(
+        self, role_id: str, *, role_name: str, privileges_ids: list[str]
+    ) -> Roles | None:
+        """Update an existing role."""
+        current_timestamp = datetime.datetime.now(datetime.timezone.utc)
+        with self.database_session() as session:
+            stmt = select(Roles).where(Roles.role_id == role_id)
+            row = session.execute(stmt).fetchone()
+            if row is None:
+                return None
+            role = row[0]
+            role.role_name = role_name
+            role.privileges_ids = sorted(set(privileges_ids))
+            role.updated_at = current_timestamp
+            session.add(role)
+            session.commit()
+            session.refresh(role)
+            return role
+
+    def delete_role(self, role_id: str) -> bool:
+        """Delete a custom role."""
+        with self.database_session() as session:
+            stmt = delete(Roles).where(Roles.role_id == role_id)
+            result = session.execute(stmt)
+            session.commit()
+            return bool(result.rowcount)
+
+    def count_users_for_role(self, role_id: str) -> int:
+        """Count how many users currently have a role assigned."""
+        with self.database_session() as session:
+            stmt = select(Users)
+            users = [row[0] for row in session.execute(stmt).fetchall()]
+            return sum(1 for user in users if role_id in (user.roles_ids or []))
+
+    def update_user_roles(self, user_id: str, role_ids: list[str]) -> Users | None:
+        """Replace a user's assigned roles."""
+        normalized_role_ids = sorted(set(role_ids or [DEFAULT_ROLE_ID]))
+        current_timestamp = datetime.datetime.now(datetime.timezone.utc)
+        with self.database_session() as session:
+            stmt = select(Users).where(Users.user_id == uuid.UUID(str(user_id)))
+            row = session.execute(stmt).fetchone()
+            if row is None:
+                return None
+            user = row[0]
+            user.roles_ids = normalized_role_ids
+            user.updated_at = current_timestamp
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            return user
+
     def fetch_channels(self, user_id: str) -> list[tuple[Channels]]:
         """
         Fetch a list of all the available channels, which
@@ -1553,7 +1413,7 @@ class DatabaseHandler:
 
             channels_names = session.execute(stmt).fetchall()
 
-        return channels_names
+        return [channel_name[0] for channel_name in channels_names]
 
     def create_new_channel(self, user_id: str, channel: Channels) -> None:
         """
@@ -1644,18 +1504,30 @@ class DatabaseHandler:
         Returns:
             `None`.
         """
+        database_uri = str(self.database_engine.url)
         with self.database_session() as session:
-            stmt = (
-                update(Channels)
-                .values(
-                    allowed_users=text(
-                        "array_append(allowed_users, '%s')" % to_add_user_id
+            if database_uri.startswith("sqlite://"):
+                stmt = select(Channels).where(Channels.channel_id == channel_id)
+                row = session.execute(stmt).fetchone()
+                if row is None:
+                    return
+                channel = row[0]
+                allowed_users = list(channel.allowed_users or [])
+                if to_add_user_id not in allowed_users:
+                    allowed_users.append(to_add_user_id)
+                channel.allowed_users = allowed_users
+                session.add(channel)
+            else:
+                stmt = (
+                    update(Channels)
+                    .values(
+                        allowed_users=text(
+                            "array_append(allowed_users, '%s')" % to_add_user_id
+                        )
                     )
+                    .where(Channels.channel_id == channel_id)
                 )
-                .where(Channels.channel_id == channel_id)
-            )
-
-            session.execute(stmt)
+                session.execute(stmt)
 
             session.commit()
 
@@ -1670,18 +1542,31 @@ class DatabaseHandler:
         Returns:
             `None`.
         """
+        database_uri = str(self.database_engine.url)
         with self.database_session() as session:
-            stmt = (
-                update(Channels)
-                .values(
-                    allowed_users=text(
-                        "array_remove(allowed_users, '%s')" % to_remove_user_id
+            if database_uri.startswith("sqlite://"):
+                stmt = select(Channels).where(Channels.channel_id == channel_id)
+                row = session.execute(stmt).fetchone()
+                if row is None:
+                    return
+                channel = row[0]
+                channel.allowed_users = [
+                    user_id
+                    for user_id in (channel.allowed_users or [])
+                    if user_id != to_remove_user_id
+                ]
+                session.add(channel)
+            else:
+                stmt = (
+                    update(Channels)
+                    .values(
+                        allowed_users=text(
+                            "array_remove(allowed_users, '%s')" % to_remove_user_id
+                        )
                     )
+                    .where(Channels.channel_id == channel_id)
                 )
-                .where(Channels.channel_id == channel_id)
-            )
-
-            session.execute(stmt)
+                session.execute(stmt)
 
             session.commit()
 
@@ -1801,17 +1686,36 @@ class DatabaseHandler:
         Returns:
             None
         """
+        database_uri = str(self.database_engine.url)
+        is_sqlite = database_uri.startswith("sqlite://")
+
         with self.database_session() as session:
-            stmt = (
-                update(Channels)
-                .values(
-                    messages_ids=text(
-                        "array_append(messages_ids, '%s')" % message.message_id
+            if isinstance(message.sent_at, str):
+                try:
+                    normalized_sent_at = message.sent_at.replace("Z", "+00:00")
+                    message.sent_at = datetime.datetime.fromisoformat(normalized_sent_at)
+                except ValueError:
+                    message.sent_at = datetime.datetime.now(datetime.timezone.utc)
+
+            if is_sqlite:
+                channel = session.get(Channels, message.channel_id)
+                if channel is not None:
+                    messages_ids = list(channel.messages_ids or [])
+                    if message.message_id not in messages_ids:
+                        messages_ids.append(message.message_id)
+                    channel.messages_ids = messages_ids
+                    session.add(channel)
+            else:
+                stmt = (
+                    update(Channels)
+                    .values(
+                        messages_ids=text(
+                            "array_append(messages_ids, '%s')" % message.message_id
+                        )
                     )
+                    .where(Channels.channel_id == message.channel_id)
                 )
-                .where(Channels.channel_id == message.channel_id)
-            )
-            session.execute(stmt)
+                session.execute(stmt)
             session.add(message)
 
             session.commit()
@@ -1859,17 +1763,31 @@ class DatabaseHandler:
         Returns:
             None.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.timezone.utc)
+        read_history_user_id = str(user_id) if self._is_sqlite() else user_id
 
         with self.database_session() as session:
-            stmt = update(MessageReadHistory).values(
-                viewed_messages_ids=text(
-                    "array_append(viewed_messages_ids, '%s')" % message_id
-                ),
-                updated_at=updated_at,
+            stmt = select(MessageReadHistory).where(
+                MessageReadHistory.user_id == read_history_user_id
             )
+            read_history = session.execute(stmt).scalar_one_or_none()
 
-            session.execute(stmt)
+            if read_history is None:
+                read_history = MessageReadHistory(
+                    user_id=read_history_user_id,
+                    viewed_messages_ids=[message_id],
+                    updated_at=updated_at,
+                )
+                session.add(read_history)
+                session.commit()
+                return
+
+            current_ids = list(read_history.viewed_messages_ids or [])
+            if message_id not in current_ids:
+                current_ids.append(message_id)
+                read_history.viewed_messages_ids = current_ids
+
+            read_history.updated_at = updated_at
 
             session.commit()
 
@@ -2160,10 +2078,9 @@ class DatabaseHandler:
 
         logger.info(f"Server settings updated: {list(settings_updates.keys())}")
 
-    def initialize_default_data(self) -> None:
+    def initialize_default_roles_and_privileges(self) -> None:
         """
-        Initializes default roles, privileges, and server settings in a single transaction.
-        Idempotent - safe to run multiple times without errors.
+        Initialize the built-in role and privilege catalog.
 
         Args:
             None.
@@ -2268,6 +2185,11 @@ class DatabaseHandler:
                 "name": "View Audit Logs",
                 "category": "moderation",
             },
+            {
+                "id": "manage_blocked_ips",
+                "name": "Manage Blocked IPs",
+                "category": "moderation",
+            },
             # Storage Management
             {
                 "id": "upload_files",
@@ -2280,6 +2202,11 @@ class DatabaseHandler:
                 "category": "storage_management",
             },
             {"id": "view_files", "name": "View Files", "category": "storage_management"},
+            {
+                "id": "manage_background_tasks",
+                "name": "Manage Background Tasks",
+                "category": "server_management",
+            },
         ]
 
         # Default roles data
@@ -2311,9 +2238,11 @@ class DatabaseHandler:
                     "mute_users",
                     "moderate_content",
                     "view_audit_logs",
+                    "manage_blocked_ips",
                     "upload_files",
                     "delete_files",
                     "view_files",
+                    "manage_background_tasks",
                 ],
             },
             {
@@ -2340,9 +2269,11 @@ class DatabaseHandler:
                     "mute_users",
                     "moderate_content",
                     "view_audit_logs",
+                    "manage_blocked_ips",
                     "upload_files",
                     "delete_files",
                     "view_files",
+                    "manage_background_tasks",
                 ],
             },
             {
@@ -2381,20 +2312,15 @@ class DatabaseHandler:
         ]
 
         with self.database_session() as session:
-            # Check if data already exists
             existing_privileges_count = session.query(Privileges).count()
             existing_roles_count = session.query(Roles).count()
-            existing_server_settings_count = session.query(ServerSettings).count()
 
-            if (
-                existing_privileges_count > 0
-                or existing_roles_count > 0
-                or existing_server_settings_count > 0
-            ):
-                logger.info("Default data already exists, skipping initialization")
+            if existing_privileges_count > 0 or existing_roles_count > 0:
+                logger.info(
+                    "Default roles/privileges already exist, skipping initialization"
+                )
                 return
 
-            # Add all privileges
             for privilege_data in default_privileges:
                 privilege = Privileges(
                     privilege_id=privilege_data["id"],
@@ -2412,35 +2338,54 @@ class DatabaseHandler:
                 )
                 session.add(role)
 
-            # Add server settings
+            session.commit()
+            logger.info("Default roles and privileges initialized successfully")
+
+    def initialize_default_server_settings(self) -> None:
+        """Initialize default server settings when the table exists."""
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return
+
+        with self.database_session() as session:
+            existing_server_settings_count = session.query(ServerSettings).count()
+            if existing_server_settings_count > 0:
+                logger.info("Default server settings already exist, skipping initialization")
+                return
+
             server_settings = ServerSettings(
                 server_settings_id="global_settings",
                 is_private=False,
                 max_message_length=50000,
-                max_image_size=5,  # 5MB
-                max_video_size=50,  # 50MB
-                max_sticker_size=5,  # 5MB
-                max_gif_size=10,  # 10MB for animated GIFs
+                max_image_size=5,
+                max_video_size=50,
+                max_sticker_size=5,
+                max_gif_size=10,
                 allowed_images_extensions=["png", "jpg", "jpeg", "gif", "webp"],
-                allowed_stickers_extensions=[
-                    "png",
-                    "gif",
-                ],  # Stickers support PNG and GIF
-                allowed_gif_extensions=["gif"],  # Standalone GIFs
+                allowed_stickers_extensions=["png", "gif"],
+                allowed_gif_extensions=["gif"],
                 allowed_videos_extensions=["mp4", "webm"],
                 allowed_doc_extensions=["pdf", "doc", "docx", "txt", "zip"],
-                rate_limit_duration=5,  # 5 minutes
-                max_rate_limit_requests=6000,  # 6000 requests per window
-                max_rate_limit_warnings=15,  # 15 warnings before blocking
+                rate_limit_duration=5,
+                max_rate_limit_requests=6000,
+                max_rate_limit_warnings=15,
             )
             session.add(server_settings)
-
-            # Single commit for all initialization data
             session.commit()
+            logger.info("Default server settings initialized successfully")
 
-            logger.info(
-                "Default roles, privileges, and server settings initialized successfully"
-            )
+    def initialize_default_data(self) -> None:
+        """
+        Initializes default roles, privileges, and server settings.
+        Idempotent - safe to run multiple times without errors.
+        """
+        self.initialize_default_roles_and_privileges()
+        self.initialize_default_server_settings()
+
+    def is_system_role(self, role_id: str) -> bool:
+        """Return whether a role id is reserved by the instance."""
+        return role_id in IMMUTABLE_ROLE_IDS
+
 
     def add_sticker_to_catalog(
         self, sticker_url: str, filename: str, uploaded_by: uuid.UUID
@@ -2658,817 +2603,4 @@ class DatabaseHandler:
             ]
 
     # Chart Data Methods for Background Tasks
-
-    def get_user_registration_count_by_period(
-        self, start_date: datetime, end_date: datetime
-    ) -> int:
-        """Get count of user registrations between dates"""
-        with self.database_session() as session:
-            result = session.query(func.count(Users.user_id)).filter(
-                Users.created_at >= start_date, Users.created_at < end_date
-            )
-            return result.scalar() if result.scalar() is not None else 0
-
-    def get_message_count_by_period(
-        self, start_date: datetime, end_date: datetime
-    ) -> int:
-        """Get count of messages between dates"""
-        with self.database_session() as session:
-            result = session.query(func.count(Messages.message_id)).filter(
-                Messages.sent_at >= start_date, Messages.sent_at < end_date
-            )
-            return result.scalar() if result.scalar() is not None else 0
-
-    def get_channel_creation_count_by_period(
-        self, start_date: datetime, end_date: datetime
-    ) -> int:
-        """Get count of channel creations between dates"""
-        with self.database_session() as session:
-            result = session.query(func.count(Channels.channel_id)).filter(
-                Channels.created_at >= start_date, Channels.created_at < end_date
-            )
-            return result.scalar() if result.scalar() is not None else 0
-
-    def save_chart_data_entry(self, chart_data_entry: ChartData) -> None:
-        """Save a chart data entry"""
-        with self.database_session() as session:
-            # Check if entry already exists to avoid duplicates
-            existing = (
-                session.query(ChartData)
-                .filter(
-                    ChartData.chart_type == chart_data_entry.chart_type,
-                    ChartData.period_type == chart_data_entry.period_type,
-                    ChartData.time_key == chart_data_entry.time_key,
-                )
-                .first()
-            )
-
-            if not existing:
-                session.add(chart_data_entry)
-                session.commit()
-
-    def get_chart_data_entries(
-        self, chart_type: str, period_type: str = None
-    ) -> list[ChartData]:
-        """Get chart data entries for a specific type and optional period"""
-        with self.database_session() as session:
-            query = session.query(ChartData).filter(ChartData.chart_type == chart_type)
-
-            if period_type:
-                query = query.filter(ChartData.period_type == period_type)
-
-            return query.order_by(ChartData.time_start).all()
-
-    def get_user_status_counts(self) -> dict[str, int]:
-        """Get counts of users by status"""
-        with self.database_session() as session:
-            online_count = (
-                session.query(func.count(Users.user_id))
-                .filter(Users.status == "online")
-                .scalar()
-                or 0
-            )
-
-            offline_count = (
-                session.query(func.count(Users.user_id))
-                .filter(Users.status.in_(["offline", None, ""]))
-                .scalar()
-                or 0
-            )
-
-            idle_count = (
-                session.query(func.count(Users.user_id))
-                .filter(Users.status == "idle")
-                .scalar()
-                or 0
-            )
-
-            dnd_count = (
-                session.query(func.count(Users.user_id))
-                .filter(Users.status == "dnd")
-                .scalar()
-                or 0
-            )
-
-            afk_count = (
-                session.query(func.count(Users.user_id))
-                .filter(Users.status.in_(["afk", "away"]))
-                .scalar()
-                or 0
-            )
-
-            # Handle other statuses if any
-            other_count = (
-                session.query(func.count(Users.user_id))
-                .filter(
-                    Users.status.not_in(
-                        ["online", "offline", "idle", "dnd", "afk", "away", "", None]
-                    )
-                )
-                .scalar()
-                or 0
-            )
-
-            return {
-                "online": online_count,
-                "offline": offline_count,
-                "idle": idle_count,
-                "dnd": dnd_count,
-                "afk": afk_count,
-                "away": afk_count,  # Backward-compatible alias for older consumers.
-                "other": other_count,
-            }
-
-    # Activity Metrics Methods
-
-    def save_activity_metrics(self, metrics: ActivityMetrics) -> None:
-        """Save activity metrics to the database"""
-        with self.database_session() as session:
-            # Check if metrics for this period already exist
-            existing = (
-                session.query(ActivityMetrics)
-                .filter(
-                    ActivityMetrics.period == metrics.period,
-                    ActivityMetrics.date == metrics.date,
-                )
-                .first()
-            )
-
-            if existing:
-                # Update existing metrics
-                for attr, value in metrics.__dict__.items():
-                    if not attr.startswith("_") and attr != "id":
-                        setattr(existing, attr, value)
-                existing.server_uptime_hours = metrics.server_uptime_hours
-            else:
-                # Save new metrics
-                session.add(metrics)
-
-            session.commit()
-
-    def get_latest_activity_metrics(self) -> dict:
-        """Get the latest activity metrics for dashboard display"""
-        with self.database_session() as session:
-            # Get total users and channels
-            total_users = self.count_users()
-
-            # Get total channels
-            database_uri = str(self.database_engine.url)
-            if database_uri.startswith("sqlite://"):
-                # For SQLite, we don't have channels table, use mock data
-                total_channels = 0
-            else:
-                total_channels = (
-                    session.query(func.count(Channels.channel_id)).scalar() or 0
-                )
-
-            # Calculate current activity metrics
-
-            # Messages per hour (current active period)
-            one_hour_ago = datetime.datetime.now() - datetime.timedelta(hours=1)
-            messages_last_hour = (
-                session.query(func.count(Messages.message_id))
-                .filter(Messages.sent_at >= one_hour_ago)
-                .scalar()
-                or 0
-            )
-
-            # Active users (users who sent messages in last 24 hours)
-            twenty_four_hours_ago = datetime.datetime.now() - datetime.timedelta(
-                hours=24
-            )
-            active_users_24h = (
-                session.query(func.count(func.distinct(Messages.sender_id)))
-                .filter(Messages.sent_at >= twenty_four_hours_ago)
-                .scalar()
-                or 0
-            )
-
-            # Current online users
-            user_status_counts = self.get_user_status_counts()
-            current_online = user_status_counts.get("online", 0)
-
-            # Calculate engagement rate (active users / total users)
-            engagement_rate = (
-                (active_users_24h / total_users * 100) if total_users > 0 else 0
-            )
-
-            # Get latest activity metrics record for trends
-            latest_metrics = (
-                session.query(ActivityMetrics)
-                .order_by(ActivityMetrics.created_at.desc())
-                .first()
-            )
-
-            return {
-                "total_users": total_users,
-                "total_channels": total_channels,
-                "messages_per_hour": messages_last_hour,
-                "active_users_24h": active_users_24h,
-                "current_online": current_online,
-                "engagement_rate": round(engagement_rate, 1),
-                "messages_per_active_user": (
-                    round(messages_last_hour / max(active_users_24h, 1), 1)
-                    if messages_last_hour > 0
-                    else 0
-                ),
-                "channel_utilization": (
-                    min(int((active_users_24h / max(total_channels, 1)) * 100), 100)
-                    if total_channels > 0
-                    else 0
-                ),
-                "last_updated": (
-                    latest_metrics.created_at.isoformat() if latest_metrics else None
-                ),
-            }
-
-    def calculate_daily_activity_metrics(self) -> ActivityMetrics | None:
-        """Calculate and return daily activity metrics"""
-        # Get today's date (start of day)
-        today = datetime.datetime.now().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        tomorrow = today + datetime.timedelta(days=1)
-
-        with self.database_session() as session:
-            # Count new users registered today
-            new_users_today = self.get_user_registration_count_by_period(
-                today, tomorrow
-            )
-
-            # Count messages sent today
-            messages_today = self.get_message_count_by_period(today, tomorrow)
-
-            # Get active users today (users who sent messages)
-            active_users_today = (
-                session.query(func.count(func.distinct(Messages.sender_id)))
-                .filter(Messages.sent_at >= today, Messages.sent_at < tomorrow)
-                .scalar()
-                or 0
-            )
-
-            # Get online user stats
-            online_avg = (
-                session.query(func.avg(ChartData.value))
-                .filter(
-                    ChartData.chart_type == "online_users",
-                    ChartData.time_start >= today,
-                    ChartData.time_start < tomorrow,
-                )
-                .scalar()
-                or 0
-            )
-
-            online_peak = (
-                session.query(func.max(ChartData.value))
-                .filter(
-                    ChartData.chart_type == "online_users",
-                    ChartData.time_start >= today,
-                    ChartData.time_start < tomorrow,
-                )
-                .scalar()
-                or 0
-            )
-
-            # Get total users at end of day
-            total_users = self.count_users()
-
-            # Get channels used today
-            channels_used_today = (
-                session.query(func.count(func.distinct(Messages.channel_id)))
-                .filter(Messages.sent_at >= today, Messages.sent_at < tomorrow)
-                .scalar()
-                or 0
-            )
-
-            # Calculate messages per hour average for today
-            messages_per_hour = messages_today / 24 if messages_today > 0 else 0
-
-            # Calculate engagement metrics
-            engagement_rate = (
-                (active_users_today / total_users * 100) if total_users > 0 else 0
-            )
-            messages_per_active_user = (
-                messages_today / max(active_users_today, 1) if messages_today > 0 else 0
-            )
-            channel_utilization_rate = (
-                (channels_used_today / max(total_channels, 1) * 100)
-                if total_channels > 0
-                else 0
-            )
-
-            # Get total channels
-            total_channels = (
-                session.query(func.count(Channels.channel_id)).scalar() or 0
-            )
-
-            # Calculate server uptime (this would need to be tracked system-wide)
-            server_uptime_hours = 24.0  # Simplified - would need to track actual uptime
-
-            # Get file upload stats for today
-            files_uploaded_today = (
-                session.query(func.count(FileReferences.id))
-                .filter(
-                    FileReferences.created_at >= today,
-                    FileReferences.created_at < tomorrow,
-                )
-                .scalar()
-                or 0
-            )
-
-            total_file_size_today = (
-                session.query(func.sum(FileObjects.file_size))
-                .join(FileReferences, FileObjects.file_id == FileReferences.file_id)
-                .filter(
-                    FileReferences.created_at >= today,
-                    FileReferences.created_at < tomorrow,
-                )
-                .scalar()
-                or 0
-            )
-
-            total_file_size_mb = (
-                total_file_size_today / (1024 * 1024) if total_file_size_today else 0
-            )
-
-            return ActivityMetrics(
-                period="daily",
-                date=today,
-                total_users=total_users,
-                new_users=new_users_today,
-                active_users=active_users_today,
-                online_users_avg=online_avg,
-                online_users_peak=online_peak,
-                total_messages=messages_today,
-                messages_this_period=messages_today,
-                messages_per_hour=messages_per_hour,
-                channels_used=channels_used_today,
-                user_engagement_rate=engagement_rate,
-                messages_per_active_user=messages_per_active_user,
-                channel_utilization_rate=channel_utilization_rate,
-                files_uploaded=files_uploaded_today,
-                total_file_size_mb=total_file_size_mb,
-                server_uptime_hours=server_uptime_hours,
-            )
-
-    def count_channels(self) -> int:
-        """Count total channels in the server"""
-        with self.database_session() as session:
-            return session.query(func.count(Channels.channel_id)).scalar() or 0
-
-    def get_current_online_count(self) -> int:
-        """Get current online users count"""
-        status_counts = self.get_user_status_counts()
-        return status_counts.get("online", 0)
-
-    def update_server_avatar_url(self, avatar_url: str) -> None:
-        """Update the server's avatar URL
-
-        Args:
-            avatar_url (str): The new avatar URL.
-
-        Returns:
-            None.
-        """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-        # For SQLite tests where server table is not created, skip
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        with self.database_session() as session:
-            stmt = update(Server).values(avatar_url=avatar_url, updated_at=updated_at)
-
-            session.execute(stmt)
-
-            session.commit()
-
-    def update_server_banner_url(self, banner_url: str) -> None:
-        """Update the server's banner URL
-
-        Args:
-            banner_url (str): The new banner URL.
-
-        Returns:
-            None.
-        """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-        # For SQLite tests where server table is not created, skip
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        with self.database_session() as session:
-            stmt = update(Server).values(banner_url=banner_url, updated_at=updated_at)
-
-            session.execute(stmt)
-
-            session.commit()
-
-    def create_file_object(
-        self,
-        file_hash: str,
-        ref_count: int,
-        file_path: str,
-        filename: str,
-        file_size: int,
-        mime_type: str,
-        verification_status: str = "unverified",
-    ) -> None:
-        """
-        Create a file object entry in the database
-
-        Args:
-            file_hash (str): SHA-256 hash of the file
-            ref_count (int): Initial reference count
-            file_path (str): Relative path to the file
-            filename (str): Original filename of the uploaded file
-            file_size (int): File size in bytes
-            mime_type (str): MIME type of the file
-            verification_status (str): Verification status
-
-        Returns:
-            None
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        file_obj = FileObjects(
-            file_hash=file_hash,
-            ref_count=ref_count,
-            file_path=file_path,
-            filename=filename,
-            file_size=file_size,
-            mime_type=mime_type,
-            verification_status=verification_status,
-        )
-
-        with self.database_session() as session:
-            session.add(file_obj)
-            session.commit()
-
-    def create_file_reference(
-        self,
-        reference_id: str,
-        file_hash: str,
-        reference_type: str,
-        reference_entity_id: str,
-    ) -> None:
-        """
-        Create a file reference entry in the database
-
-        Args:
-            reference_id (str): Unique reference identifier
-            file_hash (str): SHA-256 hash of the file
-            reference_type (str): Type of reference (e.g., 'storage_upload')
-            reference_entity_id (str): ID of the entity being referenced
-
-        Returns:
-            None
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        file_ref = FileReferences(
-            reference_id=reference_id,
-            file_hash=file_hash,
-            reference_type=reference_type,
-            reference_entity_id=reference_entity_id,
-        )
-
-        with self.database_session() as session:
-            session.add(file_ref)
-            session.commit()
-
-    def increment_file_reference_count(self, file_hash: str) -> None:
-        """
-        Increment the reference count for a file
-
-        Args:
-            file_hash (str): SHA-256 hash of the file
-
-        Returns:
-            None
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        with self.database_session() as session:
-            stmt = (
-                update(FileObjects)
-                .values(ref_count=FileObjects.ref_count + 1)
-                .where(FileObjects.file_hash == file_hash)
-            )
-            session.execute(stmt)
-            session.commit()
-
-    def decrement_file_reference_count(self, file_hash: str) -> None:
-        """
-        Decrement the reference count for a file
-
-        Args:
-            file_hash (str): SHA-256 hash of the file
-
-        Returns:
-            None
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        with self.database_session() as session:
-            stmt = (
-                update(FileObjects)
-                .values(ref_count=FileObjects.ref_count - 1)
-                .where(FileObjects.file_hash == file_hash)
-            )
-            session.execute(stmt)
-            session.commit()
-
-    def cleanup_orphaned_files(self, db_files: list[str] = None) -> None:
-        """
-        Remove files that are no longer referenced in the database.
-        This is used by storage cleanup to remove unreferenced files.
-
-        Args:
-            db_files (List[str]): Optional list of referenced file URLs.
-                                If None, uses database references.
-
-        Returns:
-            None
-        """
-        from pathlib import Path
-
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        with self.database_session() as session:
-            if db_files is None:
-                # Get all referenced file hashes from the database
-                file_hashes = session.query(FileReferences.file_hash).distinct().all()
-                file_hashes = [h[0] for h in file_hashes]
-            else:
-                # Convert input URLs to hashes when raw paths are provided.
-                file_hashes = []
-                for url in db_files:
-                    # Extract path from URL and try to find corresponding file
-                    base_url = self.config.STORAGE_BASE_URL.lstrip("/")
-                    normalized_url = url.lstrip("/")
-                    if normalized_url.startswith(base_url):
-                        relative_path = normalized_url[len(base_url) :].lstrip("/")
-                        file_path = Path(self.config.STORAGE_PATH) / relative_path
-                        if file_path.exists():
-                            try:
-                                with open(file_path, "rb") as f:
-                                    content = f.read()
-                                    file_hash = hashlib.sha256(content).hexdigest()
-                                    file_hashes.append(file_hash)
-                            except:
-                                continue
-
-            # Get files with zero references
-            orphaned_files = (
-                session.query(FileObjects)
-                .filter(
-                    FileObjects.ref_count <= 0,
-                    FileObjects.file_hash.not_in(file_hashes) if file_hashes else True,
-                )
-                .all()
-            )
-
-            # Delete orphaned files from disk and database
-            for file_obj in orphaned_files:
-                file_path = Path(self.config.STORAGE_PATH) / file_obj.file_path
-                try:
-                    if file_path.exists():
-                        file_path.unlink()
-                        logger.info(f"Deleted orphaned file: {file_obj.file_path}")
-
-                    # Remove from database
-                    session.delete(file_obj)
-
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to delete orphaned file {file_obj.file_path}: {e}"
-                    )
-
-            # Also find and remove files on disk that aren't in the database
-            storage_dir = Path(self.config.STORAGE_PATH)
-            if storage_dir.exists():
-                for sub_dir in storage_dir.glob("*"):
-                    if sub_dir.is_dir():  # Only process subdirectories
-                        for file_path in sub_dir.glob("*"):
-                            if file_path.is_file():
-                                try:
-                                    with open(file_path, "rb") as f:
-                                        content = f.read()
-                                        file_hash = hashlib.sha256(content).hexdigest()
-
-                                    # Check if this file exists in database
-                                    existing = (
-                                        session.query(FileObjects)
-                                        .filter(FileObjects.file_hash == file_hash)
-                                        .first()
-                                    )
-
-                                    if not existing:
-                                        # File not in database, check if it's referenced
-                                        is_referenced = (
-                                            session.query(FileReferences)
-                                            .filter(
-                                                FileReferences.file_hash == file_hash
-                                            )
-                                            .count()
-                                            > 0
-                                        )
-
-                                        if not is_referenced:
-                                            # Truly orphaned file - remove it
-                                            file_path.unlink()
-                                            logger.info(
-                                                f"Deleted unreferenced file on disk: {file_path.name}"
-                                            )
-                                except:
-                                    continue
-
-            session.commit()
-
-    def get_referenced_files_list(self) -> list[str]:
-        """
-        Get a list of all referenced file URLs for cleanup operations
-
-        Args:
-            None
-
-        Returns:
-            List[str]: List of referenced file URLs
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return []
-
-        with self.database_session() as session:
-            # Get all referenced file hashes
-            results = (
-                session.query(FileReferences.file_hash, FileObjects.file_path)
-                .join(FileObjects, FileReferences.file_hash == FileObjects.file_hash)
-                .all()
-            )
-
-            # Convert to URLs
-            referenced_files = []
-            for file_hash, file_path in results:
-                url = f"{self.config.STORAGE_BASE_URL.rstrip('/')}/{file_path}"
-                referenced_files.append(url)
-
-            return referenced_files
-
-    # Activity Audit Methods
-
-    def create_activity_audit_entry(self, activity_audit: ActivityAudit) -> None:
-        """
-        Create an activity audit entry in the database
-
-        Args:
-            activity_audit (ActivityAudit): The activity audit entry to create
-
-        Returns:
-            None
-        """
-        # Skip for SQLite tests where activity_audit table is not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        with self.database_session() as session:
-            session.add(activity_audit)
-            session.commit()
-
-    def get_recent_activities(self, limit: int = 10) -> list[ActivityAudit]:
-        """
-        Get recent activity audit entries, ordered by creation time (newest first)
-
-        Args:
-            limit (int): Maximum number of activity entries to return
-
-        Returns:
-            list[ActivityAudit]: List of recent activity entries
-        """
-        # Skip for SQLite tests where activity_audit table is not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            # Return empty list for testing
-            return []
-
-        with self.database_session() as session:
-            # Get recent activities, ordered by creation time descending
-            activities = (
-                session.query(ActivityAudit)
-                .order_by(ActivityAudit.created_at.desc())
-                .limit(limit)
-                .all()
-            )
-
-            return activities
-
-    def update_file_object(
-        self,
-        old_file_hash: str,
-        new_file_hash: str,
-        new_file_path: str,
-        new_file_size: int,
-        new_mime_type: str,
-    ) -> None:
-        """
-        Update a file object with new metadata after optimization
-
-        Args:
-            old_file_hash (str): Original file hash
-            new_file_hash (str): New file hash after optimization
-            new_file_path (str): New file path after optimization
-            new_file_size (int): New file size after optimization
-            new_mime_type (str): New MIME type after optimization
-
-        Returns:
-            None
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-        with self.database_session() as session:
-            stmt = (
-                update(FileObjects)
-                .values(
-                    file_hash=new_file_hash,
-                    file_path=new_file_path,
-                    file_size=new_file_size,
-                    mime_type=new_mime_type,
-                    updated_at=updated_at,
-                )
-                .where(FileObjects.file_hash == old_file_hash)
-            )
-            session.execute(stmt)
-            session.commit()
-
-    def update_file_references(self, old_file_hash: str, new_file_hash: str) -> None:
-        """
-        Update all file references to point to the new file hash after optimization
-
-        Args:
-            old_file_hash (str): Original file hash
-            new_file_hash (str): New file hash after optimization
-
-        Returns:
-            None
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
-        with self.database_session() as session:
-            stmt = (
-                update(FileReferences)
-                .values(file_hash=new_file_hash)
-                .where(FileReferences.file_hash == old_file_hash)
-            )
-            session.execute(stmt)
-            session.commit()
-
-    def get_file_object_by_hash(self, file_hash: str) -> FileObjects | None:
-        """
-        Get a file object by its hash
-
-        Args:
-            file_hash (str): SHA-256 hash of the file
-
-        Returns:
-            FileObjects | None: The file object if found, None otherwise
-        """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return None
-
-        with self.database_session() as session:
-            stmt = select(FileObjects).where(FileObjects.file_hash == file_hash)
-            result = session.execute(stmt).fetchone()
-            return result[0] if result else None
-
 

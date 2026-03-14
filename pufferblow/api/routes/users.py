@@ -93,6 +93,11 @@ async def signin_user(query: SigninQuery = Depends()):
                 status_code=403,
                 detail="This account belongs to a different instance and cannot sign in on this server.",
             )
+        if failure_reason == "banned":
+            raise exceptions.HTTPException(
+                status_code=403,
+                detail="This account has been banned from this home instance.",
+            )
         raise exceptions.HTTPException(
             status_code=401,
             detail="The provided password is incorrect. Please try again.",

@@ -43,6 +43,7 @@ PufferBlow embraces the **fediverse** model: independent instances with local ow
     - ActivityPub identity endpoints (WebFinger + actor documents)
     - Cross-instance follows
     - Cross-instance direct messages (DMs) through ActivityPub inbox/outbox exchange
+    - Client-side home-instance routing for WebFinger, actor lookup, follow, and federated DM flows
 
 **Instance-Local Boundaries (by design):**
     - Server governance and moderation are local

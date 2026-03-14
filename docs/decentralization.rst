@@ -47,6 +47,12 @@ Current ActivityPub capabilities target identity and DMs:
   - ``POST /api/v1/dms/send``
   - ``GET /api/v1/dms/messages``
 
+The current client architecture is also home-instance first:
+
+- sign in to one selected home instance
+- send WebFinger, actor, follow, and DM requests to that home instance
+- let the home instance resolve and communicate with remote ActivityPub peers
+
 Local users are represented as ActivityPub actors. Remote actors are cached in
 the database and can be mapped to local shadow users for consistent DM history.
 

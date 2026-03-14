@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import ARRAY, DateTime, ForeignKey, String
+from sqlalchemy import ARRAY, JSON, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID as SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.utils.current_date import date_in_gmt
 
 
 class Messages(Base):
@@ -22,7 +21,7 @@ class Messages(Base):
     raw_message: str | None = None
 
     sender_id: Mapped[UUID] = mapped_column(
-        SA_UUID(as_uuid=True),
+        SA_UUID(as_uuid=True).with_variant(String(36), "sqlite"),
         ForeignKey("users.user_id", ondelete="CASCADE"),
         index=True,
         nullable=False,
@@ -37,12 +36,12 @@ class Messages(Base):
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: date_in_gmt(format="%Y-%m-%d %H:%M:%S"),
+        default=lambda: datetime.now(timezone.utc),
         index=True,
     )
 
     attachments: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), nullable=True
+        ARRAY(String).with_variant(JSON(), "sqlite"), nullable=True
     )
 
     def to_dict(self) -> dict:

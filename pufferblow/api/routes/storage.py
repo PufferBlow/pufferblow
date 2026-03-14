@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Form, UploadFile, exceptions, responses
+from fastapi import APIRouter, Form, Request, UploadFile, exceptions, responses
 from sqlalchemy import delete, select
 
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
-from pufferblow.api.dependencies import require_server_owner
+from pufferblow.api.dependencies import require_privilege
 from pufferblow.api.logger.logger import logger
 from pufferblow.api.schemas import (
     CleanupOrphanedRequest,
@@ -136,6 +136,73 @@ def _resolve_storage_relative_path(file_url: str) -> str | None:
         return normalized
 
     return None
+
+
+def _build_storage_response(
+    *,
+    content: bytes,
+    media_type: str,
+    filename: str,
+    range_header: str | None,
+) -> responses.Response:
+    """Build inline storage response with optional byte-range support."""
+    total_length = len(content)
+    base_headers = {
+        "Content-Disposition": f"inline; filename={filename}",
+        "Accept-Ranges": "bytes",
+    }
+
+    if not range_header:
+        return responses.Response(
+            content=content,
+            media_type=media_type,
+            headers={**base_headers, "Content-Length": str(total_length)},
+        )
+
+    try:
+        units, _, raw_range = range_header.partition("=")
+        if units.strip().lower() != "bytes" or not raw_range:
+            raise ValueError("Unsupported range unit")
+
+        first_range = raw_range.split(",", 1)[0].strip()
+        start_text, _, end_text = first_range.partition("-")
+        if not start_text and not end_text:
+            raise ValueError("Invalid byte range")
+
+        if start_text:
+            start = int(start_text)
+            end = int(end_text) if end_text else total_length - 1
+        else:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                raise ValueError("Invalid suffix length")
+            start = max(total_length - suffix_length, 0)
+            end = total_length - 1
+
+        if total_length == 0 or start < 0 or end < start or start >= total_length:
+            raise ValueError("Range out of bounds")
+
+        end = min(end, total_length - 1)
+        partial_content = content[start : end + 1]
+    except ValueError:
+        return responses.Response(
+            status_code=416,
+            headers={
+                **base_headers,
+                "Content-Range": f"bytes */{total_length}",
+            },
+        )
+
+    return responses.Response(
+        content=partial_content,
+        status_code=206,
+        media_type=media_type,
+        headers={
+            **base_headers,
+            "Content-Length": str(len(partial_content)),
+            "Content-Range": f"bytes {start}-{end}/{total_length}",
+        },
+    )
 
 
 def _canonical_file_identity(file_url: str) -> str:
@@ -264,7 +331,7 @@ async def upload_storage_file(
     """
     Upload a file to storage. Server Owner only.
     """
-    user_id = require_server_owner(auth_token)
+    user_id = require_privilege(auth_token, "upload_files")
 
     if directory not in ALLOWED_UPLOAD_DIRECTORIES:
         raise exceptions.HTTPException(
@@ -322,7 +389,7 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
     """
     List files in storage directories. Server Owner only.
     """
-    require_server_owner(request.auth_token)
+    require_privilege(request.auth_token, "view_files")
 
     storage_root = _get_storage_root()
     if not storage_root.exists():
@@ -383,7 +450,7 @@ async def get_storage_file_info_route(request: StorageFileInfoRequest) -> dict:
     """
     Get metadata for a storage file. Server Owner only.
     """
-    require_server_owner(request.auth_token)
+    require_privilege(request.auth_token, "view_files")
 
     relative_path = _resolve_storage_relative_path(request.file_url)
     if not relative_path:
@@ -418,7 +485,7 @@ async def delete_storage_file_route(request: StorageDeleteFileRequest) -> dict:
     """
     Delete a storage file. Server Owner only.
     """
-    require_server_owner(request.auth_token)
+    require_privilege(request.auth_token, "delete_files")
 
     if await _is_file_protected(request.file_url):
         raise exceptions.HTTPException(
@@ -461,7 +528,7 @@ async def cleanup_orphaned_storage_files_route(
     """
     Remove unreferenced files from storage. Server Owner only.
     """
-    require_server_owner(request.auth_token)
+    require_privilege(request.auth_token, "manage_cdn")
 
     storage_root = _get_storage_root()
     if not storage_root.exists():
@@ -508,7 +575,7 @@ async def cleanup_orphaned_storage_files_route(
 
 @router.get("/api/v1/storage/file/{file_path:path}", status_code=200)
 async def serve_storage_file_route(
-    file_path: str, auth_token: str | None = None
+    file_path: str, request: Request, auth_token: str | None = None
 ) -> responses.Response:
     """
     Serve a storage file by relative path with optional authentication.
@@ -540,15 +607,16 @@ async def serve_storage_file_route(
         content_type = "application/octet-stream"
 
     filename = Path(normalized_path).name
-    return responses.Response(
+    return _build_storage_response(
         content=content,
         media_type=content_type,
-        headers={"Content-Disposition": f"inline; filename={filename}"},
+        filename=filename,
+        range_header=request.headers.get("range"),
     )
 
 
 @router.get("/storage/{file_hash}", status_code=200)
-async def serve_file_by_hash(file_hash: str) -> responses.Response:
+async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Response:
     """
     Serve a file by its content hash.
     """
@@ -570,8 +638,9 @@ async def serve_file_by_hash(file_hash: str) -> responses.Response:
     if not content_type:
         content_type = file_object.mime_type or "application/octet-stream"
 
-    return responses.Response(
+    return _build_storage_response(
         content=content,
         media_type=content_type,
-        headers={"Content-Disposition": f"inline; filename={Path(file_object.file_path).name}"},
+        filename=Path(file_object.file_path).name,
+        range_header=request.headers.get("range"),
     )

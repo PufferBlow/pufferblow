@@ -13,23 +13,13 @@ from loguru import logger
 from pufferblow.api.background_tasks.background_tasks_manager import (
     lifespan_background_tasks,
 )
+from pufferblow.api.config.config_handler import ConfigHandler
 from pufferblow.api.routes.register import register_routers
+from pufferblow.api.routes.system_routes.server_runtime import (
+    build_instance_health_payload,
+)
 from pufferblow.core.bootstrap import api_initializer
 from pufferblow.server.middlewares import RateLimitingMiddleware, SecurityMiddleware
-
-
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://172.19.224.1:5173",
-    "http://localhost:7575",
-    "http://127.0.0.1:7575",
-    "https://pufferblow.space",
-    "https://www.pufferblow.space",
-    "http://pufferblow.space",
-    "http://www.pufferblow.space",
-]
 
 
 def _mount_static_routes() -> None:
@@ -37,6 +27,17 @@ def _mount_static_routes() -> None:
     # All file access flows through storage route handlers so SSE decryption,
     # auth checks, and audit behavior remain centralized.
     return
+
+
+def _load_cors_settings() -> tuple[list[str], bool, list[str], list[str]]:
+    """Load CORS middleware settings from the shared config.toml."""
+    config = ConfigHandler().build_bootstrap_config()
+    return (
+        list(config.CORS_ALLOWED_ORIGINS),
+        config.CORS_ALLOW_CREDENTIALS,
+        list(config.CORS_ALLOWED_METHODS),
+        list(config.CORS_ALLOWED_HEADERS),
+    )
 
 
 @asynccontextmanager
@@ -56,22 +57,49 @@ async def lifespan(app: FastAPI):
         logger.info("API_STARTUP_COMPLETE")
         yield
 
+    if api_initializer.database_handler is not None:
+        try:
+            api_initializer.database_handler.database_engine.dispose()
+        except Exception:
+            logger.warning("API_DATABASE_DISPOSE_FAILED")
+
     logger.info("API_SHUTDOWN_COMPLETE")
 
 
 api = FastAPI(lifespan=lifespan)
 
-api.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+cors_origins, cors_allow_credentials, cors_allow_methods, cors_allow_headers = (
+    _load_cors_settings()
 )
+if cors_origins:
+    api.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=cors_allow_credentials,
+        allow_methods=cors_allow_methods,
+        allow_headers=cors_allow_headers,
+    )
+else:
+    logger.warning(
+        "CORS middleware disabled because [security].cors_origins is not set in ~/.pufferblow/config.toml"
+    )
+
 api.add_middleware(SecurityMiddleware)
 api.add_middleware(RateLimitingMiddleware)
 
 register_routers(api)
+
+
+@api.get("/healthz", status_code=200)
+async def healthz():
+    """Instance health endpoint including mirrored media-sfu health."""
+    return build_instance_health_payload()
+
+
+@api.get("/readyz", status_code=200)
+async def readyz():
+    """Alias for instance readiness/health endpoint."""
+    return build_instance_health_payload()
 
 
 @api.middleware("http")

@@ -27,7 +27,7 @@ pufferblow/
       database/               # SQLAlchemy models + handler
       storage/                # Local/S3 backend + SSE AES encryption
       websocket/              # Real-time WS distribution
-      webrtc/                 # Voice channel session manager
+      voice/                  # SFU control-plane + voice session manager
       ...
     core/
       bootstrap.py            # APIInitializer and manager wiring
@@ -56,7 +56,7 @@ At startup (`FastAPI` lifespan in `pufferblow/api/api.py`) it loads:
    - `SecurityChecksHandler`
    - `DecentralizedAuthManager`
    - `ActivityPubManager`
-4. WebRTC singleton initialization
+4. Voice session manager initialization
 5. Background scheduled task registrations
 
 ## 4. Request Pipeline
@@ -197,15 +197,26 @@ Endpoints:
 - targeted broadcast by user
 - permission-aware dispatch
 
-### 9.2 WebRTC Voice
+### 9.2 Voice via media-sfu
 
-Voice channels are managed by `WebRTCManager` (`aiortc`-based):
+Voice now follows a split architecture:
 
-- Join: `POST /api/v1/channels/{channel_id}/join-audio`
-- Leave: `POST /api/v1/channels/{channel_id}/leave-audio`
-- Status: `GET /api/v1/channels/{channel_id}/audio-status`
+- Python server (`pufferblow`) is the control plane:
+  - authz
+  - join token issuance
+  - session state
+  - internal callback handling
+- `media-sfu` is the media plane:
+  - `GET /rtc/v1/ws?join_token=<token>`
+  - RTP forwarding
+  - participant lifecycle
 
-The manager tracks channel participants and runs cleanup for stale connections.
+Current public voice APIs are centered on `/api/v2/voice/*`, while the server
+also mirrors SFU health into:
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /api/v1/system/instance-health`
 
 ## 10. Storage, CDN, and SSE Encryption
 
@@ -227,7 +238,7 @@ Related tables:
 - Sliding-window rate limiting with endpoint buckets (`auth`, `uploads`, `messages`, `default`)
 - Progressive warnings and cooldowns
 - Automatic persistent IP block for abusive clients
-- Route-level authz helpers (`get_current_user`, `require_admin`, `require_server_owner`)
+- Route-level authz helpers plus privilege checks in `dependencies.py`
 - Security checks handler validates token format, channel IDs, usernames, and other sensitive params
 
 ## 12. Database Design (Current)
@@ -269,11 +280,21 @@ Primary commands:
 
 The setup flow provisions DB connectivity, server metadata, and initial owner account.
 
+Recent CLI changes:
+
+- command modules are loaded lazily
+- heavyweight bootstrap/config/storage imports are deferred until use
+- the top-level banner/constants path is also deferred for lightweight commands
+- `scripts/benchmark_cli_startup.py` can be used to measure startup for
+  `--help`, `version`, `serve --help`, and `storage --help`
+
 ## 15. Important Current Boundaries
 
 1. Federation currently focuses on **cross-instance identity + DMs + follows**.
 2. Channels and server administration remain local to each instance.
-3. The API surface is routed through modular handlers under `pufferblow/api/routes/`.
+3. Voice is SFU-backed; remote media forwarding is not handled by the older
+   mesh-style path anymore.
+4. The API surface is routed through modular handlers under `pufferblow/api/routes/`.
 
 ## 16. How to Extend Safely
 

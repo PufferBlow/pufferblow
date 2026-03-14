@@ -18,7 +18,7 @@ The server is wired through ``APIInitializer`` in
 - ``DatabaseHandler``
 - core managers (auth, users, channels, messages, storage, background tasks)
 - federation managers (decentralized auth + ActivityPub)
-- websocket and webrtc managers
+- websocket manager and SFU/voice session control plane
 
 The ASGI export lives at ``pufferblow/server/app.py`` and points to
 ``pufferblow.api.api:api``.
@@ -48,8 +48,9 @@ Manager Map
      - Actor/webfinger handling, inbox/outbox processing, cross-instance DMs.
    * - ``WebSocketsManager``
      - Real-time fanout by channel or user.
-   * - ``WebRTCManager``
-     - Voice participant sessions and cleanup.
+   * - ``VoiceSessionManager``
+     - Issues SFU join/bootstrap data, tracks voice sessions, and processes
+       internal callbacks from ``media-sfu``.
 
 HTTP Request Lifecycle
 ======================
@@ -69,7 +70,7 @@ Security Layers
 
 - JWT-based user authentication with refresh token rotation
 - instance-bound token claims (``origin_server`` + issuer checks)
-- server-owner/admin guards in ``api/dependencies.py``
+- instance-role and privilege guards in ``api/dependencies.py``
 - persistent blocked IP table for abusive traffic
 - centralized query and input checks via ``security_checks_handler``
 
@@ -96,8 +97,10 @@ Real-Time and Voice
 
 - Global WS endpoint: ``/ws`` for multi-channel message stream.
 - Channel WS endpoint: ``/ws/channels/{channel_id}``.
-- Voice endpoints are under ``/api/v1/channels/{channel_id}/...`` and use
-  ``aiortc`` through ``WebRTCManager``.
+- Voice is SFU-backed:
+  - public session APIs are exposed under ``/api/v2/voice/*``
+  - media signaling happens against ``media-sfu`` at ``/rtc/v1/ws``
+  - instance health mirrors SFU state through ``/api/v1/system/instance-health``
 
 Operational Tooling
 ===================
@@ -107,4 +110,11 @@ CLI commands are exposed via ``pufferblow.cli.cli``:
 - ``pufferblow setup`` (includes Textual setup wizard when available)
 - ``pufferblow serve``
 - ``pufferblow storage setup|test|migrate``
+
+Recent CLI changes:
+
+- command modules are imported lazily
+- heavyweight runtime/bootstrap/storage imports are deferred until use
+- lightweight startup can be measured with
+  ``scripts/benchmark_cli_startup.py``
 

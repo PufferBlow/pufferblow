@@ -18,7 +18,7 @@ class Keys(Base):
     iv: Mapped[str] = mapped_column(String, nullable=False)
     associated_to: Mapped[str | None] = mapped_column(String, nullable=True)
     user_id: Mapped[UUID | None] = mapped_column(
-        SA_UUID(as_uuid=True),
+        SA_UUID(as_uuid=True).with_variant(String(36), "sqlite"),
         ForeignKey("users.user_id", ondelete="CASCADE"),
         index=True,
         nullable=True,

@@ -4,22 +4,28 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
-from pufferblow.api.config.config_handler import ConfigHandler
-from pufferblow.cli.common import (
-    DatabaseCredentials,
-    build_database_uri_from_credentials,
-    console,
-    ensure_database_exists,
-    load_runtime,
-)
-from pufferblow.cli.setup_prompt import run_setup_wizard
-from pufferblow.core.bootstrap import api_initializer
+if TYPE_CHECKING:
+    from pufferblow.api.config.config_handler import ConfigHandler
+    from pufferblow.cli.common import DatabaseCredentials
+
+
+def _console():
+    from pufferblow.cli.common import console
+
+    return console
+
+
+def _api_initializer():
+    from pufferblow.core.bootstrap import api_initializer
+
+    return api_initializer
 
 
 @dataclass(slots=True)
@@ -41,11 +47,15 @@ class OwnerDetails:
 
 def _launch_setup_wizard(has_existing_config: bool):
     """Run the interactive setup wizard using typer prompts."""
+    from pufferblow.cli.setup_prompt import run_setup_wizard
+
     return run_setup_wizard(has_existing_config=has_existing_config)
 
 
 def _prompt_database_credentials() -> DatabaseCredentials:
     """Prompt user for PostgreSQL connection details."""
+    from pufferblow.cli.common import DatabaseCredentials
+
     database_name = Prompt.ask("PostgreSQL database name", default="postgres").strip()
     username = Prompt.ask("PostgreSQL username").strip()
     password = Prompt.ask("PostgreSQL password", password=True)
@@ -95,7 +105,7 @@ def _prompt_owner_details() -> OwnerDetails:
 
 
 def _prompt_media_sfu_config() -> dict[str, str | int]:
-    """Prompt user for media-sfu configuration."""
+    """Prompt user for the shared Pufferblow config [media-sfu] section."""
     bootstrap_secret = Prompt.ask("Bootstrap secret", password=True).strip()
     bootstrap_config_url = Prompt.ask(
         "Bootstrap config URL",
@@ -103,10 +113,10 @@ def _prompt_media_sfu_config() -> dict[str, str | int]:
     ).strip()
     bind_addr = Prompt.ask("WebSocket bind address", default=":8787").strip()
     max_total_peers = int(
-        Prompt.ask("Max total peers across all rooms", default="200").strip()
+        Prompt.ask("Max total peers across all rooms", default="1000").strip()
     )
     max_room_peers = int(
-        Prompt.ask("Max peers per room", default="60").strip()
+        Prompt.ask("Max peers per room", default="100").strip()
     )
     event_workers = int(
         Prompt.ask("Event workers", default="4").strip()
@@ -130,6 +140,8 @@ def _apply_server_configuration(
     *, server: ServerDetails, is_update: bool
 ) -> None:
     """Create or update server information."""
+    api_initializer = _api_initializer()
+
     if is_update:
         api_initializer.server_manager.update_server(
             server_name=server.name,
@@ -153,6 +165,13 @@ def _run_full_setup(
     owner: OwnerDetails,
 ) -> None:
     """Execute first-time setup workflow."""
+    from pufferblow.cli.common import (
+        build_database_uri_from_credentials,
+        ensure_database_exists,
+        load_runtime,
+    )
+
+    api_initializer = _api_initializer()
     database_uri = build_database_uri_from_credentials(credentials)
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri)
@@ -176,7 +195,7 @@ def _run_full_setup(
         "database": credentials.database_name,
     }
 
-    # Write media-sfu config to config.toml with the generated bootstrap secret
+    # Write the shared Pufferblow config [media-sfu] section with the generated bootstrap secret
     bootstrap_secret = security_settings.get("RTC_BOOTSTRAP_SECRET") or str(
         api_initializer.database_handler.get_runtime_config(include_secrets=True).get(
             "RTC_BOOTSTRAP_SECRET", ""
@@ -187,18 +206,18 @@ def _run_full_setup(
         "bootstrap_config_url": "http://localhost:7575/api/internal/v1/voice/bootstrap-config",
         "bootstrap_secret": bootstrap_secret,
         "bind_addr": ":8787",
-        "max_total_peers": 200,
-        "max_room_peers": 60,
+        "max_total_peers": 1000,
+        "max_room_peers": 100,
         "room_end_grace_seconds": 15,
         "event_workers": 4,
-        "event_queue_size": 4096,
+        "event_queue_size": 8192,
         "http_timeout_seconds": 5,
         "ws_write_timeout_seconds": 4,
         "ws_ping_interval_seconds": 20,
         "ws_pong_wait_seconds": 45,
         "ws_read_limit_bytes": 1048576,
         "udp_port_min": 50000,
-        "udp_port_max": 50199,
+        "udp_port_max": 51999,
     }
 
     config_handler.write_config_toml(
@@ -213,7 +232,7 @@ def _run_full_setup(
         is_owner=True,
     ).raw_auth_token
 
-    console.print(
+    _console().print(
         Panel.fit(
             f"[bold green]{auth_token}[/bold green]\n\n"
             "[bold red]Store this owner auth token safely.[/bold red]\n\n"
@@ -239,6 +258,7 @@ def _ensure_runtime_security_settings(*, config_handler: ConfigHandler) -> dict[
     """
     Ensure critical runtime secrets are generated and persisted in DB.
     """
+    api_initializer = _api_initializer()
     runtime = api_initializer.database_handler.get_runtime_config(include_secrets=True)
     updates: dict[str, str] = {}
 
@@ -271,6 +291,9 @@ def _run_server_only_setup(
     *, config_handler: ConfigHandler, server: ServerDetails, is_update: bool
 ) -> None:
     """Execute setup flow that only touches server metadata."""
+    from pufferblow.cli.common import ensure_database_exists, load_runtime
+
+    api_initializer = _api_initializer()
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
         logger.error(
@@ -295,7 +318,7 @@ def _run_server_only_setup(
 def _run_media_sfu_only_setup(
     *, config_handler: ConfigHandler, media_sfu_config: dict[str, str | int]
 ) -> None:
-    """Execute setup flow that only touches media-sfu configuration."""
+    """Execute setup flow that only updates the shared Pufferblow config [media-sfu] section."""
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
         logger.error(
@@ -303,18 +326,18 @@ def _run_media_sfu_only_setup(
         )
         raise typer.Exit(code=1)
 
-    # Write media-sfu config to config.toml (don't touch database section)
+    # Update only the shared Pufferblow config [media-sfu] section.
     config_handler.write_config_toml(
         media_sfu_config=media_sfu_config,
     )
 
-    console.print(
+    _console().print(
         Panel.fit(
-            "[bold green]Media-SFU configuration updated successfully![/bold green]\n\n"
+            "[bold green]Shared Pufferblow config updated successfully for [media-sfu].[/bold green]\n\n"
             f"[bold cyan]Bootstrap URL:[/bold cyan] {media_sfu_config['bootstrap_config_url']}\n"
             f"[bold cyan]Bind Address:[/bold cyan] {media_sfu_config['bind_addr']}\n"
-            f"(Configuration saved to ~/.pufferblow/config.toml)",
-            title="[bold yellow]Media-SFU Setup Complete[/bold yellow]",
+            f"(Saved to the shared Pufferblow config at ~/.pufferblow/config.toml)",
+            title="[bold yellow]Shared Config Update Complete[/bold yellow]",
             border_style="green",
         )
     )
@@ -323,10 +346,12 @@ def _run_media_sfu_only_setup(
 
 def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
     """Execute setup using values produced by the setup wizard."""
+    from pufferblow.cli.common import DatabaseCredentials
+
     # Handle media-sfu only mode
     if payload.mode == "media_sfu_only":
         if payload.media_sfu_config is None:
-            logger.error("No media-sfu configuration provided.")
+            logger.error("No shared Pufferblow config values were provided for the [media-sfu] section.")
             raise typer.Exit(code=1)
         _run_media_sfu_only_setup(
             config_handler=config_handler,
@@ -379,10 +404,12 @@ def setup_command(
     is_setup_media_sfu: bool = typer.Option(
         False,
         "--setup-media-sfu",
-        help="Only configure media-sfu WebRTC server.",
+        help="Only update the shared Pufferblow config [media-sfu] section.",
     ),
 ) -> None:
     """Configure database, server metadata, and owner account."""
+    from pufferblow.api.config.config_handler import ConfigHandler
+
     config_handler = ConfigHandler()
     has_bootstrap_config = config_handler.resolve_database_uri() is not None
 
@@ -416,7 +443,7 @@ def setup_command(
 
     payload = _launch_setup_wizard(has_existing_config=has_bootstrap_config)
     if payload is None:
-        console.print("[dim]Setup cancelled.[/dim]")
+        _console().print("[dim]Setup cancelled.[/dim]")
         raise typer.Exit(code=0)
 
     _run_setup_payload(payload, config_handler=config_handler)

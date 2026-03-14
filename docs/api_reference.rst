@@ -419,14 +419,38 @@ message_id        string     Message to delete
      "message": "The message has been deleted successfully"
    }
 
+**POST /api/v1/channels/read-history**
+
+Return read-state history for the authenticated user.
+
+**Request Body:**
+
+.. sourcecode:: json
+
+   {
+     "auth_token": "your_auth_token"
+   }
+
+**Response (200 OK):**
+
+.. sourcecode:: json
+
+   {
+     "status_code": 200,
+     "viewed_message_ids": ["msg_1", "msg_2"],
+     "unread_counts": {
+       "channel_123": 3
+     }
+   }
+
 Voice Channel Routes
 ====================
 
-Voice endpoints are attached to channel IDs and use WebRTC/aiortc:
+Voice is now routed through the SFU-backed control plane.
 
-- ``POST /api/v1/channels/{channel_id}/join-audio``
-- ``POST /api/v1/channels/{channel_id}/leave-audio``
-- ``GET /api/v1/channels/{channel_id}/audio-status``
+Public client-facing voice APIs are exposed under ``/api/v2/voice/*`` and issue
+join/bootstrap data for ``media-sfu`` signaling at
+``GET /rtc/v1/ws?join_token=<token>``.
 
 Federation and Direct Message Routes
 ====================================
@@ -441,6 +465,10 @@ These endpoints provide ActivityPub interop and local/remote direct messaging:
 - ``POST /api/v1/federation/follow``
 - ``POST /api/v1/dms/send``
 - ``GET /api/v1/dms/messages``
+
+The current client model is home-instance first: the client sends WebFinger,
+actor, follow, and federated DM requests to the selected home instance, and the
+home instance resolves or delivers to remote ActivityPub peers.
 
 File Management (Storage/CDN) Routes
 ====================================
@@ -478,7 +506,8 @@ Clean up orphaned stored files. Server owner only.
 Server Administration Routes
 =============================
 
-These endpoints are only available to server owners and administrators for managing server configuration, security, and settings.
+These endpoints are privilege-gated through the instance role system for
+managing configuration, security, and settings.
 
 **POST /api/v1/blocked-ips/list**
 
@@ -496,9 +525,17 @@ Unblock an IP address.
 
 Get server configuration information.
 
+This now includes effective instance policy for message limits, upload limits,
+and voice/media-quality settings so clients do not hardcode those values.
+
 **GET /api/v1/system/server-stats**
 
 Get server statistics and metrics.
+
+**GET /api/v1/system/instance-health**
+
+Get instance health plus mirrored ``media-sfu /healthz`` status when RTC is
+configured.
 
 **POST /api/v1/system/server-usage**
 
@@ -543,15 +580,15 @@ Get user status distribution chart data.
 
 **POST /api/v1/system/recent-activity**
 
-Get recent server activity events. Admin only.
+Get recent server activity events. Requires ``view_audit_logs`` privilege.
 
 **POST /api/v1/system/activity-metrics**
 
-Get current activity metrics. Admin only.
+Get current activity metrics. Requires ``view_server_stats`` privilege.
 
 **POST /api/v1/system/server-overview**
 
-Get comprehensive server overview. Admin only.
+Get comprehensive server overview. Requires ``view_server_stats`` privilege.
 
 Background Tasks Routes
 =======================
@@ -566,6 +603,8 @@ Get status of all background tasks.
 
 Execute a background task on-demand.
 
+Both task routes require ``manage_background_tasks`` privilege.
+
 General Routes
 ==============
 
@@ -574,6 +613,14 @@ Miscellaneous endpoints for general server information.
 **GET /api/v1/info**
 
 Get basic server information.
+
+**GET /healthz**
+
+Return lightweight instance health status.
+
+**GET /readyz**
+
+Return lightweight readiness status.
 
 **GET /api/v1/system/latest-release**
 

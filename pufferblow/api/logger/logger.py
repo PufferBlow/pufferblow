@@ -2,9 +2,17 @@ import logging
 import os
 import sys
 
-from gunicorn.app.base import BaseApplication
-from gunicorn.glogging import Logger
 from loguru import logger
+
+try:
+    from gunicorn.app.base import BaseApplication
+    from gunicorn.glogging import Logger
+
+    GUNICORN_AVAILABLE = True
+except ImportError:
+    BaseApplication = object
+    Logger = object
+    GUNICORN_AVAILABLE = False
 
 JSON_LOGS = True if os.environ.get("JSON_LOGS", "0") == "1" else False
 
@@ -55,6 +63,11 @@ class StandaloneApplication(BaseApplication):
 
     def __init__(self, app, options=None):
         """Initialize the instance."""
+        if not GUNICORN_AVAILABLE:
+            raise RuntimeError(
+                "Gunicorn is not installed. Install the production dependencies "
+                "or use the development server mode."
+            )
         self.options = options or {}
         self.application = app
         super().__init__()

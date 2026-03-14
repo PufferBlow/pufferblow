@@ -34,16 +34,41 @@ logs_path = "~/.pufferblow/logs/pufferblow.log"
 # RTC/MEDIA CONFIGURATION (Optional)
 # ============================================================================
 [rtc]
-# Bootstrap secret must be kept secure - used for media-sfu/SFU authentication
+# Bootstrap secret must be kept secure - used by the shared Pufferblow config for media-sfu/SFU authentication
 bootstrap_secret = "change-me-in-production"
 # TURN server password for WebRTC relay
 turn_password = "change-me-in-production"
+# Default profile offered to voice/video publishers: low, balanced, or high
+default_quality_profile = "balanced"
+# Audio publishing defaults
+audio_sample_rate_hz = 48000
+audio_channels = 1
+audio_stereo_enabled = false
+audio_dtx_enabled = true
+audio_fec_enabled = true
+audio_bitrate_low_kbps = 24
+audio_bitrate_balanced_kbps = 48
+audio_bitrate_high_kbps = 64
+# Video publishing defaults for camera / future screenshare publishing
+video_bitrate_low_kbps = 800
+video_bitrate_balanced_kbps = 1500
+video_bitrate_high_kbps = 2500
+video_width_low = 640
+video_width_balanced = 1280
+video_width_high = 1920
+video_height_low = 360
+video_height_balanced = 720
+video_height_high = 1080
+video_fps_low = 15
+video_fps_balanced = 30
+video_fps_high = 60
 
 # ============================================================================
-# MEDIA-SFU RTC CONFIGURATION
+# SHARED PUFFERBLOW CONFIG: MEDIA-SFU RTC SECTION
 # ============================================================================
-# Configuration for the media-sfu server (Selective Forwarding Unit)
-# This manages WebRTC connections and audio/video streaming
+# This [media-sfu] section lives in the shared Pufferblow config.toml.
+# It configures the media-sfu server (Selective Forwarding Unit) that manages
+# WebRTC connections and audio/video streaming.
 [media-sfu]
 # Bootstrap config URL (where to fetch runtime config)
 bootstrap_config_url = "http://localhost:7575/api/internal/v1/voice/bootstrap-config"
@@ -112,9 +137,17 @@ format = "json"           # json or plain text
 # SECURITY CONFIGURATION (Optional)
 # ============================================================================
 [security]
-# CORS allowed origins (comma-separated)
-# cors_origins = "http://localhost:3000,https://example.com"
-# 
+# CORS is configured here, not hardcoded in the API.
+# You can use either a TOML array or a comma-separated string.
+cors_origins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]
+cors_allow_credentials = true
+cors_allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+cors_allow_headers = ["*"]
+#
 # Rate limiting
 # rate_limit_requests = 100        # requests per window
 # rate_limit_window_seconds = 60   # time window in seconds

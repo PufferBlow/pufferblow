@@ -8,7 +8,6 @@ This module handles all message-related operations including:
 - Deleting messages
 """
 
-import sys
 import mimetypes
 from datetime import datetime
 from urllib.parse import urlparse
@@ -20,11 +19,44 @@ from pufferblow.api.schemas import (
     MessageData,
     SendMessageForm,
 )
-from pufferblow.api.dependencies import get_current_user, check_channel_access
+from pufferblow.api.dependencies import (
+    check_channel_access,
+    ensure_user_not_timed_out,
+    get_current_user,
+    require_privilege,
+)
 from pufferblow.core.bootstrap import api_initializer
 
 # Create router for message-related endpoints
 router = APIRouter(prefix="/api/v1/channels/{channel_id}")
+
+
+def _get_message_and_attachment_policy() -> tuple[int, int]:
+    """Return instance-defined message and attachment limits."""
+    settings = api_initializer.database_handler.get_server_settings()
+    storage_manager = api_initializer.storage_manager
+    storage_manager.update_server_limits()
+
+    max_message_length = getattr(settings, "max_message_length", None)
+    if not max_message_length:
+        max_message_length = api_initializer.config.MAX_MESSAGE_SIZE
+
+    max_total_attachment_mb = getattr(
+        storage_manager, "MAX_TOTAL_ATTACHMENT_SIZE_MB", 50
+    )
+    return int(max_message_length), int(max_total_attachment_mb)
+
+
+def _measure_upload_size(file: UploadFile) -> int:
+    """Measure an uploaded file without consuming its stream permanently."""
+    if hasattr(file.file, "getbuffer"):
+        return len(file.file.getbuffer())
+
+    current_position = file.file.tell()
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(current_position)
+    return size
 
 
 def _extract_storage_hash(storage_url: str) -> str | None:
@@ -186,10 +218,13 @@ async def channel_send_message(
     message = validated_form.message
     sent_at = validated_form.sent_at
 
-    # Check message size
-    if sys.getsizeof(message) > api_initializer.config.MAX_MESSAGE_SIZE:
+    max_message_length, max_total_attachment_mb = _get_message_and_attachment_policy()
+
+    # Check message size against instance settings
+    if len(message) > max_message_length:
         raise exceptions.HTTPException(
-            detail="the message is too long.", status_code=400
+            detail=f"Message exceeds the instance limit of {max_message_length} characters.",
+            status_code=400,
         )
 
     # Check if message is empty and no attachments
@@ -198,14 +233,24 @@ async def channel_send_message(
             detail="Either a message or attachments must be provided.", status_code=400
         )
 
-    user_id = get_current_user(auth_token)
+    user_id = require_privilege(auth_token, "send_messages")
 
     # Check channel access
     check_channel_access(user_id, channel_id)
+    ensure_user_not_timed_out(user_id, "send messages")
 
     # Handle file uploads
     attachment_urls = []
     if attachments:
+        total_attachment_bytes = sum(_measure_upload_size(file) for file in attachments)
+        if total_attachment_bytes > max_total_attachment_mb * 1024 * 1024:
+            raise exceptions.HTTPException(
+                status_code=400,
+                detail=(
+                    "Combined attachment size exceeds the instance limit of "
+                    f"{max_total_attachment_mb}MB."
+                ),
+            )
         for file in attachments:
             if file.filename:
                 try:
@@ -214,7 +259,6 @@ async def channel_send_message(
                         await api_initializer.storage_manager.validate_and_save_categorized_file(
                             file=file,
                             user_id=user_id,
-                            force_category="attachments",
                             check_duplicates=True,
                         )
                     )
@@ -243,6 +287,8 @@ async def channel_send_message(
                             f"Failed to log attachment upload activity: {str(e)}"
                         )
 
+                except exceptions.HTTPException:
+                    raise
                 except Exception as e:
                     logger.error(
                         f"Failed to upload attachment '{file.filename}': {str(e)}"
@@ -302,6 +348,7 @@ async def channel_send_message(
         "message": "message sent successfully",
         "message_id": str(message_obj.message_id),
         "attachments": attachment_urls,
+        "message_data": message_dict,
     }
 
 
@@ -350,24 +397,17 @@ async def channel_delete_message(auth_token: str, channel_id: str, message_id: s
         404 NOT FOUND: Channel or message not found
     """
     user_id = get_current_user(auth_token)
+    check_channel_access(user_id=user_id, channel_id=channel_id)
 
-    # Check channel access
-    is_channel_private = api_initializer.channels_manager.is_private(
-        channel_id=channel_id
+    is_message_sender = (
+        api_initializer.messages_manager.check_message_sender(message_id=message_id)
+        == user_id
     )
-    is_server_owner = api_initializer.user_manager.is_server_owner(user_id=user_id)
-    is_admin = api_initializer.user_manager.is_admin(user_id=user_id)
+    can_delete_messages = api_initializer.user_manager.has_privilege(
+        user_id=user_id, privilege_id="delete_messages"
+    )
 
-    if is_channel_private and (not is_server_owner or not is_admin):
-        raise exceptions.HTTPException(
-            status_code=404,
-            detail="The provided channel ID does not exist or could not be found.",
-        )
-
-    # Check if user is sender or admin/owner
-    if not api_initializer.messages_manager.check_message_sender(
-        message_id=message_id
-    ) and (not is_server_owner or not is_admin):
+    if not is_message_sender and not can_delete_messages:
         raise exceptions.HTTPException(
             detail="You are not authorized to delete this message", status_code=401
         )

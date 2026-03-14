@@ -6,7 +6,11 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request
 
-from pufferblow.api.schemas import InternalVoiceEventRequest, VoiceJoinTokenConsumeRequest
+from pufferblow.api.schemas import (
+    InternalVoiceBootstrapRequest,
+    InternalVoiceEventRequest,
+    VoiceJoinTokenConsumeRequest,
+)
 from pufferblow.core.bootstrap import api_initializer
 
 router = APIRouter(prefix="/api/internal/v1/voice")
@@ -66,6 +70,22 @@ async def ingest_voice_event(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    if result.get("channel_id"):
+        payload = event.payload.copy()
+        await api_initializer.websockets_manager.broadcast_to_channel(
+            result["channel_id"],
+            {
+                "type": "voice_session_event",
+                "event_type": event.event_type,
+                "session_id": result["session_id"],
+                "channel_id": result["channel_id"],
+                "user_id": result.get("user_id"),
+                "participant_count": result.get("participant_count", 0),
+                "session_ended": result.get("session_ended", False),
+                "payload": payload,
+            },
+        )
+
     return {
         "status_code": 202,
         "message": "Voice event processed",
@@ -88,6 +108,18 @@ async def get_sfu_bootstrap_config(request: Request):
         nonce_header=nonce,
     ):
         raise HTTPException(status_code=401, detail="Invalid bootstrap signature")
+
+    try:
+        payload = InternalVoiceBootstrapRequest.model_validate(
+            json.loads(body.decode("utf-8"))
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid bootstrap payload") from exc
+
+    if payload.service != "media-sfu":
+        raise HTTPException(status_code=400, detail="Unsupported bootstrap service")
+    if payload.nonce != nonce:
+        raise HTTPException(status_code=400, detail="Bootstrap nonce mismatch")
 
     return {
         "status_code": 200,

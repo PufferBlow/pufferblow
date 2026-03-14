@@ -1,4 +1,5 @@
 import hashlib
+import datetime
 import uuid
 
 from loguru import logger
@@ -36,7 +37,9 @@ class ChannelsManager:
         self.auth_token_manager = auth_token_manager
         self.encrypt_manager = encrypt_manager
 
-    def list_channels(self, user_id: str) -> list[dict]:
+    def list_channels(
+        self, user_id: str, include_private_channels: bool = False
+    ) -> list[dict]:
         """
         List the public channels (and private channels
         in case the user is the server owner or an admin)
@@ -52,6 +55,11 @@ class ChannelsManager:
 
         for channel_data in channels_data:
             channel_data = channel_data[0]
+            allowed_users = channel_data.allowed_users or []
+
+            if channel_data.is_private and not include_private_channels:
+                if user_id not in allowed_users:
+                    continue
 
             channel_metadata_json = channel_data.to_dict()
 
@@ -84,7 +92,7 @@ class ChannelsManager:
         channel.channel_name = channel_name
         channel.channel_type = channel_type
         channel.is_private = is_private
-        channel.created_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        channel.created_at = datetime.datetime.now(datetime.timezone.utc)
         self.database_handler.create_new_channel(user_id=user_id, channel=channel)
 
         return channel

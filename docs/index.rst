@@ -7,6 +7,7 @@ Welcome to **pufferblow**'s documentation!
 
     introduction
     server_wiki
+    roles
     decentralization
     api
     get_started

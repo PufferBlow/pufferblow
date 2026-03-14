@@ -56,12 +56,13 @@ class ServerManager:
         # Create the server row first
         self.database_handler.create_server_row(server=server)
 
-        # Initialize default privileges, roles, and settings (PostgreSQL only)
-        # Skip for SQLite tests since roles/privileges use ARRAY type not supported by SQLite
-        # For SQLite, the database URI starts with 'sqlite://'
+        # Initialize instance-scoped authorization data for every environment.
+        self.database_handler.initialize_default_roles_and_privileges()
+
+        # Server settings are still skipped for SQLite test databases.
         database_uri = str(self.database_handler.database_engine.url)
         if not database_uri.startswith("sqlite://"):
-            self.database_handler.initialize_default_data()
+            self.database_handler.initialize_default_server_settings()
 
     def update_server(
         self,
