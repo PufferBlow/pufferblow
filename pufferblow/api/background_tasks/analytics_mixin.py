@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import httpx
 from datetime import datetime, timedelta
 from typing import Any
@@ -11,6 +12,7 @@ from loguru import logger
 from pufferblow.api.database.tables.channels import Channels
 from pufferblow.api.database.tables.chart_data import ChartData
 from pufferblow.api.database.tables.messages import Messages
+from pufferblow.api.database.tables.users import Users
 
 
 class BackgroundTaskAnalyticsMixin:
@@ -585,68 +587,77 @@ class BackgroundTaskAnalyticsMixin:
     def _update_online_users_chart(self):
         """Update online users chart data"""
         try:
-            # For online users chart, we use mocked data since we don't store hourly online user counts
-            # 24h data - hourly snapshots (last 24 hours)
-            for i in range(24):
-                timestamp = datetime.now() - timedelta(hours=i)
-                # For now, we'll calculate based on current online users
-                # In a real implementation, you'd store hourly snapshots
-                base_count = (
-                    self.server_stats.get("users", {}).get("online", 0)
-                    if hasattr(self, "server_stats") and self.server_stats
-                    else 10
-                )
+            from sqlalchemy import func
 
-                # Add some variation based on hour (assume peak hours)
-                hour = timestamp.hour
-                variation = 1.0
-                if 9 <= hour <= 17:  # Peak business hours
-                    variation = 1.3
-                elif 20 <= hour <= 23 or 0 <= hour <= 6:  # Late night/early morning
-                    variation = 0.7
-                elif 18 <= hour <= 21:  # Evening hours
-                    variation = 1.1
+            now = datetime.now()
+            current_online = self.database_handler.get_current_online_count()
 
-                count = int(base_count * variation)
-                # Add some randomness
-                import random
+            # Record a real hourly snapshot for the current hour.
+            hourly_entry = ChartData.save_hourly_metric(
+                chart_type="online_users",
+                metric_name="count",
+                value=current_online,
+                timestamp=now,
+                additional_metrics={"hour": now.strftime("%H")},
+            )
+            self.database_handler.save_chart_data_entry(hourly_entry)
 
-                count = max(0, count + random.randint(-3, 3))
+            # Recompute the 7-day daily rollup from stored hourly snapshots.
+            with self.database_handler.database_session() as session:
+                for i in range(7):
+                    date = now.replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ) - timedelta(days=i)
+                    day_end = date + timedelta(days=1)
 
-                chart_entry = ChartData.save_hourly_metric(
-                    chart_type="online_users",
-                    metric_name="count",
-                    value=count,
-                    timestamp=timestamp,
-                    additional_metrics={"hour": timestamp.strftime("%H")},
-                )
-                self.database_handler.save_chart_data_entry(chart_entry)
+                    avg_count = (
+                        session.query(func.avg(ChartData.primary_value))
+                        .filter(
+                            ChartData.chart_type == "online_users",
+                            ChartData.period_type == "hourly",
+                            ChartData.time_start >= date,
+                            ChartData.time_start < day_end,
+                        )
+                        .scalar()
+                    )
+                    peak_count = (
+                        session.query(func.max(ChartData.primary_value))
+                        .filter(
+                            ChartData.chart_type == "online_users",
+                            ChartData.period_type == "hourly",
+                            ChartData.time_start >= date,
+                            ChartData.time_start < day_end,
+                        )
+                        .scalar()
+                    )
+                    sample_count = (
+                        session.query(func.count(ChartData.id))
+                        .filter(
+                            ChartData.chart_type == "online_users",
+                            ChartData.period_type == "hourly",
+                            ChartData.time_start >= date,
+                            ChartData.time_start < day_end,
+                        )
+                        .scalar()
+                    ) or 0
 
-            # 7d data - daily averages (last 7 days)
-            for i in range(7):
-                date = datetime.now().replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                ) - timedelta(days=i)
-                # Calculate daily average based on current trends
-                base_count = (
-                    self.server_stats.get("users", {}).get("online", 0)
-                    if hasattr(self, "server_stats") and self.server_stats
-                    else 1
-                )
-                avg_count = int(base_count * (0.8 + 0.4 * (i / 7.0)))  # Trending data
+                    daily_average = float(avg_count) if avg_count is not None else 0.0
+                    daily_peak = int(peak_count) if peak_count is not None else 0
 
-                day_key = date.strftime("%Y-%m-%d")
-
-                chart_entry = ChartData(
-                    chart_type="online_users",
-                    period_type="7d",
-                    time_key=day_key,
-                    time_start=date,
-                    time_end=date + timedelta(days=1),
-                    metrics={"avg_count": avg_count},
-                    primary_value=avg_count,
-                )
-                self.database_handler.save_chart_data_entry(chart_entry)
+                    chart_entry = ChartData(
+                        chart_type="online_users",
+                        period_type="7d",
+                        time_key=date.strftime("%Y-%m-%d"),
+                        time_start=date,
+                        time_end=day_end,
+                        metrics={
+                            "avg_count": round(daily_average, 2),
+                            "peak_count": daily_peak,
+                            "samples": sample_count,
+                        },
+                        primary_value=round(daily_average, 2),
+                    )
+                    self.database_handler.save_chart_data_entry(chart_entry)
 
         except Exception as e:
             logger.error(f"Failed to update online users chart: {str(e)}")

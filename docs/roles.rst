@@ -46,7 +46,7 @@ includes:
 - ``view_messages``
 - ``manage_server_settings``
 - ``manage_server_privileges``
-- ``manage_cdn``
+- ``manage_storage``
 - ``view_server_stats``
 - ``ban_users``
 - ``mute_users``
@@ -118,7 +118,7 @@ Custom roles now affect real server behavior. Examples:
 - ``view_server_stats`` allows access to activity metrics and overview data
 - ``view_audit_logs`` allows access to recent activity logs
 - ``manage_blocked_ips`` allows blocked IP list, block, and unblock operations
-- ``upload_files``, ``view_files``, ``delete_files``, and ``manage_cdn`` back
+- ``upload_files``, ``view_files``, ``delete_files``, and ``manage_storage`` back
   storage operations
 - ``manage_background_tasks`` allows background task status and on-demand task execution
 

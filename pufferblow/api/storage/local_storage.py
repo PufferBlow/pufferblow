@@ -11,6 +11,7 @@ import psutil
 from fastapi import HTTPException
 
 from .storage_backend import StorageBackend
+from .path_utils import normalize_storage_relative_path, resolve_local_storage_path
 
 
 class LocalStorageBackend(StorageBackend):
@@ -39,6 +40,7 @@ class LocalStorageBackend(StorageBackend):
         self, content: bytes, path: str, metadata: dict[str, Any] | None = None
     ) -> str:
         """Upload file to local storage"""
+        normalized_path = normalize_storage_relative_path(path)
         file_size = len(content)
 
         # Check space availability
@@ -50,7 +52,7 @@ class LocalStorageBackend(StorageBackend):
             )
 
         # Create full file path
-        full_path = self.storage_path / path
+        full_path = resolve_local_storage_path(self.storage_path, normalized_path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write file
@@ -58,11 +60,11 @@ class LocalStorageBackend(StorageBackend):
             f.write(content)
 
         # Return full URL with host:port
-        return f"http://{self.api_host}:{self.api_port}{self.base_url}/{path}"
+        return f"http://{self.api_host}:{self.api_port}{self.base_url}/{normalized_path}"
 
     async def download_file(self, path: str) -> bytes:
         """Download file from local storage"""
-        full_path = self.storage_path / path
+        full_path = resolve_local_storage_path(self.storage_path, path)
 
         if not full_path.exists():
             raise HTTPException(status_code=404, detail="File not found")
@@ -72,7 +74,7 @@ class LocalStorageBackend(StorageBackend):
 
     async def delete_file(self, path: str) -> bool:
         """Delete file from local storage"""
-        full_path = self.storage_path / path
+        full_path = resolve_local_storage_path(self.storage_path, path)
 
         if full_path.exists():
             full_path.unlink()
@@ -81,16 +83,21 @@ class LocalStorageBackend(StorageBackend):
 
     async def file_exists(self, path: str) -> bool:
         """Check if file exists"""
-        full_path = self.storage_path / path
+        full_path = resolve_local_storage_path(self.storage_path, path)
         return full_path.exists()
 
     async def get_file_url(self, path: str, expires_in: int | None = None) -> str:
         """Get file URL (local files don't expire)"""
-        return f"http://{self.api_host}:{self.api_port}{self.base_url}/{path}"
+        normalized_path = normalize_storage_relative_path(path)
+        return f"http://{self.api_host}:{self.api_port}{self.base_url}/{normalized_path}"
 
     async def list_files(self, prefix: str = "") -> list[str]:
         """List files with prefix"""
-        search_path = self.storage_path / prefix if prefix else self.storage_path
+        search_path = (
+            resolve_local_storage_path(self.storage_path, prefix)
+            if prefix
+            else self.storage_path
+        )
 
         if not search_path.exists():
             return []

@@ -7,6 +7,7 @@ import hashlib
 
 from loguru import logger
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.database.tables.activity_metrics import ActivityMetrics
@@ -69,9 +70,17 @@ class DatabaseMetricsFilesMixin:
             return result.scalar() if result.scalar() is not None else 0
 
     def save_chart_data_entry(self, chart_data_entry: ChartData) -> None:
-        """Save a chart data entry"""
+        """Insert or update a chart data entry by logical chart key."""
         with self.database_session() as session:
-            # Check if entry already exists to avoid duplicates
+            def apply_entry(target: ChartData) -> None:
+                target.time_start = self._coerce_datetime(chart_data_entry.time_start)
+                target.time_end = self._coerce_datetime(chart_data_entry.time_end)
+                target.metrics = chart_data_entry.metrics
+                target.primary_value = chart_data_entry.primary_value
+                target.updated_at = self._coerce_datetime(
+                    getattr(chart_data_entry, "updated_at", None)
+                )
+
             existing = (
                 session.query(ChartData)
                 .filter(
@@ -82,8 +91,36 @@ class DatabaseMetricsFilesMixin:
                 .first()
             )
 
-            if not existing:
+            if existing:
+                apply_entry(existing)
+            else:
+                chart_data_entry.time_start = self._coerce_datetime(chart_data_entry.time_start)
+                chart_data_entry.time_end = self._coerce_datetime(chart_data_entry.time_end)
+                chart_data_entry.created_at = self._coerce_datetime(
+                    getattr(chart_data_entry, "created_at", None)
+                )
+                chart_data_entry.updated_at = self._coerce_datetime(
+                    getattr(chart_data_entry, "updated_at", None)
+                )
                 session.add(chart_data_entry)
+
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                existing = (
+                    session.query(ChartData)
+                    .filter(
+                        ChartData.chart_type == chart_data_entry.chart_type,
+                        ChartData.period_type == chart_data_entry.period_type,
+                        ChartData.time_key == chart_data_entry.time_key,
+                    )
+                    .first()
+                )
+                if existing is None:
+                    raise
+
+                apply_entry(existing)
                 session.commit()
 
     def get_chart_data_entries(
@@ -154,7 +191,6 @@ class DatabaseMetricsFilesMixin:
                 "idle": idle_count,
                 "dnd": dnd_count,
                 "afk": afk_count,
-                "away": afk_count,  # Backward-compatible alias for older consumers.
                 "other": other_count,
             }
 
@@ -290,9 +326,10 @@ class DatabaseMetricsFilesMixin:
 
             # Get online user stats
             online_avg = (
-                session.query(func.avg(ChartData.value))
+                session.query(func.avg(ChartData.primary_value))
                 .filter(
                     ChartData.chart_type == "online_users",
+                    ChartData.period_type == "hourly",
                     ChartData.time_start >= today,
                     ChartData.time_start < tomorrow,
                 )
@@ -301,15 +338,21 @@ class DatabaseMetricsFilesMixin:
             )
 
             online_peak = (
-                session.query(func.max(ChartData.value))
+                session.query(func.max(ChartData.primary_value))
                 .filter(
                     ChartData.chart_type == "online_users",
+                    ChartData.period_type == "hourly",
                     ChartData.time_start >= today,
                     ChartData.time_start < tomorrow,
                 )
                 .scalar()
                 or 0
             )
+
+            if not online_avg and not online_peak:
+                current_online = self.get_current_online_count()
+                online_avg = float(current_online)
+                online_peak = current_online
 
             # Get total users at end of day
             total_users = self.count_users()

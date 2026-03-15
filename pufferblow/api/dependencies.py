@@ -65,6 +65,7 @@ def get_current_user(auth_token: str) -> str:
     moderation_state = api_initializer.user_manager.get_user_moderation_state(
         user_id=user_id
     )
+    
     if moderation_state.get("is_banned"):
         logger.warning("AUTH_VALIDATE_BANNED user_id={user_id}", user_id=user_id)
         raise HTTPException(

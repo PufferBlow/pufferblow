@@ -40,6 +40,7 @@ class SetupWizardResult:
     server_welcome_message: str
     owner_username: str
     owner_password: str
+    security_config: dict[str, object] | None = None
     media_sfu_config: dict[str, str | int] | None = None
 
 
@@ -193,6 +194,46 @@ def _get_owner_config() -> dict[str, str] | None:
         return None
 
 
+def _get_security_config() -> dict[str, object] | None:
+    """Prompt for CORS settings stored in the shared config.toml."""
+    console.print("\n[bold cyan]Client Access (CORS)[/bold cyan]")
+    console.print("1. Allow any web client origin")
+    console.print("2. Allow one client origin")
+
+    try:
+        while True:
+            choice = typer.prompt("Select option", type=int)
+            if choice == 1:
+                return {
+                    "cors_origin_regex": ".*",
+                    "cors_origins": [],
+                    "cors_allow_credentials": True,
+                    "cors_allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                    "cors_allow_headers": ["*"],
+                }
+
+            if choice == 2:
+                client_origin = typer.prompt(
+                    "Client origin (include scheme and port when needed)",
+                    default="http://localhost:5173",
+                ).strip()
+                if not client_origin:
+                    console.print("[red]Please enter a client origin[/red]")
+                    continue
+
+                return {
+                    "cors_origin_regex": None,
+                    "cors_origins": [client_origin],
+                    "cors_allow_credentials": True,
+                    "cors_allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                    "cors_allow_headers": ["*"],
+                }
+
+            console.print("[red]Invalid choice. Please try again.[/red]")
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
 def _confirm_test_database(host: str, port: str, username: str, password: str, database: str) -> bool:
     """Prompt to test database connection."""
     try:
@@ -303,12 +344,17 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
                 server_welcome_message="",
                 owner_username="",
                 owner_password="",
+                security_config=None,
                 media_sfu_config=media_sfu_config,
             )
 
         # Step 2: Server configuration (needed for all other modes)
         server_config = _get_server_config()
         if server_config is None:
+            return None
+
+        security_config = _get_security_config()
+        if security_config is None:
             return None
 
         # For server-only or update modes, we're done!
@@ -325,6 +371,7 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
                 server_welcome_message=server_config["server_welcome_message"],
                 owner_username="",
                 owner_password="",
+                security_config=security_config,
             )
 
         # Step 3: Database configuration (full setup only)
@@ -370,6 +417,12 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
         console.print(f"  Server name: {server_config['server_name']}")
         console.print(f"  Database: {db_config['username']}@{db_config['host']}:{db_config['port']}/{db_config['database_name']}")
         console.print(f"  Owner user: {owner_config['owner_username']}")
+        cors_summary = (
+            "Any web client origin"
+            if security_config.get("cors_origin_regex")
+            else ", ".join(str(value) for value in security_config.get("cors_origins", []))
+        )
+        console.print(f"  Allowed client origin(s): {cors_summary}")
 
         if not typer.confirm("\nProceed with setup?", default=True):
             console.print("[dim]Setup cancelled.[/dim]")
@@ -387,6 +440,7 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
             server_welcome_message=server_config["server_welcome_message"],
             owner_username=owner_config["owner_username"],
             owner_password=owner_config["owner_password"],
+            security_config=security_config,
         )
     except (EOFError, KeyboardInterrupt):
         console.print("\n[dim]Setup cancelled.[/dim]")

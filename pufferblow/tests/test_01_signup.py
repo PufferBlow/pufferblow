@@ -1,11 +1,10 @@
+import uuid
+
 from fastapi.testclient import TestClient
 
 # Middlewares
 from pufferblow.tests.conftest import ValueStorage
 
-# NOTE: The tests won't function now that we have added
-# a middleware to handle security. So we need to figure
-# a way to fix that.
 
 route = "/api/v1/users/signup"
 
@@ -26,7 +25,11 @@ def test_signup_username_duplicate_exception(client: TestClient):
     """Test the exception that will get raised if the username
     used is repeated or duplicated
     """
-    data = {"username": ValueStorage.username, "password": ValueStorage.password}
+    username = f"duplicate_{uuid.uuid4().hex[:8]}"
+    data = {"username": username, "password": ValueStorage.password}
+
+    first_response = client.post(route, json=data)
+    assert first_response.status_code == 201
 
     response = client.post(route, json=data)
 

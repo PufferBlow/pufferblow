@@ -29,14 +29,6 @@ except ImportError:
     STORAGE_AVAILABLE = False
     StorageManager = None
 
-try:
-    from pufferblow.api.cdn.cdn_manager import CDNManager
-
-    CDN_AVAILABLE = True
-except ImportError:
-    CDN_AVAILABLE = False
-    CDNManager = None
-
 
 class APIInitializer:
     """
@@ -60,7 +52,6 @@ class APIInitializer:
         self.websockets_manager: WebSocketsManager | None = None
         self.voice_session_manager: VoiceSessionManager | None = None
         self.storage_manager: StorageManager | None = None
-        self.cdn_manager: CDNManager | None = None
         self.background_tasks_manager: BackgroundTasksManager | None = None
         self.security_checks_handler: SecurityChecksHandler | None = None
         self.decentralized_auth_manager: DecentralizedAuthManager | None = None
@@ -177,22 +168,6 @@ class APIInitializer:
             logger.warning(
                 "Storage manager not available - file upload features are disabled."
             )
-
-        if CDN_AVAILABLE and CDNManager:
-            try:
-                self.cdn_manager = CDNManager(
-                    database_handler=self.database_handler,
-                    config=self.config,
-                )
-                self.cdn_manager.update_server_limits()
-            except Exception as exc:
-                self.cdn_manager = None
-                logger.warning(
-                    "CDN manager not available - legacy CDN features are disabled. reason={reason}",
-                    reason=str(exc),
-                )
-        else:
-            self.cdn_manager = None
 
         self.background_tasks_manager = BackgroundTasksManager(
             database_handler=self.database_handler,

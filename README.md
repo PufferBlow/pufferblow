@@ -95,7 +95,7 @@ Custom roles are composed from the existing privilege catalog. Current built-in 
 - `view_messages`
 - `manage_server_settings`
 - `manage_server_privileges`
-- `manage_cdn`
+- `manage_storage`
 - `view_server_stats`
 - `ban_users`
 - `mute_users`
@@ -148,7 +148,7 @@ Custom roles now affect real server behavior. Examples:
 - `view_server_stats` allows control-panel metrics/overview access
 - `view_audit_logs` allows recent-activity access
 - `manage_blocked_ips` allows blocked-IP management
-- `upload_files`, `view_files`, `delete_files`, and `manage_cdn` back storage operations
+- `upload_files`, `view_files`, `delete_files`, and `manage_storage` back storage operations
 - `manage_background_tasks` allows background-task status and on-demand execution
 
 ## Contributors

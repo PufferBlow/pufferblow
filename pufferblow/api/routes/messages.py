@@ -10,7 +10,6 @@ This module handles all message-related operations including:
 
 import mimetypes
 from datetime import datetime
-from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
 from loguru import logger
 
@@ -26,6 +25,7 @@ from pufferblow.api.dependencies import (
     require_privilege,
 )
 from pufferblow.core.bootstrap import api_initializer
+from pufferblow.api.storage.path_utils import extract_local_media_path, is_sha256_hash
 
 # Create router for message-related endpoints
 router = APIRouter(prefix="/api/v1/channels/{channel_id}")
@@ -64,7 +64,13 @@ def _extract_storage_hash(storage_url: str) -> str | None:
     if not storage_url:
         return None
 
-    path = urlparse(storage_url).path if "://" in storage_url else storage_url
+    path = extract_local_media_path(
+        storage_url,
+        api_host=api_initializer.config.API_HOST,
+        api_port=api_initializer.config.API_PORT,
+    )
+    if not path:
+        return None
     storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
     if not path.startswith(f"{storage_base}/"):
         return None
@@ -72,7 +78,7 @@ def _extract_storage_hash(storage_url: str) -> str | None:
     suffix = path[len(storage_base) + 1 :]
     if "/" in suffix:
         return None
-    if len(suffix) != 64:
+    if not is_sha256_hash(suffix):
         return None
     return suffix
 
@@ -91,7 +97,14 @@ def _serialize_attachment(storage_url: str) -> dict:
             }
 
     fallback_name = (
-        (urlparse(storage_url).path if "://" in storage_url else storage_url)
+        (
+            extract_local_media_path(
+                storage_url,
+                api_host=api_initializer.config.API_HOST,
+                api_port=api_initializer.config.API_PORT,
+            )
+            or storage_url
+        )
         .rstrip("/")
         .split("/")[-1]
         or "attachment"

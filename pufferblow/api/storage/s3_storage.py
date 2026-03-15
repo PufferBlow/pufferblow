@@ -11,6 +11,7 @@ import botocore.exceptions
 from fastapi import HTTPException
 
 from .storage_backend import StorageBackend
+from .path_utils import normalize_storage_relative_path
 
 
 class S3StorageBackend(StorageBackend):
@@ -64,6 +65,7 @@ class S3StorageBackend(StorageBackend):
         self, content: bytes, path: str, metadata: dict[str, Any] | None = None
     ) -> str:
         """Upload file to S3"""
+        normalized_path = normalize_storage_relative_path(path)
         try:
             # Prepare metadata
             s3_metadata = {}
@@ -73,11 +75,14 @@ class S3StorageBackend(StorageBackend):
 
             # Upload file
             self.s3_client.put_object(
-                Bucket=self.bucket_name, Key=path, Body=content, Metadata=s3_metadata
+                Bucket=self.bucket_name,
+                Key=normalized_path,
+                Body=content,
+                Metadata=s3_metadata,
             )
 
             # Return full URL instead of just path
-            return await self.get_file_url(path)
+            return await self.get_file_url(normalized_path)
 
         except botocore.exceptions.ClientError as e:
             raise HTTPException(
@@ -87,8 +92,12 @@ class S3StorageBackend(StorageBackend):
 
     async def download_file(self, path: str) -> bytes:
         """Download file from S3"""
+        normalized_path = normalize_storage_relative_path(path)
         try:
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=path)
+            response = self.s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=normalized_path,
+            )
             return response["Body"].read()
         except self.s3_client.exceptions.NoSuchKey:
             raise HTTPException(status_code=404, detail="File not found")
@@ -100,16 +109,18 @@ class S3StorageBackend(StorageBackend):
 
     async def delete_file(self, path: str) -> bool:
         """Delete file from S3"""
+        normalized_path = normalize_storage_relative_path(path)
         try:
-            self.s3_client.delete_object(Bucket=self.bucket_name, Key=path)
+            self.s3_client.delete_object(Bucket=self.bucket_name, Key=normalized_path)
             return True
         except botocore.exceptions.ClientError:
             return False
 
     async def file_exists(self, path: str) -> bool:
         """Check if file exists in S3"""
+        normalized_path = normalize_storage_relative_path(path)
         try:
-            self.s3_client.head_object(Bucket=self.bucket_name, Key=path)
+            self.s3_client.head_object(Bucket=self.bucket_name, Key=normalized_path)
             return True
         except self.s3_client.exceptions.NoSuchKey:
             return False
@@ -118,20 +129,24 @@ class S3StorageBackend(StorageBackend):
 
     async def get_file_url(self, path: str, expires_in: int | None = None) -> str:
         """Get signed URL for S3 file"""
+        normalized_path = normalize_storage_relative_path(path)
         try:
             if expires_in:
                 # Generate signed URL
                 url = self.s3_client.generate_presigned_url(
                     "get_object",
-                    Params={"Bucket": self.bucket_name, "Key": path},
+                    Params={"Bucket": self.bucket_name, "Key": normalized_path},
                     ExpiresIn=expires_in,
                 )
             else:
                 # Use public URL (assumes bucket/objects are public)
                 if self.endpoint_url:
-                    url = f"{self.endpoint_url}/{self.bucket_name}/{path}"
+                    url = f"{self.endpoint_url}/{self.bucket_name}/{normalized_path}"
                 else:
-                    url = f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{path}"
+                    url = (
+                        f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/"
+                        f"{normalized_path}"
+                    )
 
             return url
 

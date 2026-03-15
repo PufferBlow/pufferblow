@@ -613,16 +613,6 @@ class UserManager:
         """
         from pufferblow.core.bootstrap import api_initializer
 
-        # Get server settings for limits
-        server_settings = self.database_handler.get_server_settings()
-        allowed_extensions = server_settings.allowed_images_extensions or [
-            "png",
-            "jpg",
-            "jpeg",
-            "gif",
-            "webp",
-        ]
-
         # Validate and save the avatar file with duplicate checking
         avatar_url, is_duplicate = (
             await api_initializer.storage_manager.validate_and_save_categorized_file(
@@ -769,16 +759,6 @@ class UserManager:
             tuple[str, bool]: (URL of the uploaded banner, is_duplicate)
         """
         from pufferblow.core.bootstrap import api_initializer
-
-        # Get server settings for limits
-        server_settings = self.database_handler.get_server_settings()
-        allowed_extensions = server_settings.allowed_images_extensions or [
-            "png",
-            "jpg",
-            "jpeg",
-            "gif",
-            "webp",
-        ]
 
         # Validate and save the banner file with duplicate checking
         banner_url, is_duplicate = (
@@ -949,4 +929,3 @@ class UserManager:
         logger.debug(debug.DEBUG_NEW_USER_ID_GENERATED(user_id=str(generated_uuid)))
 
         return str(generated_uuid)
-

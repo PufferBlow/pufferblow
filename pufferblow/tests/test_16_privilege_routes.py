@@ -225,7 +225,7 @@ def test_storage_privileges_gate_list_file_info_delete_and_cleanup(
         client,
         owner_token,
         "Storage Operators",
-        ["view_files", "delete_files", "manage_cdn"],
+        ["view_files", "delete_files", "manage_storage"],
     )
     _assign_role(client, owner_token, str(member.user_id), role_id)
 

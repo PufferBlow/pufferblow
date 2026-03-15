@@ -218,7 +218,7 @@ also mirrors SFU health into:
 - `GET /readyz`
 - `GET /api/v1/system/instance-health`
 
-## 10. Storage, CDN, and SSE Encryption
+## 10. Storage and SSE Encryption
 
 `StorageManager` supports local/S3 backends and server-side encryption (SSE):
 
@@ -226,7 +226,7 @@ also mirrors SFU health into:
 - AES-256-GCM for content encryption/decryption
 - Key sourced from config/env and normalized to 32 bytes
 
-Storage APIs live under `/api/v1/storage/*` with compatibility file serving routes (`/api/v1/cdn/file/...`, `/api/v1/storage/file/...`, `/storage/{file_hash}`).
+Storage APIs live under `/api/v1/storage/*`, and canonical file URLs are served from `/storage/{file_hash}`.
 
 Related tables:
 
@@ -248,7 +248,7 @@ Core entities:
 - `users`, `channels`, `messages`
 - `message_read_history`
 - `server`, `server_settings`
-- `auth_tokens` (refresh/legacy token storage support)
+- `auth_tokens`
 - moderation/activity tables (`blocked_ips`, `activity_audit`, `activity_metrics`, `chart_data`)
 - federation tables (`decentralized_*`, `activitypub_*`)
 - storage tables (`file_objects`, `file_references`)

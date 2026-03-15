@@ -6,7 +6,6 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 from fastapi import Form, HTTPException
 from loguru import logger
@@ -14,6 +13,11 @@ from pydantic import BaseModel, Field
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.schemas import UploadAuthForm
+from pufferblow.api.storage.path_utils import (
+    extract_local_media_path,
+    is_sha256_hash,
+    normalize_storage_relative_path,
+)
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.core.bootstrap import api_initializer
 
@@ -185,23 +189,24 @@ def log_activity(
         logger.warning("Failed to create activity audit entry: {}", exc)
 
 
-def _is_hash(value: str) -> bool:
-    """Check if a string looks like a SHA-256 hash."""
-    return len(value) == 64 and all(c in "0123456789abcdef" for c in value.lower())
-
-
 def extract_storage_hash(storage_url: str | None) -> str | None:
     """Extract hash from canonical storage URL (`/storage/<hash>`)."""
     if not storage_url or api_initializer.config is None:
         return None
 
-    path = urlparse(storage_url).path if "://" in storage_url else storage_url
+    path = extract_local_media_path(
+        storage_url,
+        api_host=api_initializer.config.API_HOST,
+        api_port=api_initializer.config.API_PORT,
+    )
+    if not path:
+        return None
     base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
     if not path.startswith(f"{base}/"):
         return None
 
     suffix = path[len(base) + 1 :]
-    if "/" in suffix or not _is_hash(suffix):
+    if "/" in suffix or not is_sha256_hash(suffix):
         return None
     return suffix
 
@@ -211,9 +216,14 @@ def resolve_storage_relative_path(storage_url: str | None) -> str | None:
     if not storage_url or api_initializer.config is None:
         return None
 
-    path = urlparse(storage_url).path if "://" in storage_url else storage_url
+    path = extract_local_media_path(
+        storage_url,
+        api_host=api_initializer.config.API_HOST,
+        api_port=api_initializer.config.API_PORT,
+    )
+    if not path:
+        return None
     base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
-
     file_hash = extract_storage_hash(path)
     if file_hash:
         database_handler = require_component("database_handler")
@@ -221,12 +231,20 @@ def resolve_storage_relative_path(storage_url: str | None) -> str | None:
         return file_object.file_path if file_object else None
 
     if path.startswith("/api/v1/storage/file/"):
-        return path.replace("/api/v1/storage/file/", "", 1).lstrip("/") or None
+        try:
+            return normalize_storage_relative_path(
+                path.replace("/api/v1/storage/file/", "", 1).lstrip("/")
+            )
+        except ValueError:
+            return None
 
     if path.startswith(f"{base}/"):
         suffix = path[len(base) + 1 :]
         if "/" in suffix:
-            return suffix
+            try:
+                return normalize_storage_relative_path(suffix)
+            except ValueError:
+                return None
 
     return None
 

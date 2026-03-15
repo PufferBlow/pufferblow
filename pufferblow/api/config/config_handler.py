@@ -163,6 +163,12 @@ class ConfigHandler:
             if isinstance(security_config, dict)
             else None
         )
+        cors_origin_regex = (
+            str(security_config.get("cors_origin_regex", "")).strip()
+            if isinstance(security_config, dict)
+            else ""
+        )
+        config.CORS_ALLOWED_ORIGIN_REGEX = cors_origin_regex or None
         config.CORS_ALLOWED_METHODS = _config_list(
             security_config.get("cors_allow_methods")
             if isinstance(security_config, dict)
@@ -239,6 +245,7 @@ class ConfigHandler:
         self,
         database_config: dict[str, str] | None = None,
         media_sfu_config: dict[str, object] | None = None,
+        security_config: dict[str, object] | None = None,
     ) -> None:
         """
         Write or update the shared Pufferblow config.toml.
@@ -247,6 +254,7 @@ class ConfigHandler:
             database_config: Dict with keys like host, port, username, password, database
             media_sfu_config: Dict for the shared config [media-sfu] section
                 (bootstrap_secret, bind_addr, and related SFU settings)
+            security_config: Dict for the shared config [security] section
         """
         # Read existing config if it exists
         existing_config = self._load_config_toml()
@@ -258,6 +266,17 @@ class ConfigHandler:
         # Update the shared config [media-sfu] section if provided.
         if media_sfu_config:
             existing_config["media-sfu"] = media_sfu_config
+
+        if security_config:
+            current_security = existing_config.get("security", {})
+            if not isinstance(current_security, dict):
+                current_security = {}
+            for key, value in security_config.items():
+                if value is None:
+                    current_security.pop(key, None)
+                    continue
+                current_security[key] = value
+            existing_config["security"] = current_security
         
         # Convert to TOML and write
         toml_content = self._dict_to_toml_string(existing_config)
@@ -280,15 +299,18 @@ class ConfigHandler:
 
     def _format_toml_line(self, key: str, value: object) -> str:
         """Format a single key-value pair for TOML."""
+        return f"{key} = {self._format_toml_value(value)}"
+
+    def _format_toml_value(self, value: object) -> str:
+        """Format a TOML value with basic support for arrays."""
         if isinstance(value, str):
-            # Escape backslashes and quotes
             escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-            return f'{key} = "{escaped}"'
-        elif isinstance(value, bool):
-            return f"{key} = {str(value).lower()}"
-        elif isinstance(value, (int, float)):
-            return f"{key} = {value}"
-        elif isinstance(value, list):
-            return f"{key} = {value}"
-        else:
-            return f'{key} = "{value}"'
+            return f'"{escaped}"'
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, (list, tuple)):
+            rendered_items = ", ".join(self._format_toml_value(item) for item in value)
+            return f"[{rendered_items}]"
+        return f'"{value}"'

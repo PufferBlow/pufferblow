@@ -76,7 +76,7 @@ The API provides REST endpoints across several main categories:
 **Messaging** (``/api/v1/channels/{channel_id}``)
     Send messages, load message history, upload attachments
 
-**File Management** (``/api/v1/cdn``)
+**File Management** (``/api/v1/storage``)
     File uploads, downloads, organization, duplicate handling
 
 **Server Administration** (``/api/v1/system``)

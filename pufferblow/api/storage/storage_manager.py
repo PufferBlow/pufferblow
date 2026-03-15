@@ -19,6 +19,7 @@ from PIL import Image
 from pufferblow.api.database.database_handler import DatabaseHandler
 
 from .local_storage import LocalStorageBackend
+from .path_utils import normalize_storage_relative_path
 from .s3_storage import S3StorageBackend
 from .storage_backend import StorageBackend
 
@@ -137,7 +138,8 @@ class StorageManager:
         """
         Read and transparently decrypt storage content.
         """
-        stored_content = await self.backend.download_file(file_path)
+        normalized_path = normalize_storage_relative_path(file_path)
+        stored_content = await self.backend.download_file(normalized_path)
         return self._decrypt_from_storage(stored_content)
 
     def _create_backend(self) -> StorageBackend:
@@ -189,13 +191,43 @@ class StorageManager:
         else:
             return "files"
 
-    def find_duplicate_by_hash(
-        self, file_hash: str, subdirectory: str
-    ) -> str | None:
-        """Check if file with same hash exists"""
-        # This would require maintaining a hash index in the database
-        # For now, return None (no duplicate checking)
-        return None
+    def find_duplicate_by_hash(self, file_hash: str) -> tuple[str, str] | None:
+        """Resolve an existing stored file by content hash."""
+        file_object = self.database_handler.get_file_object_by_hash(file_hash)
+        if not file_object:
+            return None
+
+        try:
+            relative_path = normalize_storage_relative_path(file_object.file_path)
+        except ValueError:
+            return None
+
+        storage_base_url = str(self.config.get("base_url", "/storage")).rstrip("/")
+        return relative_path, f"{storage_base_url}/{file_hash}"
+
+    def _register_storage_reference(
+        self,
+        *,
+        file_hash: str,
+        user_id: str,
+        reference_type: str,
+        reference_id: str | None = None,
+    ) -> None:
+        """Create a reference row and keep the ref_count in sync."""
+        try:
+            self.database_handler.increment_file_reference_count(file_hash)
+        except Exception:
+            pass
+
+        try:
+            self.database_handler.create_file_reference(
+                reference_id=reference_id or f"{reference_type}_{uuid.uuid4()}",
+                file_hash=file_hash,
+                reference_type=reference_type,
+                reference_entity_id=user_id,
+            )
+        except Exception:
+            pass
 
     async def validate_and_save_categorized_file(
         self,
@@ -305,14 +337,21 @@ class StorageManager:
         file_hash = ""
         if check_duplicates and len(content) > 0:
             file_hash = self.compute_file_hash(content)
-            existing_url = self.find_duplicate_by_hash(file_hash, subdirectory)
-            if existing_url:
-                return existing_url, True
+            duplicate = self.find_duplicate_by_hash(file_hash)
+            if duplicate:
+                existing_path, existing_url = duplicate
+                if await self.backend.file_exists(existing_path):
+                    self._register_storage_reference(
+                        file_hash=file_hash,
+                        user_id=user_id,
+                        reference_type="storage_upload",
+                    )
+                    return existing_url, True
 
         # Generate unique filename
         file_id = str(uuid.uuid4())
         new_filename = f"{file_id}.{extension}"
-        storage_path = f"{subdirectory}/{new_filename}"
+        storage_path = normalize_storage_relative_path(f"{subdirectory}/{new_filename}")
 
         # Encrypt content (if SSE enabled) before upload to storage backend
         stored_content = self._encrypt_for_storage(content)
@@ -332,18 +371,27 @@ class StorageManager:
                 mime_type=mime_type,
                 verification_status="verified",
             )
-
-            reference_id = f"storage_upload_{file_id}"
             self.database_handler.create_file_reference(
-                reference_id=reference_id,
+                reference_id=f"storage_upload_{file_id}",
                 file_hash=file_hash,
                 reference_type="storage_upload",
                 reference_entity_id=user_id,
             )
-
         except Exception:
-            # Log error but don't fail upload
-            pass
+            existing = self.find_duplicate_by_hash(file_hash)
+            if existing:
+                existing_path, existing_url = existing
+                try:
+                    if storage_path != existing_path:
+                        await self.backend.delete_file(storage_path)
+                except Exception:
+                    pass
+                self._register_storage_reference(
+                    file_hash=file_hash,
+                    user_id=user_id,
+                    reference_type="storage_upload",
+                )
+                return existing_url, True
 
         # Trigger image optimization for supported image types (avatars, banners, attachments)
         # This runs asynchronously as a background task
@@ -386,15 +434,17 @@ class StorageManager:
 
     async def delete_file(self, file_path: str) -> bool:
         """Delete file from storage"""
-        return await self.backend.delete_file(file_path)
+        normalized_path = normalize_storage_relative_path(file_path)
+        return await self.backend.delete_file(normalized_path)
 
     async def get_file_info(self, file_path: str) -> dict[str, Any] | None:
         """Get file information"""
-        if not await self.backend.file_exists(file_path):
+        normalized_path = normalize_storage_relative_path(file_path)
+        if not await self.backend.file_exists(normalized_path):
             return None
 
         # For now, return basic info
-        return {"path": file_path, "exists": True}
+        return {"path": normalized_path, "exists": True}
 
     async def cleanup_orphaned_files(
         self, valid_files: list[str], subdirectory: str = "files"

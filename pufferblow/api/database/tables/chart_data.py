@@ -85,10 +85,10 @@ class ChartData(Base):
         Returns:
             ChartData: The created chart data entry
         """
-        from datetime import datetime
+        from datetime import datetime, timedelta
 
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow = today.replace(day=today.day + 1)
+        tomorrow = today + timedelta(days=1)
 
         metrics = {metric_name: value}
         if additional_metrics:

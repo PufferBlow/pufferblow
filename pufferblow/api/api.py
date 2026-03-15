@@ -29,11 +29,12 @@ def _mount_static_routes() -> None:
     return
 
 
-def _load_cors_settings() -> tuple[list[str], bool, list[str], list[str]]:
+def _load_cors_settings() -> tuple[list[str], str | None, bool, list[str], list[str]]:
     """Load CORS middleware settings from the shared config.toml."""
     config = ConfigHandler().build_bootstrap_config()
     return (
         list(config.CORS_ALLOWED_ORIGINS),
+        config.CORS_ALLOWED_ORIGIN_REGEX,
         config.CORS_ALLOW_CREDENTIALS,
         list(config.CORS_ALLOWED_METHODS),
         list(config.CORS_ALLOWED_HEADERS),
@@ -68,20 +69,25 @@ async def lifespan(app: FastAPI):
 
 api = FastAPI(lifespan=lifespan)
 
-cors_origins, cors_allow_credentials, cors_allow_methods, cors_allow_headers = (
-    _load_cors_settings()
-)
-if cors_origins:
+(
+    cors_origins,
+    cors_origin_regex,
+    cors_allow_credentials,
+    cors_allow_methods,
+    cors_allow_headers,
+) = _load_cors_settings()
+if cors_origins or cors_origin_regex:
     api.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
+        allow_origin_regex=cors_origin_regex,
         allow_credentials=cors_allow_credentials,
         allow_methods=cors_allow_methods,
         allow_headers=cors_allow_headers,
     )
 else:
     logger.warning(
-        "CORS middleware disabled because [security].cors_origins is not set in ~/.pufferblow/config.toml"
+        "CORS middleware disabled because [security].cors_origins or [security].cors_origin_regex is not set in ~/.pufferblow/config.toml"
     )
 
 api.add_middleware(SecurityMiddleware)

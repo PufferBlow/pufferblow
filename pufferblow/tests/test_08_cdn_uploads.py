@@ -1,4 +1,5 @@
 import io
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -7,13 +8,19 @@ from PIL import Image
 from pufferblow.tests.conftest import ValueStorage
 
 
-class TestCDNUploads:
-    """Test cases for CDN file upload functionality"""
+class TestStorageUploads:
+    """Test cases for storage-backed file upload functionality."""
 
     @pytest.fixture(autouse=True)
-    def setup_method(self):
+    def setup_method(self, client: TestClient):
         """Set up test data"""
-        self.auth_token = ValueStorage.auth_token
+        username = f"storage_user_{uuid.uuid4().hex[:8]}"
+        response = client.post(
+            "/api/v1/users/signup",
+            json={"username": username, "password": "12345678"},
+        )
+        assert response.status_code == 201
+        self.auth_token = response.json()["auth_token"]
         self.moke_auth_token = ValueStorage.moke_auth_token
 
     def test_upload_avatar_success(self, client: TestClient):
@@ -34,7 +41,7 @@ class TestCDNUploads:
         assert response_data["status_code"] == 201
         assert response_data["message"] == "Avatar uploaded successfully"
         assert "avatar_url" in response_data
-        assert response_data["avatar_url"].startswith("/cdn/avatars/")
+        assert response_data["avatar_url"].startswith("/storage/")
 
     def test_upload_banner_success(self, client: TestClient):
         """Test successful banner upload"""
@@ -54,7 +61,7 @@ class TestCDNUploads:
         assert response_data["status_code"] == 201
         assert response_data["message"] == "Banner uploaded successfully"
         assert "banner_url" in response_data
-        assert response_data["banner_url"].startswith("/cdn/banners/")
+        assert response_data["banner_url"].startswith("/storage/")
 
     def test_upload_avatar_large_file_error(self, client: TestClient):
         """Test file too large error"""
@@ -133,7 +140,7 @@ class TestCDNUploads:
 
         assert response.status_code == 404
 
-    def test_cdn_file_serving(self, client: TestClient):
+    def test_storage_file_serving(self, client: TestClient):
         """Test that uploaded files are served correctly"""
         # First upload an avatar
         test_image = Image.new("RGB", (50, 50), color="orange")
@@ -154,7 +161,7 @@ class TestCDNUploads:
         # Now try to serve the file
         serve_response = client.get(avatar_url)
 
-        # The CDN is mounted, so this should serve the file
+        # Storage routes should serve the uploaded file
         # Note: In testing, the actual file serving might be mocked
         assert serve_response.status_code in [
             200,
@@ -181,21 +188,22 @@ class TestCDNUploads:
 
             # If the dimension check triggers, there will be an error
             if response.status_code == 400:
-                assert "dimensions too large" in response.json()["detail"]
+                assert response.json()["detail"] in {
+                    "Image dimensions too large",
+                    "Invalid image file",
+                }
 
         except MemoryError:
             # PIL might fail to create very large images - that's expected
             pass
 
     def test_server_settings_integration(self, client: TestClient):
-        """Test that CDN respects server settings"""
-        # This would ideally test that the CDN is using database settings
-        # For now, we verify the CDN manager loads settings successfully
+        """Test that storage manager respects server settings."""
+        # This verifies the storage manager loads settings successfully.
 
         from pufferblow.core.bootstrap import api_initializer
 
-        # Ensure CDN manager has server settings loaded
-        assert api_initializer.cdn_manager.MAX_IMAGE_SIZE_MB == 5  # Default
+        assert api_initializer.storage_manager.MAX_IMAGE_SIZE_MB == 5  # Default
         assert (
-            len(api_initializer.cdn_manager.IMAGE_EXTENSIONS) >= 1
+            len(api_initializer.storage_manager.IMAGE_EXTENSIONS) >= 1
         )  # At least has defaults

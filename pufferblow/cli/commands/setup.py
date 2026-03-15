@@ -163,6 +163,7 @@ def _run_full_setup(
     credentials: DatabaseCredentials,
     server: ServerDetails,
     owner: OwnerDetails,
+    security_config: dict[str, object] | None = None,
 ) -> None:
     """Execute first-time setup workflow."""
     from pufferblow.cli.common import (
@@ -223,6 +224,7 @@ def _run_full_setup(
     config_handler.write_config_toml(
         database_config=db_config,
         media_sfu_config=media_sfu_config,
+        security_config=security_config,
     )
 
     auth_token = api_initializer.user_manager.sign_up(
@@ -288,7 +290,11 @@ def _ensure_runtime_security_settings(*, config_handler: ConfigHandler) -> dict[
 
 
 def _run_server_only_setup(
-    *, config_handler: ConfigHandler, server: ServerDetails, is_update: bool
+    *,
+    config_handler: ConfigHandler,
+    server: ServerDetails,
+    is_update: bool,
+    security_config: dict[str, object] | None = None,
 ) -> None:
     """Execute setup flow that only touches server metadata."""
     from pufferblow.cli.common import ensure_database_exists, load_runtime
@@ -309,6 +315,8 @@ def _run_server_only_setup(
         raise typer.Exit(code=1)
 
     _apply_server_configuration(server=server, is_update=is_update)
+    if security_config is not None:
+        config_handler.write_config_toml(security_config=security_config)
     logger.info(
         "Server information {action} successfully.",
         action="updated" if is_update else "created",
@@ -382,6 +390,7 @@ def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
             credentials=credentials,
             server=server,
             owner=owner,
+            security_config=payload.security_config,
         )
         return
 
@@ -389,6 +398,7 @@ def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
         config_handler=config_handler,
         server=server,
         is_update=payload.mode == "server_update",
+        security_config=payload.security_config,
     )
 
 

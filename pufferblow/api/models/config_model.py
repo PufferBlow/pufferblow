@@ -16,6 +16,7 @@ class Config:
     JWT_ACCESS_TTL_MINUTES: int = 15
     JWT_REFRESH_TTL_DAYS: int = 30
     CORS_ALLOWED_ORIGINS: tuple[str, ...] = ()
+    CORS_ALLOWED_ORIGIN_REGEX: str | None = None
     CORS_ALLOWED_METHODS: tuple[str, ...] = (
         "GET",
         "POST",
@@ -92,7 +93,7 @@ class Config:
     MAX_MESSAGES_PER_PAGE: int = 50
     MIN_MESSAGES_PER_PAGE: int = 20
 
-    # Storage related parameters (replaces CDN)
+    # Storage related parameters
     STORAGE_PROVIDER: str = "local"
     STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/storage"
     STORAGE_BASE_URL: str = "/storage"
@@ -106,11 +107,6 @@ class Config:
     S3_ACCESS_KEY: str | None = None
     S3_SECRET_KEY: str | None = None
     S3_ENDPOINT_URL: str | None = None
-
-    # Static file serving parameters
-    CDN_STORAGE_PATH: str = f"{constants.HOME}/.pufferblow/cdn"
-    CDN_BASE_URL: str = "/cdn"
-    CDN_CACHE_MAX_AGE: int = 86400
 
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the instance."""
@@ -133,6 +129,7 @@ class Config:
         self.JWT_REFRESH_TTL_DAYS = config["api"].get("jwt_refresh_ttl_days", 30)
         security_section = config.get("security", {})
         self.CORS_ALLOWED_ORIGINS = tuple(security_section.get("cors_origins", ()))
+        self.CORS_ALLOWED_ORIGIN_REGEX = security_section.get("cors_origin_regex")
         self.CORS_ALLOWED_METHODS = tuple(
             security_section.get(
                 "cors_allow_methods",
@@ -283,11 +280,6 @@ class Config:
                 self.S3_ACCESS_KEY = config["storage"]["s3"].get("access_key")
                 self.S3_SECRET_KEY = config["storage"]["s3"].get("secret_key")
                 self.S3_ENDPOINT_URL = config["storage"]["s3"].get("endpoint_url")
-
-        if "cdn" in config:
-            self.CDN_STORAGE_PATH = config["cdn"]["storage_path"]
-            self.CDN_BASE_URL = config["cdn"]["base_url"]
-            self.CDN_CACHE_MAX_AGE = config["cdn"]["cache_max_age"]
 
     def __repr__(self) -> str:
         """Repr special method."""

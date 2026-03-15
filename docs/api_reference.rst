@@ -321,7 +321,7 @@ messages_per_page integer    Messages per page (1-50, default: 20)
          "hashed_message": "a1b2c3d4...",
          "username": "johndoe",
          "sent_at": "2025-10-18T07:00:00Z",
-         "attachments": ["/api/v1/cdn/file/upload_image.jpg"]
+         "attachments": ["/storage/upload_image.jpg"]
        }
      ]
    }
@@ -356,7 +356,7 @@ attachments       file(s)    File attachments (optional)
      "status_code": 201,
      "message": "message sent successfully",
      "message_id": "msg_456",
-     "attachments": ["/api/v1/cdn/file/upload_file.jpg"]
+     "attachments": ["/storage/upload_file.jpg"]
    }
 
 **PUT /api/v1/channels/{channel_id}/mark_message_as_read**
@@ -470,10 +470,10 @@ The current client model is home-instance first: the client sends WebFinger,
 actor, follow, and federated DM requests to the selected home instance, and the
 home instance resolves or delivers to remote ActivityPub peers.
 
-File Management (Storage/CDN) Routes
-====================================
+File Management (Storage) Routes
+================================
 
-These endpoints handle file uploads, downloads, and CDN management. Most require server owner privileges.
+These endpoints handle file uploads, downloads, and storage management. Most require server owner privileges.
 
 **POST /api/v1/storage/upload**
 
@@ -490,10 +490,6 @@ Get detailed file information. Server owner only.
 **POST /api/v1/storage/delete-file**
 
 Delete file from storage. Server owner only.
-
-**GET /api/v1/cdn/file/{file_path}**
-
-Serve CDN-compatible file path.
 
 **GET /api/v1/storage/file/{file_path}**
 
@@ -656,7 +652,7 @@ auth_token        string     User authentication token (as query parameter)
      "message": "Hello everyone!",
      "username": "johndoe",
      "sent_at": "2025-10-18T07:00:00Z",
-     "attachments": ["/api/v1/cdn/file/image.jpg"]
+     "attachments": ["/storage/image.jpg"]
    }
 
 **Outgoing Messages (Client -> Server):**

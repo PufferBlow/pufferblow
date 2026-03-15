@@ -6,7 +6,6 @@ import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Form, Request, UploadFile, exceptions, responses
 from sqlalchemy import delete, select
@@ -14,6 +13,11 @@ from sqlalchemy import delete, select
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
 from pufferblow.api.dependencies import require_privilege
 from pufferblow.api.logger.logger import logger
+from pufferblow.api.storage.path_utils import (
+    extract_local_media_path,
+    is_sha256_hash,
+    normalize_storage_relative_path,
+)
 from pufferblow.api.schemas import (
     CleanupOrphanedRequest,
     StorageDeleteFileRequest,
@@ -64,18 +68,6 @@ def set_api_initializer(initializer: Any) -> None:
     api_initializer = initializer
 
 
-def _is_hash(value: str) -> bool:
-    """Check if a string looks like a SHA-256 hex hash."""
-    return len(value) == 64 and all(c in "0123456789abcdef" for c in value.lower())
-
-
-def _extract_path_from_url(file_url: str) -> str:
-    """Extract URL path part from absolute/relative file URL."""
-    if "://" in file_url:
-        return urlparse(file_url).path
-    return file_url
-
-
 def _get_storage_root() -> Path:
     """Return storage root path."""
     return Path(api_initializer.config.STORAGE_PATH)
@@ -102,40 +94,44 @@ def _relative_path_from_hash(file_hash: str) -> str | None:
 
 
 def _resolve_storage_relative_path(file_url: str) -> str | None:
-    """Resolve a relative storage path from any supported storage URL."""
-    raw_path = _extract_path_from_url(file_url).strip()
+    """Resolve a relative local storage path from supported storage URLs."""
+    raw_path = extract_local_media_path(
+        file_url,
+        api_host=api_initializer.config.API_HOST,
+        api_port=api_initializer.config.API_PORT,
+    )
     if not raw_path:
         return None
 
     storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
-    storage_base_segment = storage_base.lstrip("/")
     storage_api_prefix = "/api/v1/storage/file/"
 
     if raw_path.startswith(storage_api_prefix):
-        relative = raw_path[len(storage_api_prefix) :].lstrip("/")
-        return relative or None
+        relative = raw_path[len(storage_api_prefix) :].lstrip("/") or None
+        if not relative:
+            return None
+        try:
+            return normalize_storage_relative_path(relative)
+        except ValueError:
+            return None
 
     if raw_path.startswith(f"{storage_base}/"):
         suffix = raw_path[len(storage_base) + 1 :]
         # Hash URL format: /storage/<file_hash>
-        if "/" not in suffix and _is_hash(suffix):
+        if "/" not in suffix and is_sha256_hash(suffix):
             return _relative_path_from_hash(suffix)
-        return suffix or None
+        try:
+            return normalize_storage_relative_path(suffix)
+        except ValueError:
+            return None
 
     normalized = raw_path.lstrip("/")
-    if _is_hash(normalized):
+    if is_sha256_hash(normalized):
         return _relative_path_from_hash(normalized)
-
-    if storage_base_segment and normalized.startswith(f"{storage_base_segment}/"):
-        suffix = normalized[len(storage_base_segment) + 1 :]
-        if "/" not in suffix and _is_hash(suffix):
-            return _relative_path_from_hash(suffix)
-        return suffix or None
-
-    if "/" in normalized:
-        return normalized
-
-    return None
+    try:
+        return normalize_storage_relative_path(normalized)
+    except ValueError:
+        return None
 
 
 def _build_storage_response(
@@ -212,18 +208,24 @@ def _canonical_file_identity(file_url: str) -> str:
     - path:<relative/path>
     - fallback to raw URL string
     """
-    raw_path = _extract_path_from_url(file_url).strip()
+    raw_path = extract_local_media_path(
+        file_url,
+        api_host=api_initializer.config.API_HOST,
+        api_port=api_initializer.config.API_PORT,
+    )
     if not raw_path:
+        return (file_url or "").strip()
+    if not raw_path.strip():
         return ""
 
     storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
     if raw_path.startswith(f"{storage_base}/"):
         suffix = raw_path[len(storage_base) + 1 :]
-        if "/" not in suffix and _is_hash(suffix):
+        if "/" not in suffix and is_sha256_hash(suffix):
             return f"hash:{suffix}"
 
     normalized = raw_path.lstrip("/")
-    if _is_hash(normalized):
+    if is_sha256_hash(normalized):
         return f"hash:{normalized}"
 
     relative_path = _resolve_storage_relative_path(file_url)
@@ -528,7 +530,7 @@ async def cleanup_orphaned_storage_files_route(
     """
     Remove unreferenced files from storage. Server Owner only.
     """
-    require_privilege(request.auth_token, "manage_cdn")
+    require_privilege(request.auth_token, "manage_storage")
 
     storage_root = _get_storage_root()
     if not storage_root.exists():
@@ -580,8 +582,9 @@ async def serve_storage_file_route(
     """
     Serve a storage file by relative path with optional authentication.
     """
-    normalized_path = file_path.strip().lstrip("/")
-    if ".." in Path(normalized_path).parts:
+    try:
+        normalized_path = normalize_storage_relative_path(file_path)
+    except ValueError:
         raise exceptions.HTTPException(status_code=400, detail="Invalid file path")
 
     if auth_token:
@@ -625,8 +628,13 @@ async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Resp
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
     try:
+        normalized_path = normalize_storage_relative_path(file_object.file_path)
+    except ValueError:
+        raise exceptions.HTTPException(status_code=404, detail="File not found")
+
+    try:
         content = await api_initializer.storage_manager.read_file_content(
-            file_object.file_path
+            normalized_path
         )
     except exceptions.HTTPException:
         raise
@@ -634,13 +642,13 @@ async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Resp
         logger.error(f"Failed to read hash-addressed file {file_hash}: {exc}")
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
-    content_type, _ = mimetypes.guess_type(file_object.file_path)
+    content_type, _ = mimetypes.guess_type(normalized_path)
     if not content_type:
         content_type = file_object.mime_type or "application/octet-stream"
 
     return _build_storage_response(
         content=content,
         media_type=content_type,
-        filename=Path(file_object.file_path).name,
+        filename=Path(normalized_path).name,
         range_header=request.headers.get("range"),
     )

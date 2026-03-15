@@ -461,7 +461,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmts = [
@@ -567,7 +567,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmt = (
@@ -590,7 +590,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmts = []
@@ -623,7 +623,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmt = (
@@ -669,7 +669,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmt = (
@@ -692,7 +692,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmt = (
@@ -2166,7 +2166,11 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 "name": "Manage Server Privileges",
                 "category": "server_management",
             },
-            {"id": "manage_cdn", "name": "Manage Storage", "category": "server_management"},
+            {
+                "id": "manage_storage",
+                "name": "Manage Storage",
+                "category": "server_management",
+            },
             {
                 "id": "view_server_stats",
                 "name": "View Server Stats",
@@ -2232,7 +2236,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                     "view_messages",
                     "manage_server_settings",
                     "manage_server_privileges",
-                    "manage_cdn",
+                    "manage_storage",
                     "view_server_stats",
                     "ban_users",
                     "mute_users",
@@ -2603,4 +2607,3 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             ]
 
     # Chart Data Methods for Background Tasks
-
