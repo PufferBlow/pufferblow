@@ -126,6 +126,16 @@ class BackgroundTasksManager(BackgroundTaskSchedulerMixin, BackgroundTaskAnalyti
             logger.error(f"Auth token cleanup failed: {str(exc)}")
             raise
 
+    def expire_stale_pings(self) -> None:
+        """Transition pings that are past their expiry time to 'timeout' status."""
+        logger.info("Running stale ping expiry task")
+        try:
+            count = self.database_handler.expire_stale_pings()
+            logger.info(f"Stale ping expiry complete | transitioned={count}")
+        except Exception as exc:
+            logger.error(f"Stale ping expiry task failed: {str(exc)}")
+            raise
+
     def optimize_image(self, file_path: str, file_hash: str, mime_type: str, category: str):
         """Optimize uploaded images by converting them to AVIF format."""
         try:

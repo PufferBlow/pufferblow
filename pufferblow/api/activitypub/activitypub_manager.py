@@ -18,6 +18,11 @@ from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.api.user.user_manager import UserManager
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
+# Avoid circular import — PingManager is resolved at runtime via TYPE_CHECKING
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pufferblow.api.ping.ping_manager import PingManager
+
 
 @dataclass
 class ActivityPubPeer:
@@ -48,6 +53,8 @@ class ActivityPubManager:
         self.user_manager = user_manager
         self.messages_manager = messages_manager
         self.websockets_manager = websockets_manager
+        # Injected after bootstrap to avoid circular construction
+        self.ping_manager: "PingManager | None" = None
 
     def build_base_url(self, request_base_url: str | None = None) -> str:
         """
@@ -570,6 +577,12 @@ class ActivityPubManager:
         if activity_type == "Create":
             return await self._handle_create(activity=activity, base_url=base_url)
 
+        if activity_type == "Ping":
+            return await self._handle_ping(activity=activity, base_url=base_url, target_actor_uri=target_actor_uri)
+
+        if activity_type == "PingAck":
+            return await self._handle_ping_ack(activity=activity, base_url=base_url)
+
         return {"processed": True, "activity_type": activity_type, "action": "stored_only"}
 
     async def _handle_follow(self, activity: dict, base_url: str, target_actor_uri: str | None) -> dict:
@@ -703,6 +716,40 @@ class ActivityPubManager:
             "action": "dm_delivered",
             "delivered_count": delivered,
         }
+
+    async def _handle_ping(
+        self,
+        activity: dict,
+        base_url: str,
+        target_actor_uri: str | None,
+    ) -> dict:
+        """
+        Dispatch incoming ``Ping`` activity to PingManager.
+
+        If no PingManager is wired (e.g. in tests), falls back to stored-only.
+        """
+        if self.ping_manager is None:
+            logger.warning("Received Ping activity but ping_manager is not wired; stored only.")
+            return {"processed": True, "activity_type": "Ping", "action": "stored_only"}
+
+        return await self.ping_manager.process_federated_ping(
+            activity=activity,
+            base_url=base_url,
+            target_actor_uri=target_actor_uri,
+        )
+
+    async def _handle_ping_ack(self, activity: dict, base_url: str) -> dict:
+        """
+        Dispatch incoming ``PingAck`` activity to PingManager.
+        """
+        if self.ping_manager is None:
+            logger.warning("Received PingAck activity but ping_manager is not wired; stored only.")
+            return {"processed": True, "activity_type": "PingAck", "action": "stored_only"}
+
+        return await self.ping_manager.process_federated_ping_ack(
+            activity=activity,
+            base_url=base_url,
+        )
 
     async def load_direct_messages(
         self,

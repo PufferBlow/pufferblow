@@ -38,6 +38,7 @@ from pufferblow.api.database.tables.roles import Roles
 from pufferblow.api.database.tables.server import Server
 from pufferblow.api.database.tables.server_settings import ServerSettings
 from pufferblow.api.database.tables.sticker_catalog import ServerGIFs, ServerStickers
+from pufferblow.api.database.tables.pings import Pings
 from pufferblow.api.database.tables.voice_sessions import (
     VoiceJoinToken,
     VoiceSession,
@@ -2605,5 +2606,319 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 }
                 for g in gifs
             ]
+
+    # =========================================================================
+    # Ping methods
+    # =========================================================================
+
+    def create_ping(self, ping: Pings) -> Pings:
+        """
+        Persist a new Ping record.
+
+        Args:
+            ping (Pings): A fully-populated Pings ORM object.
+
+        Returns:
+            Pings: The persisted object (same reference, after commit).
+        """
+        with self.database_session() as session:
+            session.add(ping)
+            session.commit()
+            session.refresh(ping)
+        return ping
+
+    def get_ping(self, ping_id: str) -> Pings | None:
+        """
+        Fetch a single ping by its primary key.
+
+        Args:
+            ping_id (str): UUID string of the ping.
+
+        Returns:
+            Pings | None: The matching record or None.
+        """
+        try:
+            ping_uuid = uuid.UUID(ping_id)
+        except (ValueError, TypeError):
+            return None
+
+        with self.database_session() as session:
+            stmt = select(Pings).where(Pings.ping_id == ping_uuid)
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def get_ping_by_activity_uri(self, activity_uri: str) -> Pings | None:
+        """
+        Fetch a ping by its outgoing ActivityPub activity URI.
+
+        Args:
+            activity_uri (str): The ActivityPub activity URI.
+
+        Returns:
+            Pings | None: Matching ping or None.
+        """
+        with self.database_session() as session:
+            stmt = select(Pings).where(Pings.activity_uri == activity_uri)
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def get_ping_by_original_activity_uri(self, original_activity_uri: str) -> Pings | None:
+        """
+        Fetch a receiver-side ping record by the original sender's activity URI.
+
+        Args:
+            original_activity_uri (str): The sender's ActivityPub Ping activity URI.
+
+        Returns:
+            Pings | None: Matching ping or None.
+        """
+        with self.database_session() as session:
+            stmt = select(Pings).where(Pings.original_activity_uri == original_activity_uri)
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def update_ping_status(
+        self,
+        ping_id: str,
+        status: str,
+        latency_ms: int | None = None,
+        acked_at: datetime.datetime | None = None,
+        instance_http_status: int | None = None,
+        instance_latency_ms: int | None = None,
+        metadata_json: dict | None = None,
+    ) -> Pings | None:
+        """
+        Update the status (and optional fields) of a ping record.
+
+        Args:
+            ping_id (str): UUID of the ping.
+            status (str): New status string.
+            latency_ms (int | None): Round-trip latency in ms.
+            acked_at (datetime | None): Timestamp when ack was received.
+            instance_http_status (int | None): HTTP status for instance pings.
+            instance_latency_ms (int | None): Network latency for instance pings.
+            metadata_json (dict | None): Optional extra metadata to merge.
+
+        Returns:
+            Pings | None: The updated record or None if not found.
+        """
+        try:
+            ping_uuid = uuid.UUID(ping_id)
+        except (ValueError, TypeError):
+            return None
+
+        update_values: dict = {"status": status}
+        if latency_ms is not None:
+            update_values["latency_ms"] = latency_ms
+        if acked_at is not None:
+            update_values["acked_at"] = acked_at
+        if instance_http_status is not None:
+            update_values["instance_http_status"] = instance_http_status
+        if instance_latency_ms is not None:
+            update_values["instance_latency_ms"] = instance_latency_ms
+        if metadata_json is not None:
+            update_values["metadata_json"] = metadata_json
+
+        with self.database_session() as session:
+            stmt = (
+                update(Pings)
+                .where(Pings.ping_id == ping_uuid)
+                .values(**update_values)
+                .returning(Pings)
+            )
+            result = session.execute(stmt).fetchone()
+            session.commit()
+            return result[0] if result else None
+
+    def get_ping_history(
+        self,
+        user_id: str,
+        direction: str = "both",
+        page: int = 1,
+        per_page: int = 20,
+    ) -> list[Pings]:
+        """
+        Fetch paginated ping history for a user.
+
+        Args:
+            user_id (str): The user's UUID string.
+            direction (str): "sent" | "received" | "both".
+            page (int): 1-based page number.
+            per_page (int): Records per page (max 50).
+
+        Returns:
+            list[Pings]: List of matching Pings records.
+        """
+        per_page = min(per_page, 50)
+        offset = (page - 1) * per_page
+
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except (ValueError, TypeError):
+            return []
+
+        with self.database_session() as session:
+            if direction == "sent":
+                where_clause = and_(
+                    Pings.sender_id == user_uuid,
+                    Pings.is_sender == True,
+                )
+            elif direction == "received":
+                where_clause = and_(
+                    Pings.target_user_id == str(user_uuid),
+                    Pings.is_sender == False,
+                )
+            else:
+                where_clause = (
+                    (Pings.sender_id == user_uuid) | (Pings.target_user_id == str(user_uuid))
+                )
+
+            stmt = (
+                select(Pings)
+                .where(where_clause)
+                .order_by(Pings.sent_at.desc())
+                .limit(per_page)
+                .offset(offset)
+            )
+            rows = session.execute(stmt).fetchall()
+            return [row[0] for row in rows]
+
+    def get_pending_pings_for_user(self, user_id: str) -> list[Pings]:
+        """
+        Return all pings in "sent" or "delivered" status directed at user_id.
+
+        Args:
+            user_id (str): The recipient's UUID string.
+
+        Returns:
+            list[Pings]: Unacknowledged pings for the user.
+        """
+        with self.database_session() as session:
+            stmt = (
+                select(Pings)
+                .where(
+                    and_(
+                        Pings.target_user_id == user_id,
+                        Pings.is_sender == False,
+                        Pings.status.in_(["sent", "delivered"]),
+                    )
+                )
+                .order_by(Pings.sent_at.asc())
+            )
+            rows = session.execute(stmt).fetchall()
+            return [row[0] for row in rows]
+
+    def get_ping_stats(self, user_id: str) -> dict:
+        """
+        Aggregate ping statistics for a user.
+
+        Args:
+            user_id (str): The user's UUID string.
+
+        Returns:
+            dict: Stats including counts, avg latency, and type breakdown.
+        """
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except (ValueError, TypeError):
+            return {}
+
+        with self.database_session() as session:
+            sent_total = session.execute(
+                select(func.count(Pings.ping_id)).where(
+                    and_(Pings.sender_id == user_uuid, Pings.is_sender == True)
+                )
+            ).scalar() or 0
+
+            received_total = session.execute(
+                select(func.count(Pings.ping_id)).where(
+                    and_(Pings.target_user_id == str(user_uuid), Pings.is_sender == False)
+                )
+            ).scalar() or 0
+
+            acked_count = session.execute(
+                select(func.count(Pings.ping_id)).where(
+                    and_(
+                        Pings.sender_id == user_uuid,
+                        Pings.is_sender == True,
+                        Pings.status == "acked",
+                    )
+                )
+            ).scalar() or 0
+
+            avg_latency = session.execute(
+                select(func.avg(Pings.latency_ms)).where(
+                    and_(
+                        Pings.sender_id == user_uuid,
+                        Pings.is_sender == True,
+                        Pings.status == "acked",
+                        Pings.latency_ms.isnot(None),
+                    )
+                )
+            ).scalar()
+
+        return {
+            "sent_total": sent_total,
+            "received_total": received_total,
+            "acked_count": acked_count,
+            "timeout_count": sent_total - acked_count,
+            "avg_latency_ms": round(float(avg_latency), 2) if avg_latency else None,
+        }
+
+    def delete_ping(self, ping_id: str, user_id: str) -> bool:
+        """
+        Delete a ping record if the caller is the sender or recipient.
+
+        Args:
+            ping_id (str): UUID of the ping to delete.
+            user_id (str): UUID of the requesting user.
+
+        Returns:
+            bool: True if deleted, False if not found or unauthorized.
+        """
+        ping = self.get_ping(ping_id)
+        if ping is None:
+            return False
+
+        if str(ping.sender_id) != user_id and ping.target_user_id != user_id:
+            return False
+
+        try:
+            ping_uuid = uuid.UUID(ping_id)
+        except (ValueError, TypeError):
+            return False
+
+        with self.database_session() as session:
+            stmt = delete(Pings).where(Pings.ping_id == ping_uuid)
+            result = session.execute(stmt)
+            session.commit()
+            return result.rowcount > 0
+
+    def expire_stale_pings(self) -> int:
+        """
+        Transition all pings past their expiry time to "timeout" status.
+        Called by the background task scheduler.
+
+        Returns:
+            int: Number of pings transitioned to timeout.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.database_session() as session:
+            stmt = (
+                update(Pings)
+                .where(
+                    and_(
+                        Pings.expires_at <= now,
+                        Pings.status.in_(["sent", "delivered"]),
+                    )
+                )
+                .values(status="timeout")
+            )
+            result = session.execute(stmt)
+            session.commit()
+            count = result.rowcount
+            if count:
+                logger.info(f"Expired {count} stale pings → 'timeout'")
+            return count
 
     # Chart Data Methods for Background Tasks

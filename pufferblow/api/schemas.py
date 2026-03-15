@@ -585,3 +585,107 @@ class UserRolesUpdateRequest(BaseModel):
     auth_token: str = Field(min_length=1)
     roles_ids: list[str] = Field(default_factory=list)
 
+
+# ============================================================================
+# Ping Schemas
+# ============================================================================
+
+
+class PingSendRequest(BaseModel):
+    """Send a ping to a local or remote user."""
+
+    auth_token: str = Field(min_length=1)
+    target: str = Field(
+        min_length=1,
+        description=(
+            "Recipient identifier: local user_id (UUID), local username, "
+            "remote handle (user@domain), or remote actor URI."
+        ),
+    )
+    message: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Optional short message body attached to the ping.",
+    )
+
+
+class PingInstanceRequest(BaseModel):
+    """Probe a remote PufferBlow instance for reachability."""
+
+    auth_token: str = Field(min_length=1)
+    target_instance_url: str = Field(
+        min_length=1,
+        description="Base URL of the remote instance (e.g. https://other.example.com).",
+    )
+
+
+class PingAckRequest(BaseModel):
+    """Acknowledge a received ping."""
+
+    auth_token: str = Field(min_length=1)
+
+
+class PingHistoryQuery(BaseModel):
+    """Query parameters for paginated ping history."""
+
+    auth_token: str = Field(min_length=1)
+    direction: str = Field(
+        default="both",
+        pattern="^(sent|received|both)$",
+        description="Filter pings by direction: sent, received, or both.",
+    )
+    page: int = Field(default=1, ge=1)
+    per_page: int = Field(default=20, ge=1, le=50)
+
+
+class PingData(BaseModel):
+    """Serialized representation of a single ping record."""
+
+    ping_id: str
+    ping_type: str
+    sender_id: str
+    target_user_id: str | None = None
+    target_actor_uri: str | None = None
+    target_instance_url: str | None = None
+    status: str
+    latency_ms: int | None = None
+    instance_http_status: int | None = None
+    instance_latency_ms: int | None = None
+    activity_uri: str | None = None
+    is_sender: bool
+    message: str | None = None
+    sent_at: str
+    acked_at: str | None = None
+    expires_at: str
+    metadata: dict = Field(default_factory=dict)
+
+
+class PingHistoryResponse(BaseModel):
+    """Paginated ping history response."""
+
+    status_code: int
+    direction: str
+    page: int
+    per_page: int
+    pings: list[PingData]
+
+
+class PingPendingResponse(BaseModel):
+    """Response listing pending (unacknowledged) inbound pings."""
+
+    status_code: int
+    pending_count: int
+    pings: list[PingData]
+
+
+class PingStatsResponse(BaseModel):
+    """Aggregated ping statistics for a user."""
+
+    status_code: int
+    user_id: str
+    sent_total: int
+    received_total: int
+    acked_count: int
+    timeout_count: int
+    avg_latency_ms: float | None = None
+

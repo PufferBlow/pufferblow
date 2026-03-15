@@ -5,6 +5,7 @@ import sys
 from loguru import logger
 
 from pufferblow.api.activitypub import ActivityPubManager
+from pufferblow.api.ping import PingManager
 from pufferblow.api.auth.auth_token_manager import AuthTokenManager
 from pufferblow.api.auth.decentralized_auth_manager import DecentralizedAuthManager
 from pufferblow.api.background_tasks import BackgroundTasksManager
@@ -56,6 +57,7 @@ class APIInitializer:
         self.security_checks_handler: SecurityChecksHandler | None = None
         self.decentralized_auth_manager: DecentralizedAuthManager | None = None
         self.activitypub_manager: ActivityPubManager | None = None
+        self.ping_manager: PingManager | None = None
         self.config_handler: ConfigHandler | None = None
         self.is_loaded = False
 
@@ -195,6 +197,14 @@ class APIInitializer:
             websockets_manager=self.websockets_manager,
         )
 
+        self.ping_manager = PingManager(
+            database_handler=self.database_handler,
+            websockets_manager=self.websockets_manager,
+            activitypub_manager=self.activitypub_manager,
+        )
+        # Cross-wire so ActivityPubManager can dispatch Ping/PingAck to PingManager
+        self.activitypub_manager.ping_manager = self.ping_manager
+
         self.is_loaded = True
 
     def _register_background_tasks(self) -> None:
@@ -233,6 +243,12 @@ class APIInitializer:
             task_id="activity_metrics_update",
             task_func=self.background_tasks_manager.update_activity_metrics,
             interval_hours=6,
+            enabled=True,
+        )
+        self.background_tasks_manager.register_task(
+            task_id="ping_stale_cleanup",
+            task_func=self.background_tasks_manager.expire_stale_pings,
+            interval_minutes=5,
             enabled=True,
         )
 
