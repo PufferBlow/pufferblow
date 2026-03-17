@@ -263,6 +263,12 @@ class WebSocketsManager:
             await self.ensure_user_offline_if_no_connections(
                 user_id=user_id, source="ws_disconnect"
             )
+            voice_manager = getattr(self, "voice_session_manager", None)
+            if voice_manager is not None:
+                try:
+                    voice_manager.leave_all_active_sessions_for_user(user_id=str(user_id))
+                except Exception as exc:
+                    logger.warning(f"Voice session cleanup on disconnect failed for user {user_id}: {exc}")
 
     async def send_message(
         self,
@@ -598,15 +604,17 @@ class WebSocketsManager:
             # The fetch_channels method already handles permission filtering
             channels_data = database_handler.fetch_channels(user_id)
 
-            # Extract channel IDs from the results
+            # Extract channel IDs from the results.
+            # fetch_channels returns SQLAlchemy Row objects; access the ORM object via index 0.
             accessible_channel_ids = []
             for channel_data in channels_data:
-                if hasattr(channel_data, "channel_id"):
-                    accessible_channel_ids.append(channel_data.channel_id)
-                elif isinstance(channel_data, tuple) and len(channel_data) > 0:
+                try:
                     channel_obj = channel_data[0]
                     if hasattr(channel_obj, "channel_id"):
-                        accessible_channel_ids.append(channel_obj.channel_id)
+                        accessible_channel_ids.append(str(channel_obj.channel_id))
+                except (IndexError, TypeError):
+                    if hasattr(channel_data, "channel_id"):
+                        accessible_channel_ids.append(str(channel_data.channel_id))
 
             logger.debug(
                 f"User {user_id} has access to {len(accessible_channel_ids)} channels"

@@ -553,6 +553,8 @@ class VoiceSessionManager:
                     "is_deafened": row.is_deafened,
                     "is_speaking": row.is_speaking,
                     "joined_at": row.joined_at.isoformat() if row.joined_at else None,
+                    # connected_at is the canonical field expected by the frontend transport layer
+                    "connected_at": row.joined_at.isoformat() if row.joined_at else None,
                     "disconnected_at": row.disconnected_at.isoformat() if row.disconnected_at else None,
                 }
                 for row in participant_rows
@@ -648,6 +650,29 @@ class VoiceSessionManager:
         if active is None:
             raise ValueError("No active voice session for this channel")
         return self.leave_session(user_id=user_id, session_id=active["session_id"])
+
+    def leave_all_active_sessions_for_user(self, *, user_id: str) -> list[dict[str, Any]]:
+        """Leave all active voice sessions the user is currently connected to."""
+        from loguru import logger as _logger
+
+        with self.database_handler.database_session() as db_session:
+            stmt = select(VoiceSessionParticipant.session_id).where(
+                and_(
+                    VoiceSessionParticipant.user_id == str(user_id),
+                    VoiceSessionParticipant.is_connected.is_(True),
+                )
+            )
+            rows = db_session.execute(stmt).fetchall()
+            session_ids = [row[0] for row in rows]
+
+        results = []
+        for session_id in session_ids:
+            try:
+                result = self.leave_session(user_id=user_id, session_id=session_id)
+                results.append(result)
+            except Exception as exc:
+                _logger.warning(f"Failed to leave voice session {session_id} for user {user_id}: {exc}")
+        return results
 
     def apply_action(
         self,

@@ -143,6 +143,8 @@ class APIInitializer:
             channels_manager=self.channels_manager,
             websockets_manager=self.websockets_manager,
         )
+        # Wire back so websockets_manager can clean up voice sessions on disconnect
+        self.websockets_manager.voice_session_manager = self.voice_session_manager
 
         if STORAGE_AVAILABLE and StorageManager:
             storage_config = {
@@ -250,6 +252,20 @@ class APIInitializer:
             task_func=self.background_tasks_manager.expire_stale_pings,
             interval_minutes=5,
             enabled=True,
+        )
+
+        # Backup task - always registered, enabled only when configured
+        backup_mode = getattr(self.config, "BACKUP_MODE", "file")
+        backup_func = (
+            self.background_tasks_manager.mirror_database
+            if backup_mode == "mirror"
+            else self.background_tasks_manager.create_database_backup
+        )
+        self.background_tasks_manager.register_task(
+            task_id="database_backup",
+            task_func=backup_func,
+            interval_hours=int(getattr(self.config, "BACKUP_SCHEDULE_HOURS", 24)),
+            enabled=bool(getattr(self.config, "BACKUP_ENABLED", False)),
         )
 
     def load_database(self, database_uri: str | None = None) -> None:
