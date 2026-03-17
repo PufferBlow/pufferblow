@@ -9,24 +9,21 @@ AUTHOR = "ramsy0dev"
 ORG_GITHUB = "https://github.com/pufferblow"
 REPO_GITHUB = "https://github.com/pufferblow/pufferblow"
 
-BANNER = f"""
-                  ___  ___            _     _
-                 / __)/ __)          | |   | |
-     ____  _   _| |__| |__ ____  ____| | _ | | ___  _ _ _
-    |  _ \\| | | |  __)  __) _  )/ ___) || \\| |/ _ \\| | | |
-    | | | | |_| | |  | | ( (/ /| |   | |_) ) | |_| | | | |
-    | | |_/\\____|_|  |_|  \\____)_|   |____/|_|\\___/ \\____|
-    |_|
-                 Made with love by '{AUTHOR}'
-        - Escape surveillance and gain anonymity -
+BANNER = f"""[bold cyan]
+  ____         __  __          ____  _
+ |  _ \\ _   _ / _|/ _| ___ _ _| __ )| | _____      __
+ | |_) || | | |  _|  _|/ _ \\ '__| _ \\| |/ _ \\ \\ /\\ / /
+ |  __/ | |_| | | | | |  __/ |  | |_) | | (_) \\ V  V /
+ |_|     \\__,_|_| |_|  \\___|_|  |____/|_|\\___/  \\_/\\_/
+[/bold cyan][dim]  v{VERSION}  ·  {AUTHOR}  ·  Escape surveillance, gain anonymity.[/dim]
 """
 
 
 def banner() -> None:
     """Render the package banner in the terminal."""
-    from rich import print
+    from rich import print as rprint
 
-    print(BANNER)
+    rprint(BANNER)
 
 
 CURRENT_PLATFORM = platform.system()

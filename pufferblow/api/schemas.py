@@ -373,6 +373,21 @@ class UserTimeoutRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
+class GetReportsRequest(BaseModel):
+    """Fetch moderation reports."""
+
+    auth_token: str = Field(min_length=1)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class ResolveReportRequest(BaseModel):
+    """Resolve a moderation report."""
+
+    auth_token: str = Field(min_length=1)
+    action: str = Field(min_length=1, max_length=50)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class DirectMessageSendRequest(BaseModel):
     """Send direct message to local or remote peer."""
 
@@ -505,6 +520,26 @@ class RunTaskRequest(BaseModel):
     """RunTaskRequest class."""
     auth_token: str = Field(min_length=1)
     task_id: str = Field(min_length=1)
+
+
+class ToggleTaskRequest(BaseModel):
+    """Enable or disable a background task."""
+
+    auth_token: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    enabled: bool
+
+
+class BackupConfigRequest(BaseModel):
+    """Update database backup configuration."""
+
+    auth_token: str = Field(min_length=1)
+    enabled: bool
+    mode: str = Field(default="file", pattern="^(file|mirror)$")
+    path: str | None = Field(default=None)
+    mirror_dsn: str | None = Field(default=None)
+    schedule_hours: int = Field(default=24, ge=1, le=168)
+    max_files: int = Field(default=7, ge=1, le=100)
 
 
 class ChartRequest(BaseModel):

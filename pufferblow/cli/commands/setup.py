@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
@@ -402,6 +403,58 @@ def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
     )
 
 
+def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
+    """Interactive backup configuration wizard."""
+    _console().print("\n[bold cyan]Database Backup Setup[/bold cyan]")
+    _console().print("Configure how PufferBlow backs up your PostgreSQL database.\n")
+
+    mode_raw = Prompt.ask("Backup mode", choices=["file", "mirror"], default="file")
+    schedule_hours_raw = Prompt.ask("Backup interval (hours)", default="24").strip()
+
+    try:
+        schedule_hours = int(schedule_hours_raw)
+    except ValueError:
+        logger.error("Schedule hours must be a number.")
+        raise typer.Exit(code=1)
+
+    backup_config: dict[str, object] = {
+        "enabled": True,
+        "mode": mode_raw,
+        "schedule_hours": schedule_hours,
+    }
+
+    if mode_raw == "file":
+        default_path = f"{Path.home()}/.pufferblow/backups"
+        path = Prompt.ask("Backup directory path", default=default_path).strip()
+        max_files_raw = Prompt.ask("Max backup files to keep", default="7").strip()
+        try:
+            max_files = int(max_files_raw)
+        except ValueError:
+            max_files = 7
+        backup_config["path"] = path
+        backup_config["max_files"] = max_files
+    else:
+        mirror_dsn = Prompt.ask("Mirror database DSN (postgresql://user:pass@host/db)").strip()
+        if not mirror_dsn:
+            logger.error("Mirror DSN is required for mirror mode.")
+            raise typer.Exit(code=1)
+        backup_config["mirror_dsn"] = mirror_dsn
+
+    config_handler.write_config_toml(backup_config=backup_config)
+
+    _console().print(
+        Panel.fit(
+            f"[bold green]Backup configured in file mode.[/bold green]\n\n"
+            f"[bold cyan]Mode:[/bold cyan] {mode_raw}\n"
+            f"[bold cyan]Schedule:[/bold cyan] Every {schedule_hours} hour(s)\n"
+            f"(Saved to ~/.pufferblow/config.toml)\n\n"
+            "[dim]Restart the server for the backup task to activate.[/dim]",
+            title="[bold yellow]Backup Setup Complete[/bold yellow]",
+            border_style="green",
+        )
+    )
+
+
 def setup_command(
     is_setup_server: bool = typer.Option(
         False, "--setup-server", help="Only create initial server metadata."
@@ -416,6 +469,11 @@ def setup_command(
         "--setup-media-sfu",
         help="Only update the shared Pufferblow config [media-sfu] section.",
     ),
+    is_setup_backup: bool = typer.Option(
+        False,
+        "--setup-backup",
+        help="Configure database backup settings (file dump or mirror).",
+    ),
 ) -> None:
     """Configure database, server metadata, and owner account."""
     from pufferblow.api.config.config_handler import ConfigHandler
@@ -424,7 +482,7 @@ def setup_command(
     has_bootstrap_config = config_handler.resolve_database_uri() is not None
 
     # Validate that only one flag is used
-    flags_used = sum([is_setup_server, is_update_server, is_setup_media_sfu])
+    flags_used = sum([is_setup_server, is_update_server, is_setup_media_sfu, is_setup_backup])
     if flags_used > 1:
         logger.error("Choose only one of --setup-server, --update-server, or --setup-media-sfu.")
         raise typer.Exit(code=1)
@@ -449,6 +507,10 @@ def setup_command(
             server=server,
             is_update=is_update_server,
         )
+        return
+
+    if is_setup_backup:
+        _run_backup_setup(config_handler=config_handler)
         return
 
     payload = _launch_setup_wizard(has_existing_config=has_bootstrap_config)

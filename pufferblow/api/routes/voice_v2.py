@@ -42,6 +42,31 @@ async def create_or_join_voice_session(channel_id: str, request: VoiceSessionCre
     }
 
 
+@router.get("/channels/{channel_id}/participants", status_code=200)
+async def get_voice_channel_participants(channel_id: str, auth_token: str):
+    """Return participants in the active voice session for a channel (read-only, no join required)."""
+    user_id = get_current_user(auth_token)
+    check_channel_access(user_id=user_id, channel_id=channel_id)
+
+    payload = api_initializer.voice_session_manager.get_active_session_for_channel(channel_id)
+    if payload is None:
+        return {
+            "status_code": 200,
+            "channel_id": channel_id,
+            "participants": [],
+            "participant_count": 0,
+            "session_id": None,
+        }
+
+    return {
+        "status_code": 200,
+        "channel_id": channel_id,
+        "participants": [p for p in payload.get("participants", []) if p.get("is_connected")],
+        "participant_count": payload.get("participant_count", 0),
+        "session_id": payload.get("session_id"),
+    }
+
+
 @router.post("/sessions/{session_id}/leave", status_code=200)
 async def leave_voice_session(session_id: str, request: VoiceSessionLeaveRequest):
     """Leave voice session for current user."""

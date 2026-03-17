@@ -263,6 +263,85 @@ class BackgroundTasksManager(BackgroundTaskSchedulerMixin, BackgroundTaskAnalyti
             logger.error(f"Image optimization failed for {file_path}: {str(exc)}")
             raise
 
+    async def create_database_backup(self) -> None:
+        """Create a database backup file using pg_dump."""
+        import os
+        import subprocess
+        from datetime import datetime
+        from pathlib import Path
+
+        backup_path = Path(getattr(self.config, "BACKUP_PATH", "~/.pufferblow/backups")).expanduser()
+        backup_path.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"pufferblow_backup_{timestamp}.dump"
+        filepath = backup_path / filename
+
+        env = os.environ.copy()
+        env["PGPASSWORD"] = str(getattr(self.config, "DATABASE_PASSWORD", ""))
+
+        cmd = [
+            "pg_dump",
+            "-h", str(getattr(self.config, "DATABASE_HOST", "localhost")),
+            "-p", str(getattr(self.config, "DATABASE_PORT", 5432)),
+            "-U", str(getattr(self.config, "USERNAME", "postgres")),
+            "-Fc",
+            "-f", str(filepath),
+            str(getattr(self.config, "DATABASE_NAME", "pufferblow")),
+        ]
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self.executor,
+            lambda: __import__("subprocess").run(cmd, env=env, capture_output=True, text=True),
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"pg_dump failed: {result.stderr.strip()}")
+
+        max_files = int(getattr(self.config, "BACKUP_MAX_FILES", 7))
+        backups = sorted(backup_path.glob("pufferblow_backup_*.dump"))
+        while len(backups) > max_files:
+            backups.pop(0).unlink(missing_ok=True)
+
+        logger.info(f"Database backup created: {filepath}")
+
+    async def mirror_database(self) -> None:
+        """Mirror the database to a secondary PostgreSQL instance via pg_dump | psql."""
+        import os
+
+        mirror_dsn = getattr(self.config, "BACKUP_MIRROR_DSN", None)
+        if not mirror_dsn:
+            raise ValueError("BACKUP_MIRROR_DSN is not configured")
+
+        env = os.environ.copy()
+        env["PGPASSWORD"] = str(getattr(self.config, "DATABASE_PASSWORD", ""))
+
+        dump_cmd = [
+            "pg_dump",
+            "-h", str(getattr(self.config, "DATABASE_HOST", "localhost")),
+            "-p", str(getattr(self.config, "DATABASE_PORT", 5432)),
+            "-U", str(getattr(self.config, "USERNAME", "postgres")),
+            str(getattr(self.config, "DATABASE_NAME", "pufferblow")),
+        ]
+        restore_cmd = ["psql", mirror_dsn]
+
+        loop = asyncio.get_event_loop()
+
+        def _run_mirror():
+            import subprocess
+            dump_proc = subprocess.Popen(dump_cmd, stdout=subprocess.PIPE, env=env)
+            restore_proc = subprocess.Popen(restore_cmd, stdin=dump_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if dump_proc.stdout:
+                dump_proc.stdout.close()
+            _, stderr = restore_proc.communicate()
+            dump_proc.wait()
+            if restore_proc.returncode != 0:
+                raise RuntimeError(f"Database mirror failed: {stderr.decode().strip()}")
+
+        await loop.run_in_executor(self.executor, _run_mirror)
+        logger.info("Database mirrored successfully")
+
 
 @asynccontextmanager
 async def lifespan_background_tasks():

@@ -108,6 +108,14 @@ class Config:
     S3_SECRET_KEY: str | None = None
     S3_ENDPOINT_URL: str | None = None
 
+    # Database backup settings
+    BACKUP_ENABLED: bool = False
+    BACKUP_MODE: str = "file"  # "file" or "mirror"
+    BACKUP_PATH: str = f"{constants.HOME}/.pufferblow/backups"
+    BACKUP_MIRROR_DSN: str | None = None
+    BACKUP_SCHEDULE_HOURS: int = 24
+    BACKUP_MAX_FILES: int = 7
+
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the instance."""
         if config is not None:

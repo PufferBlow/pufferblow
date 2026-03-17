@@ -15,7 +15,9 @@ from pufferblow.api.dependencies import (
     require_privilege,
 )
 from pufferblow.api.schemas import (
+    GetReportsRequest,
     MessageReportRequest,
+    ResolveReportRequest,
     UserBanRequest,
     UserReportRequest,
     UserTimeoutRequest,
@@ -227,6 +229,108 @@ async def timeout_user_route(target_user_id: str, request: UserTimeoutRequest) -
         "message": f"User '{target_user.get('username', target_user_id)}' has been timed out.",
         "target_user_id": target_user_id,
         "expires_at": expires_at.isoformat(),
+    }
+
+
+@router.post("/reports", status_code=200)
+async def get_reports_route(request: GetReportsRequest) -> dict:
+    """Fetch all moderation reports (message and user)."""
+    require_privilege(request.auth_token, "view_audit_logs")
+
+    report_entries = api_initializer.database_handler.list_activity_audit_entries(
+        activity_types=["message_report_submitted", "user_report_submitted"],
+        limit=request.limit,
+    )
+
+    resolved_entries = api_initializer.database_handler.list_activity_audit_entries(
+        activity_types=["report_resolved"],
+        limit=request.limit * 2,
+    )
+    resolved_report_ids: set[str] = set()
+    for entry in resolved_entries:
+        metadata = json.loads(entry.metadata_json) if entry.metadata_json else {}
+        if "original_report_id" in metadata:
+            resolved_report_ids.add(metadata["original_report_id"])
+
+    reports = []
+    for entry in report_entries:
+        metadata = json.loads(entry.metadata_json) if entry.metadata_json else {}
+
+        reporter_id = metadata.get("reporter_user_id", entry.user_id)
+        reporter_info = None
+        if reporter_id:
+            profile = api_initializer.user_manager.user_profile(reporter_id)
+            if profile:
+                reporter_info = {
+                    "id": reporter_id,
+                    "username": profile.get("username", "Unknown"),
+                }
+
+        report: dict = {
+            "id": entry.activity_id,
+            "type": "message_report" if entry.activity_type == "message_report_submitted" else "user_report",
+            "status": "resolved" if entry.activity_id in resolved_report_ids else "pending",
+            "category": metadata.get("category", "Unknown"),
+            "description": metadata.get("description"),
+            "reporter": reporter_info,
+            "reported_at": entry.created_at.isoformat(),
+        }
+
+        if entry.activity_type == "message_report_submitted":
+            message_ids: list[str] = metadata.get("message_ids", [])
+            report["message_ids"] = message_ids
+            report["channel_ids"] = metadata.get("channel_ids", [])
+
+            sender_info = None
+            if message_ids:
+                msg_meta = api_initializer.database_handler.get_message_metadata(message_ids[0])
+                if msg_meta and msg_meta.sender_id:
+                    sender_profile = api_initializer.user_manager.user_profile(str(msg_meta.sender_id))
+                    if sender_profile:
+                        sender_info = {
+                            "id": str(msg_meta.sender_id),
+                            "username": sender_profile.get("username", "Unknown"),
+                        }
+            report["sender"] = sender_info
+        else:
+            target_user_id = metadata.get("target_user_id")
+            report["target_user"] = {
+                "id": target_user_id,
+                "username": metadata.get("target_username", "Unknown"),
+            }
+
+        reports.append(report)
+
+    return {
+        "status_code": 200,
+        "reports": reports,
+        "total": len(reports),
+    }
+
+
+@router.post("/reports/{report_id}/resolve", status_code=200)
+async def resolve_report_route(report_id: str, request: ResolveReportRequest) -> dict:
+    """Resolve a moderation report."""
+    actor_user_id = require_privilege(request.auth_token, "view_audit_logs")
+
+    _create_audit_entry(
+        actor_user_id=actor_user_id,
+        activity_type="report_resolved",
+        title=f"Report resolved with action: {request.action}",
+        description=f"Moderator resolved report {report_id}.",
+        metadata={
+            "original_report_id": report_id,
+            "action": request.action,
+            "reason": request.reason,
+            "resolved_by": actor_user_id,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    return {
+        "status_code": 200,
+        "message": f"Report resolved with action: {request.action}.",
+        "report_id": report_id,
     }
 
 

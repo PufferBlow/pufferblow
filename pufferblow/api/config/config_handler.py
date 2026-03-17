@@ -185,6 +185,27 @@ class ConfigHandler:
             else None,
             config.CORS_ALLOW_CREDENTIALS,
         )
+
+        # Backup settings
+        backup_section = config_toml.get("backup", {})
+        if isinstance(backup_section, dict):
+            config.BACKUP_ENABLED = _config_bool(backup_section.get("enabled"), False)
+            config.BACKUP_MODE = str(backup_section.get("mode", "file"))
+            if backup_section.get("path"):
+                config.BACKUP_PATH = str(backup_section["path"])
+            if backup_section.get("mirror_dsn"):
+                config.BACKUP_MIRROR_DSN = str(backup_section["mirror_dsn"])
+            if backup_section.get("schedule_hours"):
+                try:
+                    config.BACKUP_SCHEDULE_HOURS = int(backup_section["schedule_hours"])
+                except (ValueError, TypeError):
+                    pass
+            if backup_section.get("max_files"):
+                try:
+                    config.BACKUP_MAX_FILES = int(backup_section["max_files"])
+                except (ValueError, TypeError):
+                    pass
+
         return config
 
     def load_config(
@@ -246,6 +267,7 @@ class ConfigHandler:
         database_config: dict[str, str] | None = None,
         media_sfu_config: dict[str, object] | None = None,
         security_config: dict[str, object] | None = None,
+        backup_config: dict[str, object] | None = None,
     ) -> None:
         """
         Write or update the shared Pufferblow config.toml.
@@ -277,7 +299,10 @@ class ConfigHandler:
                     continue
                 current_security[key] = value
             existing_config["security"] = current_security
-        
+
+        if backup_config:
+            existing_config["backup"] = backup_config
+
         # Convert to TOML and write
         toml_content = self._dict_to_toml_string(existing_config)
         self.config_toml_path.write_text(toml_content, encoding="utf-8")
