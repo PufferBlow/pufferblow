@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, exceptions
 from loguru import logger
@@ -154,6 +155,13 @@ async def global_messages_websocket(websocket: WebSocket, auth_token: str):
                         logger.debug(
                             f"Received client message | User: {user_id} | Type: {message_type}"
                         )
+
+                        if message_type == "ping":
+                            await websocket.send_json({
+                                "type": "pong",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            continue
 
                         if await _handle_presence_update_message(
                             websocket=websocket, user_id=user_id, message_data=message_data
@@ -388,6 +396,14 @@ async def channels_messages_websocket(
                 if incoming_data:
                     try:
                         message_data = json.loads(incoming_data)
+
+                        if message_data.get("type") == "ping":
+                            await websocket.send_json({
+                                "type": "pong",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            continue
+
                         if await _handle_presence_update_message(
                             websocket=websocket, user_id=user_id, message_data=message_data
                         ):

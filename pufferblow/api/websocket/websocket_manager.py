@@ -117,9 +117,27 @@ class WebSocketsManager:
     async def ensure_user_online(self, user_id: str, source: str = "ws_connect") -> None:
         """
         Mark user online when they establish their first websocket connection.
+        Skips the update if the user has a manual status lock (DND or AFK).
         """
         if self._count_connections_for_user(user_id) != 1:
             return
+
+        # Respect manual status locks — don't override DND/AFK on reconnect
+        try:
+            user_data = (
+                self.user_manager.database_handler.get_user(user_id=user_id)
+                if self.user_manager is not None
+                else None
+            )
+            if user_data and user_data.status in {"dnd", "afk"}:
+                logger.info(
+                    f"Skipping ensure_user_online — manual status lock active | User: {user_id} | Status: {user_data.status}"
+                )
+                return
+        except Exception as exc:
+            logger.warning(
+                f"Could not check user status before ensure_user_online | User: {user_id} | Error: {exc}"
+            )
 
         try:
             await self.update_user_presence_status(
