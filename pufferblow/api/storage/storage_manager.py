@@ -6,8 +6,10 @@ Manages different storage backends and provides unified file operations.
 
 import base64
 import hashlib
+import io
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import magic  # python-magic for MIME detection
@@ -15,8 +17,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException, UploadFile
 from loguru import logger
 from PIL import Image
+from sqlalchemy import update
 
 from pufferblow.api.database.database_handler import DatabaseHandler
+from pufferblow.api.database.tables.file_objects import FileObjects
 
 from .local_storage import LocalStorageBackend
 from .path_utils import normalize_storage_relative_path
@@ -40,13 +44,10 @@ class StorageManager:
         self.sse_enabled = bool(self.config.get("sse_enabled", False))
         self.sse_key = self._load_sse_key() if self.sse_enabled else None
 
-        # Initialize storage backend
         self.backend = self._create_backend()
-
-        # MIME detector
         self.mime_detector = magic.Magic(mime=True)
 
-        # File type validation - defaults, will be updated from server settings
+        # File type validation - defaults, updated from server settings
         self.IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"]
         self.STICKER_EXTENSIONS = ["png", "gif"]
         self.GIF_EXTENSIONS = ["gif"]
@@ -62,9 +63,7 @@ class StorageManager:
         self.MAX_TOTAL_ATTACHMENT_SIZE_MB = 50
 
     def _load_sse_key(self) -> bytes | None:
-        """
-        Load and normalize SSE key material to a 32-byte AES key.
-        """
+        """Load and normalize SSE key material to a 32-byte AES key."""
         configured_key = self.config.get("sse_key")
         if not configured_key:
             logger.warning(
@@ -95,9 +94,7 @@ class StorageManager:
         return key_bytes
 
     def _encrypt_for_storage(self, plain_content: bytes) -> bytes:
-        """
-        Encrypt file content before writing to storage backend.
-        """
+        """Encrypt file content before writing to storage backend."""
         if not self.sse_enabled or not self.sse_key:
             return plain_content
 
@@ -106,9 +103,7 @@ class StorageManager:
         return self.SSE_MAGIC + nonce + ciphertext
 
     def _decrypt_from_storage(self, stored_content: bytes) -> bytes:
-        """
-        Decrypt previously encrypted storage content.
-        """
+        """Decrypt previously encrypted storage content."""
         if not self.sse_enabled or not self.sse_key:
             return stored_content
 
@@ -135,15 +130,13 @@ class StorageManager:
             )
 
     async def read_file_content(self, file_path: str) -> bytes:
-        """
-        Read and transparently decrypt storage content.
-        """
+        """Read and transparently decrypt storage content."""
         normalized_path = normalize_storage_relative_path(file_path)
         stored_content = await self.backend.download_file(normalized_path)
         return self._decrypt_from_storage(stored_content)
 
     def _create_backend(self) -> StorageBackend:
-        """Create storage backend based on configuration"""
+        """Create storage backend based on configuration."""
         provider = self.config.get("provider", "local")
 
         if provider == "local":
@@ -154,19 +147,17 @@ class StorageManager:
             raise ValueError(f"Unsupported storage provider: {provider}")
 
     def compute_file_hash(self, content: bytes) -> str:
-        """Compute SHA-256 hash of file content"""
+        """Compute SHA-256 hash of file content."""
         return hashlib.sha256(content).hexdigest()
 
     def categorize_file(self, filename: str, mime_type: str) -> str:
-        """Categorize file based on type and return subdirectory"""
+        """Categorize file based on MIME type and return subdirectory."""
         extension = filename.split(".")[-1].lower() if "." in filename else ""
 
         if mime_type.startswith("image/"):
             if extension in self.GIF_EXTENSIONS:
                 return "gifs"
-            elif (
-                extension in self.STICKER_EXTENSIONS and "_sticker" in filename.lower()
-            ):
+            elif extension in self.STICKER_EXTENSIONS and "_sticker" in filename.lower():
                 return "stickers"
             elif "_avatar" in filename.lower():
                 return "avatars"
@@ -192,7 +183,7 @@ class StorageManager:
             return "files"
 
     def find_duplicate_by_hash(self, file_hash: str) -> tuple[str, str] | None:
-        """Resolve an existing stored file by content hash."""
+        """Resolve an existing stored file by content hash. Returns (relative_path, public_url)."""
         file_object = self.database_handler.get_file_object_by_hash(file_hash)
         if not file_object:
             return None
@@ -213,255 +204,49 @@ class StorageManager:
         reference_type: str,
         reference_id: str | None = None,
     ) -> None:
-        """Create a reference row and keep the ref_count in sync."""
-        try:
-            self.database_handler.increment_file_reference_count(file_hash)
-        except Exception:
-            pass
+        """Create a reference row, keep ref_count in sync, and update last_referenced."""
+        self.database_handler.increment_file_reference_count(file_hash)
 
-        try:
-            self.database_handler.create_file_reference(
-                reference_id=reference_id or f"{reference_type}_{uuid.uuid4()}",
-                file_hash=file_hash,
-                reference_type=reference_type,
-                reference_entity_id=user_id,
-            )
-        except Exception:
-            pass
-
-    async def validate_and_save_categorized_file(
-        self,
-        file: UploadFile,
-        user_id: str,
-        check_duplicates: bool = True,
-        force_category: str | None = None,
-    ) -> tuple[str, bool]:
-        """Validate and save file with categorization"""
-        self.update_server_limits()
-        content = file.file.read()
-        filename = file.filename or "unknown"
-        extension = filename.split(".")[-1].lower() if "." in filename else ""
-
-        mime_type = self.mime_detector.from_buffer(content)
-        if not mime_type:
-            raise HTTPException(status_code=400, detail="Cannot determine file type")
-
-        category = (
-            force_category
-            if force_category
-            else self.categorize_file(filename, mime_type)
+        self.database_handler.create_file_reference(
+            reference_id=reference_id or f"{reference_type}_{uuid.uuid4()}",
+            file_hash=file_hash,
+            reference_type=reference_type,
+            reference_entity_id=user_id,
         )
 
-        # Set limits based on category
-        if category == "images":
-            max_size_mb = self.MAX_IMAGE_SIZE_MB
-            allowed_extensions = self.IMAGE_EXTENSIONS
-        elif category in ["avatars", "banners"]:
-            max_size_mb = self.MAX_IMAGE_SIZE_MB
-            allowed_extensions = self.IMAGE_EXTENSIONS
+        # Update last_referenced timestamp
+        try:
+            database_uri = str(self.database_handler.database_engine.url)
+            if not database_uri.startswith("sqlite://"):
+                with self.database_handler.database_session() as session:
+                    session.execute(
+                        update(FileObjects)
+                        .where(FileObjects.file_hash == file_hash)
+                        .values(last_referenced=datetime.now(timezone.utc))
+                    )
+                    session.commit()
+        except Exception as exc:
+            logger.warning(f"Failed to update last_referenced for {file_hash}: {exc}")
+
+    def _size_limit_for_category(self, category: str) -> tuple[int, list[str]]:
+        """Return (max_size_mb, allowed_extensions) for a storage category."""
+        if category in ("images", "avatars", "banners"):
+            return self.MAX_IMAGE_SIZE_MB, self.IMAGE_EXTENSIONS
         elif category == "gifs":
-            max_size_mb = self.MAX_GIF_SIZE_MB
-            allowed_extensions = self.GIF_EXTENSIONS
+            return self.MAX_GIF_SIZE_MB, self.GIF_EXTENSIONS
         elif category == "stickers":
-            max_size_mb = self.MAX_STICKER_SIZE_MB
-            allowed_extensions = self.STICKER_EXTENSIONS
+            return self.MAX_STICKER_SIZE_MB, self.STICKER_EXTENSIONS
         elif category == "videos":
-            max_size_mb = self.MAX_VIDEO_SIZE_MB
-            allowed_extensions = self.VIDEO_EXTENSIONS
+            return self.MAX_VIDEO_SIZE_MB, self.VIDEO_EXTENSIONS
         elif category == "audio":
-            max_size_mb = self.MAX_AUDIO_SIZE_MB
-            allowed_extensions = self.AUDIO_EXTENSIONS
+            return self.MAX_AUDIO_SIZE_MB, self.AUDIO_EXTENSIONS
         elif category == "documents":
-            max_size_mb = self.MAX_DOCUMENT_SIZE_MB
-            allowed_extensions = self.DOCUMENT_EXTENSIONS
+            return self.MAX_DOCUMENT_SIZE_MB, self.DOCUMENT_EXTENSIONS
         else:
-            max_size_mb = 10
-            allowed_extensions = [extension] if extension else ["*"]
-
-        file.file.seek(0)
-        return await self.validate_and_save_file(
-            file=file,
-            user_id=user_id,
-            max_size_mb=max_size_mb,
-            allowed_extensions=allowed_extensions,
-            subdirectory=category,
-            check_duplicates=check_duplicates,
-        )
-
-    async def validate_and_save_file(
-        self,
-        file: UploadFile,
-        user_id: str,
-        max_size_mb: int,
-        allowed_extensions: list[str],
-        subdirectory: str = "files",
-        check_duplicates: bool = True,
-    ) -> tuple[str, bool]:
-        """Validate and save file"""
-        content = file.file.read()
-        if len(content) > max_size_mb * 1024 * 1024:
-            raise HTTPException(
-                status_code=400, detail=f"File size exceeds maximum of {max_size_mb}MB"
-            )
-
-        mime_type = self.mime_detector.from_buffer(content)
-        if not mime_type:
-            raise HTTPException(status_code=400, detail="Cannot determine file type")
-
-        filename = file.filename or "unknown"
-        extension = filename.split(".")[-1].lower() if "." in filename else ""
-        if extension not in allowed_extensions and "*" not in allowed_extensions:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File extension '{extension}' not allowed. Allowed: {', '.join(allowed_extensions)}",
-            )
-
-        # Additional validation for images
-        if extension in self.IMAGE_EXTENSIONS and mime_type.startswith("image/"):
-            file.file.seek(0)
-            try:
-                image = Image.open(file.file)
-                image.verify()
-                max_dimension = 2048
-                if image.size[0] > max_dimension or image.size[1] > max_dimension:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Image dimensions too large. Max allowed: {max_dimension}x{max_dimension}",
-                    )
-                file.file.seek(0)
-            except Exception:
-                raise HTTPException(status_code=400, detail="Invalid image file")
-
-        # Check for duplicates
-        is_duplicate = False
-        file_hash = ""
-        if check_duplicates and len(content) > 0:
-            file_hash = self.compute_file_hash(content)
-            duplicate = self.find_duplicate_by_hash(file_hash)
-            if duplicate:
-                existing_path, existing_url = duplicate
-                if await self.backend.file_exists(existing_path):
-                    self._register_storage_reference(
-                        file_hash=file_hash,
-                        user_id=user_id,
-                        reference_type="storage_upload",
-                    )
-                    return existing_url, True
-
-        # Generate unique filename
-        file_id = str(uuid.uuid4())
-        new_filename = f"{file_id}.{extension}"
-        storage_path = normalize_storage_relative_path(f"{subdirectory}/{new_filename}")
-
-        # Encrypt content (if SSE enabled) before upload to storage backend
-        stored_content = self._encrypt_for_storage(content)
-        url_path = await self.backend.upload_file(stored_content, storage_path)
-
-        # Register in database
-        try:
-            if not file_hash:
-                file_hash = self.compute_file_hash(content)
-
-            self.database_handler.create_file_object(
-                file_hash=file_hash,
-                ref_count=1,
-                file_path=storage_path,
-                filename=filename,
-                file_size=len(content),
-                mime_type=mime_type,
-                verification_status="verified",
-            )
-            self.database_handler.create_file_reference(
-                reference_id=f"storage_upload_{file_id}",
-                file_hash=file_hash,
-                reference_type="storage_upload",
-                reference_entity_id=user_id,
-            )
-        except Exception:
-            existing = self.find_duplicate_by_hash(file_hash)
-            if existing:
-                existing_path, existing_url = existing
-                try:
-                    if storage_path != existing_path:
-                        await self.backend.delete_file(storage_path)
-                except Exception:
-                    pass
-                self._register_storage_reference(
-                    file_hash=file_hash,
-                    user_id=user_id,
-                    reference_type="storage_upload",
-                )
-                return existing_url, True
-
-        # Trigger image optimization for supported image types (avatars, banners, attachments)
-        # This runs asynchronously as a background task
-        if subdirectory in ["avatars", "banners", "images"] and mime_type.startswith(
-            "image/"
-        ):
-            try:
-                # Import here to avoid circular imports
-                from pufferblow.core.bootstrap import api_initializer
-
-                if (
-                    hasattr(api_initializer, "background_tasks_manager")
-                    and api_initializer.background_tasks_manager
-                ):
-                    # Run image optimization as background task
-                    await api_initializer.background_tasks_manager.run_task(
-                        f"optimize_image_{file_id}",
-                        task_func=api_initializer.background_tasks_manager.optimize_image,
-                        file_path=storage_path,
-                        file_hash=file_hash,
-                        mime_type=mime_type,
-                        category=subdirectory,
-                    )
-                    logger.info(f"Triggered image optimization for {storage_path}")
-                else:
-                    logger.warning(
-                        "Background tasks manager not available for image optimization"
-                    )
-
-            except Exception as e:
-                # Don't fail the upload if optimization fails
-                logger.warning(
-                    f"Failed to trigger image optimization for {storage_path}: {str(e)}"
-                )
-
-        # Return hash-based URL under configured storage base path.
-        storage_base_url = str(self.config.get("base_url", "/storage")).rstrip("/")
-        hash_url = f"{storage_base_url}/{file_hash}"
-        return hash_url, False
-
-    async def delete_file(self, file_path: str) -> bool:
-        """Delete file from storage"""
-        normalized_path = normalize_storage_relative_path(file_path)
-        return await self.backend.delete_file(normalized_path)
-
-    async def get_file_info(self, file_path: str) -> dict[str, Any] | None:
-        """Get file information"""
-        normalized_path = normalize_storage_relative_path(file_path)
-        if not await self.backend.file_exists(normalized_path):
-            return None
-
-        # For now, return basic info
-        return {"path": normalized_path, "exists": True}
-
-    async def cleanup_orphaned_files(
-        self, valid_files: list[str], subdirectory: str = "files"
-    ):
-        """Clean up orphaned files"""
-        # This would need database integration to find valid files
-        # For local storage, we can implement cleanup
-        if hasattr(self.backend, "cleanup_orphaned_files"):
-            return await self.backend.cleanup_orphaned_files(valid_files)
-        return 0
-
-    async def get_storage_info(self) -> dict[str, Any]:
-        """Get storage backend information"""
-        return await self.backend.get_storage_info()
+            return 10, ["*"]
 
     def update_server_limits(self):
-        """Update file size limits from server settings"""
+        """Update file size limits from server settings."""
         try:
             server_settings = self.database_handler.get_server_settings()
             if server_settings:
@@ -474,35 +259,169 @@ class StorageManager:
                 )
                 self.MAX_AUDIO_SIZE_MB = self.MAX_DOCUMENT_SIZE_MB
                 self.IMAGE_EXTENSIONS = server_settings.allowed_images_extensions or [
-                    "png",
-                    "jpg",
-                    "jpeg",
-                    "gif",
-                    "webp",
+                    "png", "jpg", "jpeg", "gif", "webp",
                 ]
                 self.STICKER_EXTENSIONS = (
                     server_settings.allowed_stickers_extensions or ["png", "gif"]
                 )
                 self.GIF_EXTENSIONS = server_settings.allowed_gif_extensions or ["gif"]
                 self.VIDEO_EXTENSIONS = server_settings.allowed_videos_extensions or [
-                    "mp4",
-                    "webm",
+                    "mp4", "webm",
                 ]
                 self.AUDIO_EXTENSIONS = self.AUDIO_EXTENSIONS or [
-                    "mp3",
-                    "wav",
-                    "ogg",
-                    "m4a",
-                    "aac",
-                    "flac",
-                    "opus",
+                    "mp3", "wav", "ogg", "m4a", "aac", "flac", "opus",
                 ]
                 self.DOCUMENT_EXTENSIONS = server_settings.allowed_doc_extensions or [
-                    "pdf",
-                    "doc",
-                    "docx",
-                    "txt",
-                    "zip",
+                    "pdf", "doc", "docx", "txt", "zip",
                 ]
         except Exception:
             pass  # Use defaults
+
+    async def upload_file(
+        self,
+        file: UploadFile,
+        user_id: str,
+        reference_type: str,
+        force_category: str | None = None,
+        check_duplicates: bool = True,
+    ) -> tuple[str, bool, str, str, int]:
+        """
+        Validate and store an uploaded file.
+
+        Returns:
+            (public_url, is_duplicate, original_filename, mime_type, file_size_bytes)
+        """
+        self.update_server_limits()
+
+        # Read content exactly once
+        content = file.file.read()
+        filename = file.filename or "unknown"
+        extension = filename.split(".")[-1].lower() if "." in filename else ""
+        file_size = len(content)
+
+        mime_type = self.mime_detector.from_buffer(content)
+        if not mime_type:
+            raise HTTPException(status_code=400, detail="Cannot determine file type")
+
+        category = force_category if force_category else self.categorize_file(filename, mime_type)
+        max_size_mb, allowed_extensions = self._size_limit_for_category(category)
+
+        if file_size > max_size_mb * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds maximum of {max_size_mb}MB",
+            )
+
+        if "*" not in allowed_extensions and extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File extension '{extension}' not allowed. Allowed: {', '.join(allowed_extensions)}",
+            )
+
+        # Validate image integrity using in-memory buffer (avoids corrupting file handle)
+        if mime_type.startswith("image/") and extension in self.IMAGE_EXTENSIONS:
+            try:
+                img = Image.open(io.BytesIO(content))
+                img.verify()
+                # Re-open after verify() since verify() closes the PIL image
+                img = Image.open(io.BytesIO(content))
+                max_dimension = 2048
+                if img.width > max_dimension or img.height > max_dimension:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Image dimensions too large. Max allowed: {max_dimension}x{max_dimension}",
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid image file")
+
+        # Deduplication check
+        file_hash = self.compute_file_hash(content)
+        if check_duplicates:
+            duplicate = self.find_duplicate_by_hash(file_hash)
+            if duplicate:
+                existing_path, existing_url = duplicate
+                if await self.backend.file_exists(existing_path):
+                    self._register_storage_reference(
+                        file_hash=file_hash,
+                        user_id=user_id,
+                        reference_type=reference_type,
+                    )
+                    # Retrieve stored metadata for the duplicate
+                    file_obj = self.database_handler.get_file_object_by_hash(file_hash)
+                    dup_filename = file_obj.filename if file_obj else filename
+                    dup_mime = file_obj.mime_type if file_obj else mime_type
+                    dup_size = file_obj.file_size if file_obj else file_size
+                    return existing_url, True, dup_filename, dup_mime, dup_size
+
+        # Generate unique storage path
+        file_id = str(uuid.uuid4())
+        new_filename = f"{file_id}.{extension}" if extension else file_id
+        storage_path = normalize_storage_relative_path(f"{category}/{new_filename}")
+
+        stored_content = self._encrypt_for_storage(content)
+        await self.backend.upload_file(stored_content, storage_path)  # noqa: return value is the path-based URL, unused — we serve via hash
+
+        # Register in database
+        self.database_handler.create_file_object(
+            file_hash=file_hash,
+            ref_count=1,
+            file_path=storage_path,
+            filename=filename,
+            file_size=file_size,
+            mime_type=mime_type,
+            verification_status="verified",
+        )
+        self.database_handler.create_file_reference(
+            reference_id=f"{reference_type}_{file_id}",
+            file_hash=file_hash,
+            reference_type=reference_type,
+            reference_entity_id=user_id,
+        )
+
+        # Trigger async image optimization for avatars, banners, and images
+        if category in ("avatars", "banners", "images") and mime_type.startswith("image/"):
+            try:
+                from pufferblow.core.bootstrap import api_initializer
+
+                if (
+                    hasattr(api_initializer, "background_tasks_manager")
+                    and api_initializer.background_tasks_manager
+                ):
+                    await api_initializer.background_tasks_manager.run_task(
+                        f"optimize_image_{file_id}",
+                        task_func=api_initializer.background_tasks_manager.optimize_image,
+                        file_path=storage_path,
+                        file_hash=file_hash,
+                        mime_type=mime_type,
+                        category=category,
+                    )
+            except Exception as exc:
+                logger.warning(f"Failed to trigger image optimization for {storage_path}: {exc}")
+
+        storage_base_url = str(self.config.get("base_url", "/storage")).rstrip("/")
+        public_url = f"{storage_base_url}/{file_hash}"
+        return public_url, False, filename, mime_type, file_size
+
+    async def delete_file(self, file_path: str) -> bool:
+        """Delete file from storage."""
+        normalized_path = normalize_storage_relative_path(file_path)
+        return await self.backend.delete_file(normalized_path)
+
+    async def get_file_info(self, file_path: str) -> dict[str, Any] | None:
+        """Get file information."""
+        normalized_path = normalize_storage_relative_path(file_path)
+        if not await self.backend.file_exists(normalized_path):
+            return None
+        return {"path": normalized_path, "exists": True}
+
+    async def cleanup_orphaned_files(self, valid_files: list[str]):
+        """Clean up orphaned files."""
+        if hasattr(self.backend, "cleanup_orphaned_files"):
+            return await self.backend.cleanup_orphaned_files(valid_files)
+        return 0
+
+    async def get_storage_info(self) -> dict[str, Any]:
+        """Get storage backend information."""
+        return await self.backend.get_storage_info()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import ARRAY, JSON, DateTime, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID as SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,9 +40,7 @@ class Messages(Base):
         index=True,
     )
 
-    attachments: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String).with_variant(JSON(), "sqlite"), nullable=True
-    )
+    attachments: Mapped[list | None] = mapped_column(JSON(), nullable=True)
 
     def to_dict(self) -> dict:
         """Convert message object to dictionary format"""

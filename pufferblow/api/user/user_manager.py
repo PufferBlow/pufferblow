@@ -613,20 +613,16 @@ class UserManager:
         """
         from pufferblow.core.bootstrap import api_initializer
 
-        # Validate and save the avatar file with duplicate checking
-        avatar_url, is_duplicate = (
-            await api_initializer.storage_manager.validate_and_save_categorized_file(
+        avatar_url, is_duplicate, _, _, _ = (
+            await api_initializer.storage_manager.upload_file(
                 file=avatar_file,
                 user_id=user_id,
+                reference_type="user_avatar",
                 force_category="avatars",
                 check_duplicates=True,
             )
         )
 
-        # Avatar URLs are now returned as relative paths (/storage/{hash}) for client-side URL construction
-        # No conversion needed - store as-is for client compatibility
-
-        # Update the user's avatar URL in database
         self.database_handler.update_user_avatar(
             user_id=user_id, new_avatar_url=avatar_url
         )
@@ -651,13 +647,13 @@ class UserManager:
 
         from pufferblow.core.bootstrap import api_initializer
 
-        # Upload the sticker
-        sticker_url, _ = (
-            await api_initializer.storage_manager.validate_and_save_categorized_file(
+        sticker_url, _, _, _, _ = (
+            await api_initializer.storage_manager.upload_file(
                 file=sticker_file,
                 user_id=user_id,
+                reference_type="sticker",
                 force_category="stickers",
-                check_duplicates=False,  # Allow duplicate stickers for message sending
+                check_duplicates=False,
             )
         )
 
@@ -695,13 +691,13 @@ class UserManager:
 
         from pufferblow.core.bootstrap import api_initializer
 
-        # Upload the GIF
-        gif_url, _ = (
-            await api_initializer.storage_manager.validate_and_save_categorized_file(
+        gif_url, _, _, _, _ = (
+            await api_initializer.storage_manager.upload_file(
                 file=gif_file,
                 user_id=user_id,
+                reference_type="gif",
                 force_category="gifs",
-                check_duplicates=False,  # Allow duplicate GIFs for message sending
+                check_duplicates=False,
             )
         )
 
@@ -760,20 +756,16 @@ class UserManager:
         """
         from pufferblow.core.bootstrap import api_initializer
 
-        # Validate and save the banner file with duplicate checking
-        banner_url, is_duplicate = (
-            await api_initializer.storage_manager.validate_and_save_categorized_file(
+        banner_url, is_duplicate, _, _, _ = (
+            await api_initializer.storage_manager.upload_file(
                 file=banner_file,
                 user_id=user_id,
+                reference_type="user_banner",
                 force_category="banners",
                 check_duplicates=True,
             )
         )
 
-        # Banner URLs are now returned as relative paths (/storage/{hash}) for client-side URL construction
-        # No conversion needed - store as-is for client compatibility
-
-        # Update the user's banner URL in database
         self.database_handler.update_user_banner(
             user_id=user_id, new_banner_url=banner_url
         )

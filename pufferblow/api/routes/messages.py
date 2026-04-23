@@ -8,7 +8,6 @@ This module handles all message-related operations including:
 - Deleting messages
 """
 
-import mimetypes
 from datetime import datetime
 from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
 from loguru import logger
@@ -25,7 +24,6 @@ from pufferblow.api.dependencies import (
     require_privilege,
 )
 from pufferblow.core.bootstrap import api_initializer
-from pufferblow.api.storage.path_utils import extract_local_media_path, is_sha256_hash
 
 # Create router for message-related endpoints
 router = APIRouter(prefix="/api/v1/channels/{channel_id}")
@@ -57,65 +55,6 @@ def _measure_upload_size(file: UploadFile) -> int:
     size = file.file.tell()
     file.file.seek(current_position)
     return size
-
-
-def _extract_storage_hash(storage_url: str) -> str | None:
-    """Extract storage hash from canonical `/storage/<hash>` style URLs."""
-    if not storage_url:
-        return None
-
-    path = extract_local_media_path(
-        storage_url,
-        api_host=api_initializer.config.API_HOST,
-        api_port=api_initializer.config.API_PORT,
-    )
-    if not path:
-        return None
-    storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
-    if not path.startswith(f"{storage_base}/"):
-        return None
-
-    suffix = path[len(storage_base) + 1 :]
-    if "/" in suffix:
-        return None
-    if not is_sha256_hash(suffix):
-        return None
-    return suffix
-
-
-def _serialize_attachment(storage_url: str) -> dict:
-    """Build a client-facing attachment object from a storage URL."""
-    file_hash = _extract_storage_hash(storage_url)
-    if file_hash:
-        file_obj = api_initializer.database_handler.get_file_object_by_hash(file_hash)
-        if file_obj:
-            return {
-                "url": storage_url,
-                "filename": file_obj.filename,
-                "type": file_obj.mime_type,
-                "size": file_obj.file_size,
-            }
-
-    fallback_name = (
-        (
-            extract_local_media_path(
-                storage_url,
-                api_host=api_initializer.config.API_HOST,
-                api_port=api_initializer.config.API_PORT,
-            )
-            or storage_url
-        )
-        .rstrip("/")
-        .split("/")[-1]
-        or "attachment"
-    )
-    guessed_type = mimetypes.guess_type(fallback_name)[0] or "application/octet-stream"
-    return {
-        "url": storage_url,
-        "filename": fallback_name,
-        "type": guessed_type,
-        "size": None,
-    }
 
 
 # Dependency to parse form data into Pydantic model
@@ -252,8 +191,8 @@ async def channel_send_message(
     check_channel_access(user_id, channel_id)
     ensure_user_not_timed_out(user_id, "send messages")
 
-    # Handle file uploads
-    attachment_urls = []
+    # Handle file uploads — store structured metadata alongside the URL
+    attachment_objects: list[dict] = []
     if attachments:
         total_attachment_bytes = sum(_measure_upload_size(file) for file in attachments)
         if total_attachment_bytes > max_total_attachment_mb * 1024 * 1024:
@@ -267,71 +206,61 @@ async def channel_send_message(
         for file in attachments:
             if file.filename:
                 try:
-                    # Use the storage manager to save the attachment
-                    storage_url, is_duplicate = (
-                        await api_initializer.storage_manager.validate_and_save_categorized_file(
+                    storage_url, is_duplicate, filename, mime_type, file_size = (
+                        await api_initializer.storage_manager.upload_file(
                             file=file,
                             user_id=user_id,
+                            reference_type="message_attachment",
                             check_duplicates=True,
                         )
                     )
-                    attachment_urls.append(storage_url)
+                    attachment_objects.append({
+                        "url": storage_url,
+                        "filename": filename,
+                        "type": mime_type,
+                        "size": file_size,
+                    })
 
-                    # Log attachment upload
                     try:
-                        file_size = getattr(file, "size", 0)
-                        file_type = file.content_type or "unknown"
-                        activity_data = {
+                        api_initializer.database_handler.create_activity({
                             "event_type": "message_attachment",
-                            "description": f"Attachment '{file.filename}' uploaded for message in channel {channel_id}",
+                            "description": f"Attachment '{filename}' uploaded for message in channel {channel_id}",
                             "metadata": {
                                 "file_url": storage_url,
                                 "file_size": file_size,
-                                "file_type": file_type,
+                                "file_type": mime_type,
                                 "channel_id": channel_id,
                                 "is_duplicate": is_duplicate,
                             },
                             "user_id": user_id,
                             "timestamp": datetime.utcnow().isoformat(),
-                        }
-                        api_initializer.database_handler.create_activity(activity_data)
+                        })
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to log attachment upload activity: {str(e)}"
-                        )
+                        logger.warning(f"Failed to log attachment upload activity: {str(e)}")
 
                 except exceptions.HTTPException:
                     raise
                 except Exception as e:
-                    logger.error(
-                        f"Failed to upload attachment '{file.filename}': {str(e)}"
-                    )
+                    logger.error(f"Failed to upload attachment '{file.filename}': {str(e)}")
                     raise exceptions.HTTPException(
                         status_code=500,
                         detail=f"Failed to upload attachment '{file.filename}'. Please try again.",
                     )
 
-    # Send the message
+    # Send the message — attachments stored as structured dicts (no follow-up DB queries needed at read time)
     message_obj = api_initializer.messages_manager.send_message(
         channel_id=channel_id,
         user_id=user_id,
         message=message,
-        attachments=attachment_urls,
+        attachments=attachment_objects,
         sent_at=sent_at if sent_at.strip() else None,
     )
 
-    # Prepare message dict for broadcasting
     sender_user = api_initializer.user_manager.user_profile(user_id=user_id)
 
-    # Handle sent_at field
     sent_at_value = message_obj.sent_at
-    if sent_at_value:
-        if isinstance(sent_at_value, str):
-            pass
-        else:
-            sent_at_value = sent_at_value.isoformat()
-    else:
-        sent_at_value = None
+    if sent_at_value and not isinstance(sent_at_value, str):
+        sent_at_value = sent_at_value.isoformat()
 
     message_dict = {
         "message_id": str(message_obj.message_id),
@@ -348,10 +277,9 @@ async def channel_send_message(
         "sender_last_seen": sender_user.get("last_seen"),
         "sender_created_at": sender_user.get("created_at"),
         "sent_at": sent_at_value,
-        "attachments": [_serialize_attachment(item) for item in attachment_urls],
+        "attachments": attachment_objects,
     }
 
-    # Broadcast to all eligible users using global websocket system
     await api_initializer.websockets_manager.broadcast_to_eligible_users(
         channel_id, message_dict
     )
@@ -360,7 +288,7 @@ async def channel_send_message(
         "status_code": 201,
         "message": "message sent successfully",
         "message_id": str(message_obj.message_id),
-        "attachments": attachment_urls,
+        "attachments": attachment_objects,
         "message_data": message_dict,
     }
 

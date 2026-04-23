@@ -5,9 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 
 from .shared import (
-    create_server_file_reference,
     delete_previous_storage_file,
-    extract_storage_hash,
     log_activity,
     parse_upload_auth_form,
     require_component,
@@ -41,9 +39,10 @@ async def _upload_server_media(
         await delete_previous_storage_file(existing_url)
 
     try:
-        storage_url, _ = await storage_manager.validate_and_save_categorized_file(
+        storage_url, _, _, _, _ = await storage_manager.upload_file(
             file=upload,
             user_id=user_id,
+            reference_type=reference_type,
             force_category=force_category,
             check_duplicates=False,
         )
@@ -51,10 +50,6 @@ async def _upload_server_media(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    file_hash = extract_storage_hash(storage_url)
-    if file_hash:
-        create_server_file_reference(file_hash, reference_type)
 
     if field_name == "avatar_url":
         database_handler.update_server_avatar_url(storage_url)

@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import mimetypes
 from datetime import datetime, timezone
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Form, Request, UploadFile, exceptions, responses
+from fastapi import APIRouter, Request, UploadFile, Form, exceptions, responses
 from sqlalchemy import delete, select
 
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
 from pufferblow.api.dependencies import require_privilege
 from pufferblow.api.logger.logger import logger
 from pufferblow.api.storage.path_utils import (
-    extract_local_media_path,
     is_sha256_hash,
     normalize_storage_relative_path,
 )
@@ -73,188 +72,36 @@ def _get_storage_root() -> Path:
     return Path(api_initializer.config.STORAGE_PATH)
 
 
-def _file_hash_from_relative_path(relative_path: str) -> str | None:
-    """Lookup file hash for a relative storage path."""
-    try:
-        with api_initializer.database_handler.database_session() as session:
-            stmt = select(FileObjects.file_hash).where(
-                FileObjects.file_path == relative_path
-            )
-            return session.execute(stmt).scalar_one_or_none()
-    except Exception:
-        return None
-
-
-def _relative_path_from_hash(file_hash: str) -> str | None:
-    """Resolve storage relative path from file hash."""
-    file_obj = api_initializer.database_handler.get_file_object_by_hash(file_hash)
-    if not file_obj:
-        return None
-    return file_obj.file_path
-
-
-def _resolve_storage_relative_path(file_url: str) -> str | None:
-    """Resolve a relative local storage path from supported storage URLs."""
-    raw_path = extract_local_media_path(
-        file_url,
-        api_host=api_initializer.config.API_HOST,
-        api_port=api_initializer.config.API_PORT,
-    )
-    if not raw_path:
-        return None
-
-    storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
-    storage_api_prefix = "/api/v1/storage/file/"
-
-    if raw_path.startswith(storage_api_prefix):
-        relative = raw_path[len(storage_api_prefix) :].lstrip("/") or None
-        if not relative:
-            return None
-        try:
-            return normalize_storage_relative_path(relative)
-        except ValueError:
-            return None
-
-    if raw_path.startswith(f"{storage_base}/"):
-        suffix = raw_path[len(storage_base) + 1 :]
-        # Hash URL format: /storage/<file_hash>
-        if "/" not in suffix and is_sha256_hash(suffix):
-            return _relative_path_from_hash(suffix)
-        try:
-            return normalize_storage_relative_path(suffix)
-        except ValueError:
-            return None
-
-    normalized = raw_path.lstrip("/")
-    if is_sha256_hash(normalized):
-        return _relative_path_from_hash(normalized)
-    try:
-        return normalize_storage_relative_path(normalized)
-    except ValueError:
-        return None
-
-
-def _build_storage_response(
-    *,
-    content: bytes,
-    media_type: str,
-    filename: str,
-    range_header: str | None,
-) -> responses.Response:
-    """Build inline storage response with optional byte-range support."""
-    total_length = len(content)
-    base_headers = {
-        "Content-Disposition": f"inline; filename={filename}",
-        "Accept-Ranges": "bytes",
-    }
-
-    if not range_header:
-        return responses.Response(
-            content=content,
-            media_type=media_type,
-            headers={**base_headers, "Content-Length": str(total_length)},
-        )
-
-    try:
-        units, _, raw_range = range_header.partition("=")
-        if units.strip().lower() != "bytes" or not raw_range:
-            raise ValueError("Unsupported range unit")
-
-        first_range = raw_range.split(",", 1)[0].strip()
-        start_text, _, end_text = first_range.partition("-")
-        if not start_text and not end_text:
-            raise ValueError("Invalid byte range")
-
-        if start_text:
-            start = int(start_text)
-            end = int(end_text) if end_text else total_length - 1
-        else:
-            suffix_length = int(end_text)
-            if suffix_length <= 0:
-                raise ValueError("Invalid suffix length")
-            start = max(total_length - suffix_length, 0)
-            end = total_length - 1
-
-        if total_length == 0 or start < 0 or end < start or start >= total_length:
-            raise ValueError("Range out of bounds")
-
-        end = min(end, total_length - 1)
-        partial_content = content[start : end + 1]
-    except ValueError:
-        return responses.Response(
-            status_code=416,
-            headers={
-                **base_headers,
-                "Content-Range": f"bytes */{total_length}",
-            },
-        )
-
-    return responses.Response(
-        content=partial_content,
-        status_code=206,
-        media_type=media_type,
-        headers={
-            **base_headers,
-            "Content-Length": str(len(partial_content)),
-            "Content-Range": f"bytes {start}-{end}/{total_length}",
-        },
-    )
+def _build_public_storage_url(file_hash: str) -> str:
+    """Build canonical public URL for a file hash."""
+    return f"{api_initializer.config.STORAGE_BASE_URL.rstrip('/')}/{file_hash}"
 
 
 def _canonical_file_identity(file_url: str) -> str:
     """
-    Build canonical identity for comparisons:
-    - hash:<sha256> when possible
-    - path:<relative/path>
-    - fallback to raw URL string
+    Return a stable canonical identity string for a file URL.
+    Hash-addressed URLs become 'hash:<sha256>'.
+    Anything else falls through as-is.
     """
-    raw_path = extract_local_media_path(
-        file_url,
-        api_host=api_initializer.config.API_HOST,
-        api_port=api_initializer.config.API_PORT,
-    )
-    if not raw_path:
-        return (file_url or "").strip()
-    if not raw_path.strip():
+    if not file_url:
         return ""
 
     storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
-    if raw_path.startswith(f"{storage_base}/"):
-        suffix = raw_path[len(storage_base) + 1 :]
+    stripped = file_url.strip()
+
+    if stripped.startswith(f"{storage_base}/"):
+        suffix = stripped[len(storage_base) + 1:]
         if "/" not in suffix and is_sha256_hash(suffix):
             return f"hash:{suffix}"
 
-    normalized = raw_path.lstrip("/")
-    if is_sha256_hash(normalized):
-        return f"hash:{normalized}"
+    if is_sha256_hash(stripped.lstrip("/")):
+        return f"hash:{stripped.lstrip('/')}"
 
-    relative_path = _resolve_storage_relative_path(file_url)
-    if relative_path:
-        file_hash = _file_hash_from_relative_path(relative_path)
-        if file_hash:
-            return f"hash:{file_hash}"
-        return f"path:{relative_path}"
-
-    return raw_path
-
-
-def _build_public_storage_url(relative_path: str) -> str:
-    """
-    Build canonical public URL for a relative storage path.
-
-    Prefer hash URLs (`/storage/<hash>`) so SSE-enabled storage serves
-    decrypted content through route handlers.
-    """
-    file_hash = _file_hash_from_relative_path(relative_path)
-    if file_hash:
-        return f"{api_initializer.config.STORAGE_BASE_URL.rstrip('/')}/{file_hash}"
-    return f"/api/v1/storage/file/{relative_path}"
+    return stripped
 
 
 async def _is_file_protected(file_url: str) -> bool:
-    """
-    Check if a file is currently in use as an avatar or banner.
-    """
+    """Check if a file is currently in use as an avatar or banner."""
     try:
         target = _canonical_file_identity(file_url)
         if not target:
@@ -322,6 +169,79 @@ def _remove_file_metadata(file_hash: str) -> None:
         logger.warning(f"Failed to delete file metadata for hash {file_hash}: {exc}")
 
 
+def _build_storage_response(
+    *,
+    content: bytes,
+    media_type: str,
+    filename: str,
+    range_header: str | None,
+    etag: str | None = None,
+    extra_headers: dict | None = None,
+) -> responses.Response:
+    """Build inline storage response with optional byte-range support."""
+    total_length = len(content)
+    base_headers: dict[str, str] = {
+        "Content-Disposition": f"inline; filename={filename}",
+        "Accept-Ranges": "bytes",
+    }
+    if etag:
+        base_headers["ETag"] = etag
+    if extra_headers:
+        base_headers.update(extra_headers)
+
+    if not range_header:
+        return responses.Response(
+            content=content,
+            media_type=media_type,
+            headers={**base_headers, "Content-Length": str(total_length)},
+        )
+
+    try:
+        units, _, raw_range = range_header.partition("=")
+        if units.strip().lower() != "bytes" or not raw_range:
+            raise ValueError("Unsupported range unit")
+
+        first_range = raw_range.split(",", 1)[0].strip()
+        start_text, _, end_text = first_range.partition("-")
+        if not start_text and not end_text:
+            raise ValueError("Invalid byte range")
+
+        if start_text:
+            start = int(start_text)
+            end = int(end_text) if end_text else total_length - 1
+        else:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                raise ValueError("Invalid suffix length")
+            start = max(total_length - suffix_length, 0)
+            end = total_length - 1
+
+        if total_length == 0 or start < 0 or end < start or start >= total_length:
+            raise ValueError("Range out of bounds")
+
+        end = min(end, total_length - 1)
+        partial_content = content[start : end + 1]
+    except ValueError:
+        return responses.Response(
+            status_code=416,
+            headers={
+                **base_headers,
+                "Content-Range": f"bytes */{total_length}",
+            },
+        )
+
+    return responses.Response(
+        content=partial_content,
+        status_code=206,
+        media_type=media_type,
+        headers={
+            **base_headers,
+            "Content-Length": str(len(partial_content)),
+            "Content-Range": f"bytes {start}-{end}/{total_length}",
+        },
+    )
+
+
 @router.post("/api/v1/storage/upload", status_code=201)
 async def upload_storage_file(
     auth_token: str,
@@ -330,9 +250,7 @@ async def upload_storage_file(
         ..., description="Target directory (uploads, avatars, banners, etc.)"
     ),
 ) -> dict:
-    """
-    Upload a file to storage. Server Owner only.
-    """
+    """Upload a file to storage. Server Owner only."""
     user_id = require_privilege(auth_token, "upload_files")
 
     if directory not in ALLOWED_UPLOAD_DIRECTORIES:
@@ -342,19 +260,20 @@ async def upload_storage_file(
         )
 
     try:
-        storage_url, is_duplicate = (
-            await api_initializer.storage_manager.validate_and_save_categorized_file(
+        storage_url, is_duplicate, filename, mime_type, file_size = (
+            await api_initializer.storage_manager.upload_file(
                 file=file,
                 user_id=user_id,
+                reference_type="storage_upload",
                 force_category=_resolve_upload_category(directory),
                 check_duplicates=True,
             )
         )
 
         try:
-            activity_data = {
+            api_initializer.database_handler.create_activity({
                 "event_type": "file_upload",
-                "description": f"File '{file.filename}' uploaded to storage ({directory})",
+                "description": f"File '{filename}' uploaded to storage ({directory})",
                 "metadata": {
                     "file_url": storage_url,
                     "directory": directory,
@@ -363,8 +282,7 @@ async def upload_storage_file(
                 },
                 "user_id": user_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            api_initializer.database_handler.create_activity(activity_data)
+            })
         except Exception as exc:
             logger.warning(f"Failed to write upload activity log: {exc}")
 
@@ -376,6 +294,9 @@ async def upload_storage_file(
                 else "Duplicate file detected, existing file returned"
             ),
             "url": storage_url,
+            "filename": filename,
+            "type": mime_type,
+            "size": file_size,
             "is_duplicate": is_duplicate,
         }
     except exceptions.HTTPException:
@@ -388,9 +309,7 @@ async def upload_storage_file(
 
 @router.post("/api/v1/storage/files", status_code=200)
 async def list_storage_files_route(request: StorageFilesRequest) -> dict:
-    """
-    List files in storage directories. Server Owner only.
-    """
+    """List files in storage directories. Server Owner only."""
     require_privilege(request.auth_token, "view_files")
 
     storage_root = _get_storage_root()
@@ -417,24 +336,37 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
                 continue
 
             stat = file_path.stat()
-            mime_type, _ = mimetypes.guess_type(file_path.name)
             relative_path = str(file_path.relative_to(storage_root)).replace("\\", "/")
-            file_hash = _file_hash_from_relative_path(relative_path)
+
+            # Look up stored metadata from DB
+            file_obj = None
+            try:
+                with api_initializer.database_handler.database_session() as session:
+                    result = session.execute(
+                        select(FileObjects).where(FileObjects.file_path == relative_path)
+                    ).scalar_one_or_none()
+                    file_obj = result
+            except Exception:
+                pass
+
+            file_hash = file_obj.file_hash if file_obj else None
+            mime_type = file_obj.mime_type if file_obj else "application/octet-stream"
+            original_filename = file_obj.filename if file_obj else file_path.name
 
             files.append(
                 {
                     "id": file_hash or relative_path,
-                    "filename": file_path.name,
+                    "filename": original_filename,
                     "size": stat.st_size,
                     "uploaded_at": datetime.fromtimestamp(
                         stat.st_mtime, tz=timezone.utc
                     ).isoformat(),
                     "modified": stat.st_mtime,
-                    "url": _build_public_storage_url(relative_path),
+                    "url": _build_public_storage_url(file_hash) if file_hash else f"/api/v1/storage/file/{relative_path}",
                     "subdirectory": directory,
-                    "type": mime_type or "application/octet-stream",
+                    "type": mime_type,
                     "uploader": "Unknown",
-                    "is_orphaned": False,
+                    "is_orphaned": file_hash is None,
                 }
             )
 
@@ -449,44 +381,50 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
 
 @router.post("/api/v1/storage/file-info", status_code=200)
 async def get_storage_file_info_route(request: StorageFileInfoRequest) -> dict:
-    """
-    Get metadata for a storage file. Server Owner only.
-    """
+    """Get metadata for a storage file by hash URL. Server Owner only."""
     require_privilege(request.auth_token, "view_files")
 
-    relative_path = _resolve_storage_relative_path(request.file_url)
-    if not relative_path:
+    # Accept hash URL (/storage/{hash}) or bare hash
+    file_url = (request.file_url or "").strip()
+    storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
+    if file_url.startswith(f"{storage_base}/"):
+        candidate = file_url[len(storage_base) + 1:]
+    else:
+        candidate = file_url.lstrip("/")
+
+    if not is_sha256_hash(candidate):
+        raise exceptions.HTTPException(
+            status_code=400, detail="file_url must be a hash-based storage URL (/storage/{hash})"
+        )
+
+    file_obj = api_initializer.database_handler.get_file_object_by_hash(candidate)
+    if not file_obj:
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
-    storage_path = _get_storage_root() / relative_path
+    storage_path = _get_storage_root() / file_obj.file_path
     if not storage_path.exists() or not storage_path.is_file():
-        raise exceptions.HTTPException(status_code=404, detail="File not found")
+        raise exceptions.HTTPException(status_code=404, detail="File not found on disk")
 
     stat = storage_path.stat()
-    mime_type, _ = mimetypes.guess_type(storage_path.name)
-    file_hash = _file_hash_from_relative_path(relative_path)
 
     return {
         "status_code": 200,
         "file_info": {
-            "url": _build_public_storage_url(relative_path),
-            "path": relative_path,
-            "size": stat.st_size,
-            "mime_type": mime_type or "application/octet-stream",
-            "created": datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat(),
-            "modified": datetime.fromtimestamp(
-                stat.st_mtime, tz=timezone.utc
-            ).isoformat(),
-            "file_hash": file_hash,
+            "url": _build_public_storage_url(candidate),
+            "path": file_obj.file_path,
+            "filename": file_obj.filename,
+            "size": file_obj.file_size,
+            "mime_type": file_obj.mime_type,
+            "created": file_obj.created_at.isoformat() if file_obj.created_at else None,
+            "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "file_hash": candidate,
         },
     }
 
 
 @router.post("/api/v1/storage/delete-file", status_code=200)
 async def delete_storage_file_route(request: StorageDeleteFileRequest) -> dict:
-    """
-    Delete a storage file. Server Owner only.
-    """
+    """Delete a storage file. Server Owner only."""
     require_privilege(request.auth_token, "delete_files")
 
     if await _is_file_protected(request.file_url):
@@ -495,26 +433,25 @@ async def delete_storage_file_route(request: StorageDeleteFileRequest) -> dict:
             detail="Cannot delete this file as it is currently used as a user or server avatar/banner.",
         )
 
-    relative_path = _resolve_storage_relative_path(request.file_url)
-    if not relative_path:
+    # Resolve hash from URL
+    file_url = (request.file_url or "").strip()
+    storage_base = api_initializer.config.STORAGE_BASE_URL.rstrip("/")
+    if file_url.startswith(f"{storage_base}/"):
+        candidate = file_url[len(storage_base) + 1:]
+    else:
+        candidate = file_url.lstrip("/")
+
+    file_hash: str | None = candidate if is_sha256_hash(candidate) else None
+    file_obj = api_initializer.database_handler.get_file_object_by_hash(file_hash) if file_hash else None
+
+    if not file_obj:
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
-    file_hash = _file_hash_from_relative_path(relative_path)
-    if not file_hash:
-        try:
-            content = await api_initializer.storage_manager.read_file_content(
-                relative_path
-            )
-            file_hash = api_initializer.storage_manager.compute_file_hash(content)
-        except Exception:
-            file_hash = None
-
-    deleted = await api_initializer.storage_manager.delete_file(relative_path)
+    deleted = await api_initializer.storage_manager.delete_file(file_obj.file_path)
     if not deleted:
-        raise exceptions.HTTPException(status_code=404, detail="File not found")
+        raise exceptions.HTTPException(status_code=404, detail="File not found on disk")
 
-    if file_hash:
-        _remove_file_metadata(file_hash)
+    _remove_file_metadata(file_obj.file_hash)
 
     return {
         "status_code": 200,
@@ -527,9 +464,7 @@ async def delete_storage_file_route(request: StorageDeleteFileRequest) -> dict:
 async def cleanup_orphaned_storage_files_route(
     request: CleanupOrphanedRequest,
 ) -> dict:
-    """
-    Remove unreferenced files from storage. Server Owner only.
-    """
+    """Remove unreferenced files from storage. Server Owner only."""
     require_privilege(request.auth_token, "manage_storage")
 
     storage_root = _get_storage_root()
@@ -560,9 +495,20 @@ async def cleanup_orphaned_storage_files_route(
             if relative_path in referenced_paths:
                 continue
 
-            public_url = _build_public_storage_url(relative_path)
-            if await _is_file_protected(public_url):
-                continue
+            # Build a hash URL for the protection check
+            try:
+                with api_initializer.database_handler.database_session() as session:
+                    result = session.execute(
+                        select(FileObjects.file_hash).where(FileObjects.file_path == relative_path)
+                    ).scalar_one_or_none()
+                    file_hash_for_check = result
+            except Exception:
+                file_hash_for_check = None
+
+            if file_hash_for_check:
+                public_url = _build_public_storage_url(file_hash_for_check)
+                if await _is_file_protected(public_url):
+                    continue
 
             if await api_initializer.storage_manager.delete_file(relative_path):
                 deleted_count += 1
@@ -575,57 +521,28 @@ async def cleanup_orphaned_storage_files_route(
     }
 
 
-@router.get("/api/v1/storage/file/{file_path:path}", status_code=200)
-async def serve_storage_file_route(
-    file_path: str, request: Request, auth_token: str | None = None
-) -> responses.Response:
-    """
-    Serve a storage file by relative path with optional authentication.
-    """
-    try:
-        normalized_path = normalize_storage_relative_path(file_path)
-    except ValueError:
-        raise exceptions.HTTPException(status_code=400, detail="Invalid file path")
-
-    if auth_token:
-        try:
-            from pufferblow.api.dependencies import get_current_user
-
-            get_current_user(auth_token)
-        except Exception:
-            raise exceptions.HTTPException(
-                status_code=403, detail="Invalid authentication token"
-            )
-
-    try:
-        content = await api_initializer.storage_manager.read_file_content(normalized_path)
-    except exceptions.HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to read storage file {normalized_path}: {exc}")
-        raise exceptions.HTTPException(status_code=404, detail="File not found")
-
-    content_type, _ = mimetypes.guess_type(normalized_path)
-    if not content_type:
-        content_type = "application/octet-stream"
-
-    filename = Path(normalized_path).name
-    return _build_storage_response(
-        content=content,
-        media_type=content_type,
-        filename=filename,
-        range_header=request.headers.get("range"),
-    )
-
-
 @router.get("/storage/{file_hash}", status_code=200)
 async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Response:
-    """
-    Serve a file by its content hash.
-    """
+    """Serve a file by its SHA-256 content hash with proper caching headers."""
+    if not is_sha256_hash(file_hash):
+        raise exceptions.HTTPException(status_code=404, detail="File not found")
+
     file_object = api_initializer.database_handler.get_file_object_by_hash(file_hash)
     if not file_object:
         raise exceptions.HTTPException(status_code=404, detail="File not found")
+
+    etag = f'"{file_hash}"'
+
+    # Conditional request — return 304 if client already has this version
+    if_none_match = request.headers.get("if-none-match", "").strip()
+    if if_none_match == etag or if_none_match == file_hash:
+        return responses.Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": "public, max-age=31536000, immutable",
+            },
+        )
 
     try:
         normalized_path = normalize_storage_relative_path(file_object.file_path)
@@ -633,22 +550,31 @@ async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Resp
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
     try:
-        content = await api_initializer.storage_manager.read_file_content(
-            normalized_path
-        )
+        content = await api_initializer.storage_manager.read_file_content(normalized_path)
     except exceptions.HTTPException:
         raise
     except Exception as exc:
         logger.error(f"Failed to read hash-addressed file {file_hash}: {exc}")
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
-    content_type, _ = mimetypes.guess_type(normalized_path)
-    if not content_type:
-        content_type = file_object.mime_type or "application/octet-stream"
+    # Use magic-detected MIME type stored at upload time, not guessed from filename
+    content_type = file_object.mime_type or "application/octet-stream"
+    filename = Path(normalized_path).name
+
+    cache_headers: dict[str, str] = {
+        "Cache-Control": "public, max-age=31536000, immutable",
+    }
+    if file_object.created_at:
+        created_utc = file_object.created_at
+        if created_utc.tzinfo is None:
+            created_utc = created_utc.replace(tzinfo=timezone.utc)
+        cache_headers["Last-Modified"] = format_datetime(created_utc, usegmt=True)
 
     return _build_storage_response(
         content=content,
         media_type=content_type,
-        filename=Path(normalized_path).name,
+        filename=filename,
         range_header=request.headers.get("range"),
+        etag=etag,
+        extra_headers=cache_headers,
     )

@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import mimetypes
 import random
 import string
 import uuid
@@ -84,7 +83,7 @@ class MessagesManager:
         channel_id: str,
         user_id: str,
         message: str,
-        attachments: list[str] | None = None,
+        attachments: list[dict] | None = None,
         sent_at: str | None = None,
     ) -> Messages:
         """
@@ -94,7 +93,7 @@ class MessagesManager:
             channel_id (str): The channel's `channel_id`.
             user_id (str): The sender user's `user_id`.
             message (str): The message to send.
-            attachments (list[str], optional): List of attachment URLs.
+            attachments (list[dict], optional): List of attachment objects with url/filename/type/size.
             sent_at (str, optional): ISO format timestamp when message was sent. If None, uses current time.
 
         Returns:
@@ -132,7 +131,7 @@ class MessagesManager:
         user_id: str,
         conversation_id: str,
         message: str,
-        attachments: list[str] | None = None,
+        attachments: list[dict] | None = None,
         sent_at: str | None = None,
     ) -> Messages:
         """
@@ -394,49 +393,8 @@ class MessagesManager:
                 json_metadata_format["sender_created_at"] = None
 
             if message_data.attachments and len(message_data.attachments) > 0:
-                enhanced_attachments = []
-                for attachment_url in message_data.attachments:
-                    if attachment_url and attachment_url.startswith("/storage/"):
-                        file_hash = attachment_url.split("/")[-1]
-                        file_obj = self.database_handler.get_file_object_by_hash(file_hash)
-                        if file_obj:
-                            enhanced_attachments.append(
-                                {
-                                    "url": attachment_url,
-                                    "filename": file_obj.filename,
-                                    "type": file_obj.mime_type,
-                                    "size": file_obj.file_size,
-                                }
-                            )
-                        else:
-                            filename = file_hash
-                            mime_type = (
-                                mimetypes.guess_type(filename)[0]
-                                or "application/octet-stream"
-                            )
-                            enhanced_attachments.append(
-                                {
-                                    "url": attachment_url,
-                                    "filename": filename,
-                                    "type": mime_type,
-                                    "size": None,
-                                }
-                            )
-                    else:
-                        filename = attachment_url.split("/")[-1] if attachment_url else "unknown"
-                        mime_type = (
-                            mimetypes.guess_type(filename)[0]
-                            or "application/octet-stream"
-                        )
-                        enhanced_attachments.append(
-                            {
-                                "url": attachment_url,
-                                "filename": filename,
-                                "type": mime_type,
-                                "size": None,
-                            }
-                        )
-                json_metadata_format["attachments"] = enhanced_attachments
+                # Attachments are stored as structured dicts {url, filename, type, size}
+                json_metadata_format["attachments"] = message_data.attachments
             else:
                 json_metadata_format["attachments"] = []
 
