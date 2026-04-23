@@ -361,7 +361,7 @@ class StorageManager:
         storage_path = normalize_storage_relative_path(f"{category}/{new_filename}")
 
         stored_content = self._encrypt_for_storage(content)
-        await self.backend.upload_file(stored_content, storage_path)  # noqa: return value is the path-based URL, unused — we serve via hash
+        _ = await self.backend.upload_file(stored_content, storage_path)
 
         # Register in database
         self.database_handler.create_file_object(

@@ -328,47 +328,50 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
     target_dirs = _target_directories(request.directory, existing_dirs)
     scanned_dirs = [d for d in target_dirs if (storage_root / d).exists()]
 
+    all_file_paths = [
+        (directory, file_path, str(file_path.relative_to(storage_root)).replace("\\", "/"))
+        for directory in scanned_dirs
+        for file_path in sorted((storage_root / directory).glob("*"))
+        if file_path.is_file()
+    ]
+
+    all_relative_paths = [rp for _, _, rp in all_file_paths]
+    file_objects_by_path: dict[str, Any] = {}
+    if all_relative_paths:
+        try:
+            with api_initializer.database_handler.database_session() as session:
+                results = session.execute(
+                    select(FileObjects).where(FileObjects.file_path.in_(all_relative_paths))
+                ).scalars().all()
+                file_objects_by_path = {obj.file_path: obj for obj in results}
+        except Exception:
+            pass
+
     files: list[dict[str, Any]] = []
-    for directory in scanned_dirs:
-        sub_dir = storage_root / directory
-        for file_path in sorted(sub_dir.glob("*")):
-            if not file_path.is_file():
-                continue
+    for directory, file_path, relative_path in all_file_paths:
+        stat = file_path.stat()
 
-            stat = file_path.stat()
-            relative_path = str(file_path.relative_to(storage_root)).replace("\\", "/")
+        file_obj = file_objects_by_path.get(relative_path)
+        file_hash = file_obj.file_hash if file_obj else None
+        mime_type = file_obj.mime_type if file_obj else "application/octet-stream"
+        original_filename = file_obj.filename if file_obj else file_path.name
 
-            # Look up stored metadata from DB
-            file_obj = None
-            try:
-                with api_initializer.database_handler.database_session() as session:
-                    result = session.execute(
-                        select(FileObjects).where(FileObjects.file_path == relative_path)
-                    ).scalar_one_or_none()
-                    file_obj = result
-            except Exception:
-                pass
-
-            file_hash = file_obj.file_hash if file_obj else None
-            mime_type = file_obj.mime_type if file_obj else "application/octet-stream"
-            original_filename = file_obj.filename if file_obj else file_path.name
-
-            files.append(
-                {
-                    "id": file_hash or relative_path,
-                    "filename": original_filename,
-                    "size": stat.st_size,
-                    "uploaded_at": datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
-                    ).isoformat(),
-                    "modified": stat.st_mtime,
-                    "url": _build_public_storage_url(file_hash) if file_hash else f"/api/v1/storage/file/{relative_path}",
-                    "subdirectory": directory,
-                    "type": mime_type,
-                    "uploader": "Unknown",
-                    "is_orphaned": file_hash is None,
-                }
-            )
+        files.append(
+            {
+                "id": file_hash or relative_path,
+                "filename": original_filename,
+                "size": stat.st_size,
+                "uploaded_at": datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat(),
+                "modified": stat.st_mtime,
+                "url": _build_public_storage_url(file_hash) if file_hash else f"/api/v1/storage/file/{relative_path}",
+                "subdirectory": directory,
+                "type": mime_type,
+                "uploader": "Unknown",
+                "is_orphaned": file_hash is None,
+            }
+        )
 
     return {
         "status_code": 200,

@@ -191,7 +191,6 @@ async def channel_send_message(
     check_channel_access(user_id, channel_id)
     ensure_user_not_timed_out(user_id, "send messages")
 
-    # Handle file uploads — store structured metadata alongside the URL
     attachment_objects: list[dict] = []
     if attachments:
         total_attachment_bytes = sum(_measure_upload_size(file) for file in attachments)
@@ -247,7 +246,6 @@ async def channel_send_message(
                         detail=f"Failed to upload attachment '{file.filename}'. Please try again.",
                     )
 
-    # Send the message — attachments stored as structured dicts (no follow-up DB queries needed at read time)
     message_obj = api_initializer.messages_manager.send_message(
         channel_id=channel_id,
         user_id=user_id,
@@ -259,7 +257,7 @@ async def channel_send_message(
     sender_user = api_initializer.user_manager.user_profile(user_id=user_id)
 
     sent_at_value = message_obj.sent_at
-    if sent_at_value and not isinstance(sent_at_value, str):
+    if sent_at_value is not None and not isinstance(sent_at_value, str):
         sent_at_value = sent_at_value.isoformat()
 
     message_dict = {
