@@ -246,7 +246,28 @@ class ConfigHandler:
         for key, value in runtime_values.items():
             if hasattr(config, key):
                 setattr(config, key, value)
+
+        # config.toml [media-sfu] is the shared file that media-sfu itself reads, so
+        # it is the authoritative source for bootstrap/internal/join secrets. Re-apply
+        # after DB hydration so a stale DB value can never shadow a config.toml update.
+        self._overlay_media_sfu_secrets(config)
         return config
+
+    def _overlay_media_sfu_secrets(self, config: Config) -> None:
+        """Re-apply [media-sfu] secrets from config.toml, overriding any DB values."""
+        toml = self._load_config_toml()
+        section = toml.get("media-sfu", {})
+        if not isinstance(section, dict):
+            return
+        mapping = {
+            "bootstrap_secret": "RTC_BOOTSTRAP_SECRET",
+            "internal_secret": "RTC_INTERNAL_SECRET",
+            "join_secret": "RTC_JOIN_SECRET",
+        }
+        for toml_key, config_key in mapping.items():
+            value = section.get(toml_key)
+            if value and isinstance(value, str) and value.strip():
+                setattr(config, config_key, value.strip())
 
     def write_config(
         self,
