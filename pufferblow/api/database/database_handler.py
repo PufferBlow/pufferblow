@@ -2,11 +2,14 @@ import base64
 import datetime
 import hashlib
 import json
+import time
 import uuid
+from typing import Callable, TypeVar
 
 import sqlalchemy
 from loguru import logger
 from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from pufferblow.api.database.metrics_files_mixin import DatabaseMetricsFilesMixin
@@ -51,6 +54,43 @@ from pufferblow.api.logger.msgs import debug, info
 from pufferblow.api.models.config_model import Config
 from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, IMMUTABLE_ROLE_IDS
 from pufferblow.api.utils.current_date import date_in_gmt
+
+_T = TypeVar("_T")
+
+
+def _retry_on_disconnect(
+    fn: Callable[[], _T],
+    *,
+    retries: int = 2,
+    base_backoff_seconds: float = 0.5,
+) -> _T:
+    """
+    Run ``fn`` and retry on transient Postgres disconnects.
+
+    Catches ``OperationalError`` (e.g. 'SSL SYSCALL error: EOF detected',
+    'server closed the connection unexpectedly') and retries up to
+    ``retries`` times with exponential backoff. SQLAlchemy auto-invalidates
+    the broken pooled connection, so each retry pulls a fresh one.
+
+    Only safe to wrap idempotent operations; do not use for non-idempotent
+    multi-statement transactions.
+    """
+    last_exc: OperationalError | None = None
+    for attempt in range(retries + 1):
+        try:
+            return fn()
+        except OperationalError as exc:
+            last_exc = exc
+            if attempt >= retries:
+                break
+            backoff = base_backoff_seconds * (2 ** attempt)
+            logger.warning(
+                f"DB disconnect on attempt {attempt + 1}/{retries + 1}, "
+                f"retrying in {backoff:.2f}s: {exc}"
+            )
+            time.sleep(backoff)
+    assert last_exc is not None
+    raise last_exc
 
 
 class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
@@ -2903,22 +2943,26 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             int: Number of pings transitioned to timeout.
         """
         now = datetime.datetime.now(datetime.timezone.utc)
-        with self.database_session() as session:
-            stmt = (
-                update(Pings)
-                .where(
-                    and_(
-                        Pings.expires_at <= now,
-                        Pings.status.in_(["sent", "delivered"]),
+
+        def _run() -> int:
+            with self.database_session() as session:
+                stmt = (
+                    update(Pings)
+                    .where(
+                        and_(
+                            Pings.expires_at <= now,
+                            Pings.status.in_(["sent", "delivered"]),
+                        )
                     )
+                    .values(status="timeout")
                 )
-                .values(status="timeout")
-            )
-            result = session.execute(stmt)
-            session.commit()
-            count = result.rowcount
-            if count:
-                logger.info(f"Expired {count} stale pings → 'timeout'")
-            return count
+                result = session.execute(stmt)
+                session.commit()
+                count = result.rowcount
+                if count:
+                    logger.info(f"Expired {count} stale pings → 'timeout'")
+                return count
+
+        return _retry_on_disconnect(_run)
 
     # Chart Data Methods for Background Tasks
