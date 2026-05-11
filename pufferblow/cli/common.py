@@ -24,25 +24,52 @@ if TYPE_CHECKING:
 
 console = Console()
 
-INFORMATIVE_LOG_FORMAT = (
-    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | "
-    "request_id={extra[request_id]} | method={extra[method]} | path={extra[path]} | "
-    "status={extra[status_code]} | duration_ms={extra[duration_ms]} | client_ip={extra[client_ip]} | "
-    "{name}:{function}:{line} | {message}"
-)
+def _has_request_context(extra: dict) -> bool:
+    """True when the record was emitted inside an HTTP request scope."""
+    return extra.get("method", "-") != "-" and extra.get("path", "-") != "-"
 
-COLOR_LOG_FORMAT = (
-    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-    "<level>{level:<8}</level> | "
-    "<cyan>request_id={extra[request_id]}</cyan> | "
-    "<blue>method={extra[method]}</blue> | "
-    "<blue>path={extra[path]}</blue> | "
-    "<magenta>status={extra[status_code]}</magenta> | "
-    "<yellow>duration_ms={extra[duration_ms]}</yellow> | "
-    "<cyan>client_ip={extra[client_ip]}</cyan> | "
-    "<dim>{name}:{function}:{line}</dim> | "
-    "<level>{message}</level>"
-)
+
+def console_log_format(record: dict) -> str:
+    """
+    Tone-down terminal format. Color is restricted to the level tag and
+    a dim timestamp/location; the rainbow of per-field colors is gone.
+    HTTP request fields (method/path/status/duration) are only rendered
+    when the record was emitted inside a request — background tasks,
+    startup and scheduler logs no longer print 'method=- path=- status=-'.
+    """
+    template = (
+        "<dim>{time:HH:mm:ss}</dim>  "
+        "<level>{level: <8}</level>"
+    )
+    if _has_request_context(record["extra"]):
+        template += (
+            "  <cyan>{extra[method]: <6}</cyan>"
+            "<blue>{extra[path]}</blue>"
+            "  <magenta>{extra[status_code]}</magenta>"
+            "  <yellow>{extra[duration_ms]}ms</yellow>"
+        )
+    template += "  <dim>{name}:{line}</dim>  {message}\n{exception}"
+    return template
+
+
+def file_log_format(record: dict) -> str:
+    """
+    Plain-text file format. Same conditional treatment of HTTP request
+    fields as the console variant so the file is not padded with '-'
+    placeholders for non-request logs. Tracebacks are appended via
+    {exception} which the previous static format string was missing.
+    """
+    template = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8}"
+    if _has_request_context(record["extra"]):
+        template += (
+            " | {extra[method]} {extra[path]}"
+            " status={extra[status_code]}"
+            " duration={extra[duration_ms]}ms"
+            " client={extra[client_ip]}"
+            " req={extra[request_id]}"
+        )
+    template += " | {name}:{function}:{line} | {message}\n{exception}"
+    return template
 
 
 @dataclass(slots=True)
@@ -189,7 +216,7 @@ def configure_structured_logging(
     logger.add(
         sys.stdout,
         level=log_level_name,
-        format=COLOR_LOG_FORMAT,
+        format=console_log_format,
         colorize=True,
         backtrace=debug,
         diagnose=debug,
@@ -198,7 +225,7 @@ def configure_structured_logging(
         config.LOGS_PATH,
         rotation="10 MB",
         level=log_level_name,
-        format=INFORMATIVE_LOG_FORMAT,
+        format=file_log_format,
         colorize=False,
     )
     return log_level_name
