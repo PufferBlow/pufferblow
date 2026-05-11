@@ -30,6 +30,15 @@ async def users_route():
 @router.post("/signup", status_code=201)
 async def signup_new_user(request: SignupRequest):
     """Signup new user."""
+    if api_initializer.database_handler.get_server() is None:
+        raise exceptions.HTTPException(
+            status_code=503,
+            detail=(
+                "This instance has not been initialized. The administrator must run "
+                "`pufferblow setup` before accounts can be created."
+            ),
+        )
+
     if api_initializer.user_manager.check_username(request.username):
         raise exceptions.HTTPException(
             status_code=409,
