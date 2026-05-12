@@ -14,7 +14,11 @@ from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 
 # Log messages
 from pufferblow.api.logger.msgs import info, warnings
+from pufferblow.api.security import sql_injection_detector
 from pufferblow.core.bootstrap import api_initializer
+
+# Detections this many times across a process lifetime → IP joins BlockedIPS.
+SQL_INJECTION_BLOCK_THRESHOLD = 3
 
 
 # Pydantic models for query parameters validation in middleware
@@ -75,10 +79,6 @@ class MessageOperationsQuery(BaseModel):
     """MessageOperationsQuery class."""
     auth_token: str = Field(min_length=1)
     message_id: str = Field(min_length=1)
-
-
-# TODO: add a mecanisame to detect hand crafted parameters that are associated with a SQL injection attack,
-# and block the client ip
 
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
@@ -288,6 +288,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             "to_add_user_id": self._check_to_add_user_id,
             "to_remove_user_id": self._check_to_remove_user_id,
         }
+        self._injection_warnings_per_ip: dict[str, int] = defaultdict(int)
 
     @staticmethod
     def _compile_route_patterns(route_patterns: list[str] | tuple[str, ...]) -> list:
@@ -349,6 +350,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         query_params = request.query_params
 
+        injection_response = self._check_sql_injection(request, query_params)
+        if injection_response is not None:
+            return injection_response
+
         validation_error = self._validate_query_params(request_url, query_params)
         if validation_error is not None:
             return validation_error
@@ -358,6 +363,77 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             return exception
 
         return await call_next(request)
+
+    def _check_sql_injection(self, request, query_params):
+        """Detect SQL injection signatures in query params.
+
+        Repeated detections from the same IP cross
+        :data:`SQL_INJECTION_BLOCK_THRESHOLD` and the IP is added to
+        :class:`BlockedIPS`.
+        """
+        hit = sql_injection_detector.detect_in_params(query_params)
+        if hit is None:
+            return None
+        param_name, pattern_name = hit
+
+        client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if not client_ip:
+            client_ip = request.client.host
+
+        self._injection_warnings_per_ip[client_ip] += 1
+        warnings_count = self._injection_warnings_per_ip[client_ip]
+
+        logger.warning(
+            warnings.SQL_INJECTION_PATTERN_DETECTED(
+                ip=client_ip,
+                route=request.url.path,
+                param=param_name,
+                pattern=pattern_name,
+                warnings_count=warnings_count,
+            )
+        )
+
+        if warnings_count >= SQL_INJECTION_BLOCK_THRESHOLD:
+            logger.info(
+                info.CLIENT_IP_BLOCKED_SQL_INJECTION(
+                    client_ip=client_ip,
+                    injection_warnings=warnings_count,
+                )
+            )
+
+            blocked_ip = BlockedIPS(
+                ip=client_ip,
+                block_reason=(
+                    "Repeated SQL injection signatures in query parameters "
+                    f"(last pattern: '{pattern_name}' in parameter '{param_name}')."
+                ),
+                ip_id=str(uuid.uuid4()),
+            )
+            try:
+                api_initializer.database_handler.save_blocked_ip_to_blocked_ips(
+                    blocked_ip=blocked_ip
+                )
+            except Exception:
+                # IP may already be blocked from a concurrent request; the next
+                # request will be short-circuited by RateLimitingMiddleware.
+                logger.exception(
+                    f"Failed to persist BlockedIPS row for '{client_ip}' "
+                    "after SQL injection threshold"
+                )
+
+            return ORJSONResponse(
+                status_code=403,
+                content={
+                    "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
+                },
+            )
+
+        return ORJSONResponse(
+            status_code=400,
+            content={
+                "error": "Request rejected: query parameter contains a disallowed pattern."
+            },
+        )
 
     def _check_auth_token(self, request_url: str, query_params):
         """Validate auth token format, then validate user existence by token."""

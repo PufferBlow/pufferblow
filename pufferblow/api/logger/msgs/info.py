@@ -141,3 +141,14 @@ def CLIENT_IP_BLOCKED(
     msg = f"Malicious activities detected with the client IP: '{client_ip}', it have been [bold red]blocked[reset]. Number of requests is '{requests_count}' and number of rate limite warnings is '{rate_limit_warnings}'."
 
     return msg
+
+
+def CLIENT_IP_BLOCKED_SQL_INJECTION(
+    client_ip: str, injection_warnings: int
+) -> str:
+    """CLIENT IP BLOCKED FOR REPEATED SQL INJECTION ATTEMPTS."""
+    msg = (
+        f"Client IP: '{client_ip}' has been [bold red]blocked[reset] after "
+        f"'{injection_warnings}' SQL injection attempts."
+    )
+    return msg
