@@ -62,6 +62,63 @@ class MessagesManager:
             )
         return self._hydrate_messages(messages)
 
+    def search_messages(
+        self,
+        channel_id: str,
+        query: str,
+        scan_limit: int,
+        max_results: int,
+    ) -> tuple[list[dict], int, bool]:
+        """
+        Substring search across a channel's most recent ``scan_limit`` messages.
+
+        Messages are encrypted at rest, so this code path decrypts each candidate
+        and applies a case-insensitive substring match on the plaintext. Returns
+        newest matches first.
+
+        Args:
+            channel_id: The channel's id.
+            query: The substring to look for (case-insensitive).
+            scan_limit: How many recent messages to decrypt before stopping.
+            max_results: How many matches to return at most.
+
+        Returns:
+            (matches, scanned_count, truncated_scan):
+                ``matches`` — hydrated message dicts, newest first, up to ``max_results``.
+                ``scanned_count`` — how many messages were decrypted.
+                ``truncated_scan`` — True when the channel has more messages than ``scan_limit``.
+        """
+        candidates = self.database_handler.fetch_channel_messages_for_search(
+            channel_id=channel_id, scan_limit=scan_limit
+        )
+
+        needle = query.lower()
+        matches: list[tuple[Messages, object | None]] = []
+        for message_tuple in candidates:
+            message_data = message_tuple[0]
+            try:
+                raw_message = self.decrypt_message(
+                    user_id=str(message_data.sender_id),
+                    message_id=message_data.message_id,
+                    encrypted_message=base64.b64decode(message_data.hashed_message),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to decrypt during search: message_id={message_id} error={error}",
+                    message_id=message_data.message_id,
+                    error=str(exc),
+                )
+                continue
+
+            if needle in raw_message.lower():
+                matches.append(message_tuple)
+                if len(matches) >= max_results:
+                    break
+
+        hydrated = self._hydrate_messages(matches)
+        truncated = len(candidates) >= scan_limit
+        return hydrated, len(candidates), truncated
+
     def load_direct_messages(
         self,
         conversation_id: str,

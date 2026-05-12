@@ -291,6 +291,16 @@ class LoadMessagesResponse(BaseModel):
     messages: list[MessageData]
 
 
+class SearchMessagesResponse(BaseModel):
+    """Pydantic model for channel message search API response."""
+
+    status_code: int
+    messages: list[MessageData]
+    query: str
+    scanned: int
+    truncated_scan: bool
+
+
 class SendMessageQuery(BaseModel):
     """SendMessageQuery class."""
     auth_token: str = Field(min_length=1)

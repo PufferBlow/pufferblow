@@ -15,8 +15,16 @@ from loguru import logger
 from pufferblow.api.schemas import (
     LoadMessagesResponse,
     MessageData,
+    SearchMessagesResponse,
     SendMessageForm,
 )
+
+SEARCH_MIN_QUERY_LENGTH = 2
+SEARCH_MAX_QUERY_LENGTH = 256
+SEARCH_DEFAULT_LIMIT = 20
+SEARCH_MAX_LIMIT = 50
+SEARCH_DEFAULT_SCAN_LIMIT = 1000
+SEARCH_MAX_SCAN_LIMIT = 5000
 from pufferblow.api.dependencies import (
     check_channel_access,
     ensure_user_not_timed_out,
@@ -143,6 +151,102 @@ async def channel_load_messages(
         )
 
     return LoadMessagesResponse(status_code=200, messages=message_data_list)
+
+
+@router.get("/search", status_code=200, response_model=SearchMessagesResponse)
+async def channel_search_messages(
+    auth_token: str,
+    channel_id: str,
+    q: str,
+    limit: int | None = SEARCH_DEFAULT_LIMIT,
+    scan_limit: int | None = SEARCH_DEFAULT_SCAN_LIMIT,
+):
+    """
+    Substring search across a channel's recent messages.
+
+    Messages are encrypted at rest, so the server decrypts up to ``scan_limit``
+    most-recent messages and returns up to ``limit`` matches, newest first.
+    For channels larger than ``scan_limit``, the response sets
+    ``truncated_scan: true`` and only the recent window is searched. True
+    full-text search across all history is a v1.1 item (see PUFFERBLOW_MVP.md).
+
+    Args:
+        auth_token: User's authentication token.
+        channel_id: Channel ID.
+        q: Search query (2-256 chars).
+        limit: Max matches to return (default 20, max 50).
+        scan_limit: Max messages to decrypt-and-scan (default 1000, max 5000).
+
+    Returns:
+        200 OK: Matches plus scan metadata.
+        400 BAD REQUEST: Query out of bounds, or limits exceeded.
+        404 NOT FOUND: Channel not found or no access.
+    """
+    normalized_query = (q or "").strip()
+    if len(normalized_query) < SEARCH_MIN_QUERY_LENGTH:
+        raise exceptions.HTTPException(
+            detail=f"`q` must be at least {SEARCH_MIN_QUERY_LENGTH} characters.",
+            status_code=400,
+        )
+    if len(normalized_query) > SEARCH_MAX_QUERY_LENGTH:
+        raise exceptions.HTTPException(
+            detail=f"`q` exceeds the {SEARCH_MAX_QUERY_LENGTH}-character maximum.",
+            status_code=400,
+        )
+
+    effective_limit = limit or SEARCH_DEFAULT_LIMIT
+    if effective_limit < 1 or effective_limit > SEARCH_MAX_LIMIT:
+        raise exceptions.HTTPException(
+            detail=f"`limit` must be between 1 and {SEARCH_MAX_LIMIT}.",
+            status_code=400,
+        )
+
+    effective_scan = scan_limit or SEARCH_DEFAULT_SCAN_LIMIT
+    if effective_scan < 1 or effective_scan > SEARCH_MAX_SCAN_LIMIT:
+        raise exceptions.HTTPException(
+            detail=f"`scan_limit` must be between 1 and {SEARCH_MAX_SCAN_LIMIT}.",
+            status_code=400,
+        )
+
+    user_id = get_current_user(auth_token)
+    check_channel_access(user_id, channel_id)
+
+    matches, scanned, truncated = api_initializer.messages_manager.search_messages(
+        channel_id=channel_id,
+        query=normalized_query,
+        scan_limit=effective_scan,
+        max_results=effective_limit,
+    )
+
+    message_data_list = [
+        MessageData(
+            message_id=msg.get("message_id", ""),
+            channel_id=msg.get("channel_id", None),
+            conversation_id=msg.get("conversation_id", None),
+            sender_id=msg.get("sender_id", ""),
+            message=msg.get("message", ""),
+            sent_at=msg.get("sent_at", ""),
+            attachments=msg.get("attachments", []),
+            username=msg.get("sender_username", ""),
+            sender_user_id=msg.get("sender_user_id"),
+            sender_avatar_url=msg.get("sender_avatar_url"),
+            sender_banner_url=msg.get("sender_banner_url"),
+            sender_status=msg.get("sender_status"),
+            sender_roles=msg.get("sender_roles"),
+            sender_about=msg.get("sender_about"),
+            sender_last_seen=msg.get("sender_last_seen"),
+            sender_created_at=msg.get("sender_created_at"),
+        )
+        for msg in matches
+    ]
+
+    return SearchMessagesResponse(
+        status_code=200,
+        messages=message_data_list,
+        query=normalized_query,
+        scanned=scanned,
+        truncated_scan=truncated,
+    )
 
 
 @router.post("/send_message")

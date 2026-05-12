@@ -1679,6 +1679,39 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
         return messages_with_users
 
+    def fetch_channel_messages_for_search(
+        self, channel_id: str, scan_limit: int
+    ) -> list[tuple[Messages, Users | None]]:
+        """
+        Fetch up to ``scan_limit`` most-recent messages from a channel, with
+        user data joined, for the substring-search code path.
+
+        Returns newest first so the search can return recent hits without
+        scanning the whole channel.
+        """
+        messages_with_users: list[tuple[Messages, Users | None]] = []
+
+        with self.database_session() as session:
+            channel_messages_ids = self.get_channel_data(
+                channel_id=channel_id
+            ).messages_ids
+
+            if not channel_messages_ids:
+                return []
+
+            response = (
+                session.query(Messages, Users)
+                .join(Users, Messages.sender_id == Users.user_id, isouter=True)
+                .filter(Messages.message_id.in_(channel_messages_ids))
+                .order_by(Messages.sent_at.desc())
+                .limit(scan_limit)
+                .all()
+            )
+
+            messages_with_users = response
+
+        return messages_with_users
+
     def fetch_conversation_messages(
         self, conversation_id: str, messages_per_page: int, page: int
     ) -> list[tuple[Messages, Users | None]]:
