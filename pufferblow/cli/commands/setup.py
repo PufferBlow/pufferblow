@@ -480,7 +480,7 @@ def setup_command(
 
     config_handler = ConfigHandler()
     has_bootstrap_config = config_handler.resolve_database_uri() is not None
-
+    
     # Validate that only one flag is used
     flags_used = sum([is_setup_server, is_update_server, is_setup_media_sfu, is_setup_backup])
     if flags_used > 1:

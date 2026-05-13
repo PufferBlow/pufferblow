@@ -44,6 +44,11 @@ def setup_command_entry(
         "--setup-media-sfu",
         help="Only update the shared Pufferblow config [media-sfu] section.",
     ),
+    is_setup_backup: bool = typer.Option(
+        False,
+        "--backup",
+        help="Backup existing server metadata to a timestamped JSON file before making changes.",
+    ),
 ) -> None:
     """Run the setup command with lazy imports."""
     from pufferblow.cli.commands.setup import setup_command
@@ -52,6 +57,7 @@ def setup_command_entry(
         is_setup_server=is_setup_server,
         is_update_server=is_update_server,
         is_setup_media_sfu=is_setup_media_sfu,
+        is_setup_backup=is_setup_backup
     )
 
 
