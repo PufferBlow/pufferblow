@@ -11,6 +11,7 @@ from pufferblow.api.routes.core import router as core_router
 from pufferblow.api.routes.internal_voice import router as internal_voice_router
 from pufferblow.api.routes.messages import router as messages_router
 from pufferblow.api.routes.moderation import router as moderation_router
+from pufferblow.api.routes.notifications import router as notifications_router
 from pufferblow.api.routes.storage import (
     router as storage_router,
     set_api_initializer as set_storage_initializer,
@@ -35,6 +36,7 @@ def register_routers(api: FastAPI) -> None:
     api.include_router(channels_router, tags=["channels"])
     api.include_router(messages_router, tags=["messages"])
     api.include_router(moderation_router, tags=["moderation"])
+    api.include_router(notifications_router, tags=["notifications"])
     api.include_router(storage_router, tags=["storage"])
     api.include_router(admin_router, tags=["admin"])
     api.include_router(system_router, tags=["system"])

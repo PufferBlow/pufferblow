@@ -396,6 +396,37 @@ async def channel_send_message(
         channel_id, message_dict
     )
 
+    # Mention notifications: record one per resolved recipient and push a
+    # `notification_created` event to each one's WebSocket so badges update
+    # in real time. Failure here must not fail the send.
+    try:
+        notifications = (
+            api_initializer.notifications_manager.record_mentions_for_message(
+                content=message,
+                sender_user_id=user_id,
+                channel_id=channel_id,
+                message_id=str(message_obj.message_id),
+            )
+        )
+        for notification in notifications:
+            try:
+                await api_initializer.websockets_manager.broadcast_to_user(
+                    str(notification.user_id),
+                    api_initializer.notifications_manager.serialize_for_broadcast(
+                        notification
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    f"Failed to broadcast notification_created to "
+                    f"user_id={notification.user_id}"
+                )
+    except Exception:
+        logger.exception(
+            f"Mention-notification recording failed for "
+            f"message_id={message_obj.message_id}"
+        )
+
     return {
         "status_code": 201,
         "message": "message sent successfully",

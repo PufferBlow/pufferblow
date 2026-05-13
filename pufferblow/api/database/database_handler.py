@@ -1,5 +1,6 @@
 import base64
 import datetime
+from datetime import datetime as _datetime, timezone
 import hashlib
 import json
 import time
@@ -37,6 +38,7 @@ from pufferblow.api.database.tables.keys import Keys
 from pufferblow.api.database.tables.message_reactions import MessageReactions
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
 from pufferblow.api.database.tables.messages import Messages
+from pufferblow.api.database.tables.notifications import Notifications
 from pufferblow.api.database.tables.privileges import Privileges
 from pufferblow.api.database.tables.roles import Roles
 from pufferblow.api.database.tables.server import Server
@@ -1803,6 +1805,101 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             for row in rows:
                 grouped.setdefault(row.message_id, []).append(row)
         return grouped
+
+    # --- Notifications ---------------------------------------------------
+
+    def create_notification(self, notification: Notifications) -> None:
+        """Insert a single notification row."""
+        with self.database_session() as session:
+            session.add(notification)
+
+    def create_notifications_bulk(
+        self, notifications: list[Notifications]
+    ) -> None:
+        """Insert many notifications in one session."""
+        if not notifications:
+            return
+        with self.database_session() as session:
+            session.add_all(notifications)
+
+    def list_notifications_for_user(
+        self,
+        user_id: str,
+        limit: int = 50,
+        unread_only: bool = False,
+    ) -> list[Notifications]:
+        """Return the user's notifications, newest first.
+
+        Capped by ``limit`` (max 100 enforced at the route layer); pass
+        ``unread_only=True`` to skip rows already marked read.
+        """
+        effective_limit = max(1, min(int(limit), 100))
+        with self.database_session() as session:
+            query = session.query(Notifications).filter(
+                Notifications.user_id == user_id
+            )
+            if unread_only:
+                query = query.filter(Notifications.read_at.is_(None))
+            return (
+                query.order_by(Notifications.created_at.desc())
+                .limit(effective_limit)
+                .all()
+            )
+
+    def count_unread_notifications_for_user(self, user_id: str) -> int:
+        """Cheap unread-badge count."""
+        with self.database_session() as session:
+            return (
+                session.query(Notifications)
+                .filter(
+                    Notifications.user_id == user_id,
+                    Notifications.read_at.is_(None),
+                )
+                .count()
+            )
+
+    def mark_notification_read(
+        self, notification_id: str, user_id: str
+    ) -> bool:
+        """Mark a single notification read iff it belongs to ``user_id``.
+
+        Returns True when a row was updated (idempotent: already-read rows
+        return False so callers can distinguish).
+        """
+        now = _datetime.now(timezone.utc)
+        with self.database_session() as session:
+            row = (
+                session.query(Notifications)
+                .filter(
+                    Notifications.notification_id == notification_id,
+                    Notifications.user_id == user_id,
+                )
+                .first()
+            )
+            if row is None or row.read_at is not None:
+                return False
+            row.read_at = now
+        return True
+
+    def mark_all_notifications_read(self, user_id: str) -> int:
+        """Mark every unread notification for ``user_id`` as read.
+
+        Returns the number of rows touched.
+        """
+        now = _datetime.now(timezone.utc)
+        with self.database_session() as session:
+            count = (
+                session.query(Notifications)
+                .filter(
+                    Notifications.user_id == user_id,
+                    Notifications.read_at.is_(None),
+                )
+                .update(
+                    {Notifications.read_at: now},
+                    synchronize_session=False,
+                )
+            )
+        return int(count or 0)
 
     def update_channel_participants(
         self, channel_id: str, participant_ids: list[str]

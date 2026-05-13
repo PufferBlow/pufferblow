@@ -16,6 +16,7 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.api.models.config_model import Config
+from pufferblow.api.notifications import NotificationsManager
 from pufferblow.api.security.security_checks_handler import SecurityChecksHandler
 from pufferblow.api.server.server_manager import ServerManager
 from pufferblow.api.user.user_manager import UserManager
@@ -55,6 +56,7 @@ class APIInitializer:
         self.storage_manager: StorageManager | None = None
         self.background_tasks_manager: BackgroundTasksManager | None = None
         self.security_checks_handler: SecurityChecksHandler | None = None
+        self.notifications_manager: NotificationsManager | None = None
         self.decentralized_auth_manager: DecentralizedAuthManager | None = None
         self.activitypub_manager: ActivityPubManager | None = None
         self.ping_manager: PingManager | None = None
@@ -188,6 +190,9 @@ class APIInitializer:
             user_manager=self.user_manager,
             channels_manager=self.channels_manager,
             auth_token_manager=self.auth_token_manager,
+        )
+        self.notifications_manager = NotificationsManager(
+            database_handler=self.database_handler,
         )
         self.decentralized_auth_manager = DecentralizedAuthManager(
             database_handler=self.database_handler
