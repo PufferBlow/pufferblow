@@ -15,6 +15,7 @@ from loguru import logger
 from pufferblow.api.schemas import (
     LoadMessagesResponse,
     MessageData,
+    ReactionSummary,
     SearchMessagesResponse,
     SendMessageForm,
 )
@@ -25,6 +26,10 @@ SEARCH_DEFAULT_LIMIT = 20
 SEARCH_MAX_LIMIT = 50
 SEARCH_DEFAULT_SCAN_LIMIT = 1000
 SEARCH_MAX_SCAN_LIMIT = 5000
+
+# Reactions must be short. The DB column is 32 chars to comfortably fit
+# multi-codepoint emoji like flags or skin-tone modifiers.
+REACTION_EMOJI_MAX_LENGTH = 32
 from pufferblow.api.dependencies import (
     check_channel_access,
     ensure_user_not_timed_out,
@@ -122,7 +127,10 @@ async def channel_load_messages(
 
     # Load messages
     messages = api_initializer.messages_manager.load_messages(
-        channel_id=channel_id, messages_per_page=messages_per_page, page=page
+        channel_id=channel_id,
+        messages_per_page=messages_per_page,
+        page=page,
+        viewer_user_id=user_id,
     )
 
     # Convert raw messages to Pydantic MessageData models
@@ -137,6 +145,7 @@ async def channel_load_messages(
                 message=msg.get("message", ""),
                 sent_at=msg.get("sent_at", ""),
                 attachments=msg.get("attachments", []),
+                reactions=msg.get("reactions", []),
                 username=msg.get("sender_username", ""),
                 # User profile fields for reducing frontend requests
                 sender_user_id=msg.get("sender_user_id"),
@@ -216,6 +225,7 @@ async def channel_search_messages(
         query=normalized_query,
         scan_limit=effective_scan,
         max_results=effective_limit,
+        viewer_user_id=user_id,
     )
 
     message_data_list = [
@@ -422,6 +432,139 @@ async def channel_mark_message_as_read(
         "status_code": 201,
         "message": "The `message_id` was successfully mark as read",
     }
+
+
+@router.post("/messages/{message_id}/reactions", status_code=201)
+async def channel_add_message_reaction(
+    auth_token: str,
+    channel_id: str,
+    message_id: str,
+    emoji: str,
+):
+    """
+    Add a reaction emoji to a message.
+
+    Idempotent: re-applying the same emoji is a no-op (returns 200 with
+    ``already_present: true``). Adding a different emoji from the same user
+    is allowed.
+    """
+    emoji_value = (emoji or "").strip()
+    if not emoji_value:
+        raise exceptions.HTTPException(
+            detail="`emoji` cannot be empty.", status_code=400
+        )
+    if len(emoji_value) > REACTION_EMOJI_MAX_LENGTH:
+        raise exceptions.HTTPException(
+            detail=f"`emoji` exceeds the {REACTION_EMOJI_MAX_LENGTH}-character maximum.",
+            status_code=400,
+        )
+
+    user_id = require_privilege(auth_token, "send_messages")
+    check_channel_access(user_id, channel_id)
+    ensure_user_not_timed_out(user_id, "react to messages")
+
+    newly_added = api_initializer.messages_manager.add_reaction(
+        message_id=message_id, user_id=user_id, emoji=emoji_value
+    )
+
+    summary = api_initializer.messages_manager.get_reaction_summary(
+        message_id=message_id, viewer_user_id=user_id
+    )
+
+    payload = {
+        "status_code": 201 if newly_added else 200,
+        "already_present": not newly_added,
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "emoji": emoji_value,
+        "reactions": summary,
+    }
+
+    try:
+        await api_initializer.websockets_manager.broadcast_to_eligible_users(
+            channel_id,
+            {
+                "event": "message_reaction_added",
+                "message_id": message_id,
+                "channel_id": channel_id,
+                "user_id": str(user_id),
+                "emoji": emoji_value,
+                "reactions": [
+                    {k: v for k, v in entry.items() if k != "viewer_reacted"}
+                    for entry in summary
+                ],
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to broadcast message_reaction_added for "
+            f"message_id={message_id}"
+        )
+
+    return payload
+
+
+@router.delete("/messages/{message_id}/reactions", status_code=200)
+async def channel_remove_message_reaction(
+    auth_token: str,
+    channel_id: str,
+    message_id: str,
+    emoji: str,
+):
+    """
+    Remove a reaction emoji applied by the viewer from a message.
+
+    Idempotent: removing a reaction the viewer never applied returns 200
+    with ``already_absent: true``.
+    """
+    emoji_value = (emoji or "").strip()
+    if not emoji_value:
+        raise exceptions.HTTPException(
+            detail="`emoji` cannot be empty.", status_code=400
+        )
+
+    user_id = get_current_user(auth_token)
+    check_channel_access(user_id, channel_id)
+
+    removed = api_initializer.messages_manager.remove_reaction(
+        message_id=message_id, user_id=user_id, emoji=emoji_value
+    )
+
+    summary = api_initializer.messages_manager.get_reaction_summary(
+        message_id=message_id, viewer_user_id=user_id
+    )
+
+    payload = {
+        "status_code": 200,
+        "already_absent": not removed,
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "emoji": emoji_value,
+        "reactions": summary,
+    }
+
+    try:
+        await api_initializer.websockets_manager.broadcast_to_eligible_users(
+            channel_id,
+            {
+                "event": "message_reaction_removed",
+                "message_id": message_id,
+                "channel_id": channel_id,
+                "user_id": str(user_id),
+                "emoji": emoji_value,
+                "reactions": [
+                    {k: v for k, v in entry.items() if k != "viewer_reacted"}
+                    for entry in summary
+                ],
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to broadcast message_reaction_removed for "
+            f"message_id={message_id}"
+        )
+
+    return payload
 
 
 @router.delete("/delete_message")

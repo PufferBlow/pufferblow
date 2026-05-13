@@ -34,6 +34,7 @@ from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
 from pufferblow.api.database.tables.instance_runtime_config import InstanceRuntimeConfig
 from pufferblow.api.database.tables.keys import Keys
+from pufferblow.api.database.tables.message_reactions import MessageReactions
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
 from pufferblow.api.database.tables.messages import Messages
 from pufferblow.api.database.tables.privileges import Privileges
@@ -1734,6 +1735,74 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             messages_with_users = response
 
         return messages_with_users
+
+    # --- Message reactions -----------------------------------------------
+
+    def add_message_reaction(
+        self, message_id: str, user_id: str, emoji: str
+    ) -> bool:
+        """Insert a reaction row. Returns True when newly added, False when the
+        row already existed (idempotent toggle on)."""
+        with self.database_session() as session:
+            existing = (
+                session.query(MessageReactions)
+                .filter(
+                    MessageReactions.message_id == message_id,
+                    MessageReactions.user_id == user_id,
+                    MessageReactions.emoji == emoji,
+                )
+                .first()
+            )
+            if existing is not None:
+                return False
+            session.add(
+                MessageReactions(
+                    message_id=message_id,
+                    user_id=user_id,
+                    emoji=emoji,
+                )
+            )
+        return True
+
+    def remove_message_reaction(
+        self, message_id: str, user_id: str, emoji: str
+    ) -> bool:
+        """Delete a reaction row. Returns True when a row was removed, False
+        when no such reaction existed (idempotent toggle off)."""
+        with self.database_session() as session:
+            deleted = (
+                session.query(MessageReactions)
+                .filter(
+                    MessageReactions.message_id == message_id,
+                    MessageReactions.user_id == user_id,
+                    MessageReactions.emoji == emoji,
+                )
+                .delete(synchronize_session=False)
+            )
+        return bool(deleted)
+
+    def get_reactions_for_messages(
+        self, message_ids: list[str]
+    ) -> dict[str, list[MessageReactions]]:
+        """Return reactions grouped by ``message_id`` for the given ids.
+
+        Empty input returns an empty dict. Missing ids are simply absent from
+        the result rather than mapped to empty lists, so callers should
+        default-handle.
+        """
+        if not message_ids:
+            return {}
+
+        grouped: dict[str, list[MessageReactions]] = {}
+        with self.database_session() as session:
+            rows = (
+                session.query(MessageReactions)
+                .filter(MessageReactions.message_id.in_(message_ids))
+                .all()
+            )
+            for row in rows:
+                grouped.setdefault(row.message_id, []).append(row)
+        return grouped
 
     def update_channel_participants(
         self, channel_id: str, participant_ids: list[str]

@@ -255,6 +255,15 @@ class MessageAttachment(BaseModel):
     size: int | None = None
 
 
+class ReactionSummary(BaseModel):
+    """Aggregated reaction info attached to a message."""
+
+    emoji: str
+    count: int
+    viewer_reacted: bool = False
+    user_ids: list[str] = []
+
+
 class MessageData(BaseModel):
     """Pydantic model for individual message data"""
 
@@ -265,6 +274,7 @@ class MessageData(BaseModel):
     message: str
     sent_at: str
     attachments: list[MessageAttachment] = []
+    reactions: list[ReactionSummary] = []
     username: str
     # User profile fields for reducing frontend requests
     sender_user_id: str | None = None

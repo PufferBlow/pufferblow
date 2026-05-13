@@ -15,6 +15,31 @@ from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.user.user_manager import UserManager
 
 
+def _summarize_reactions(
+    reactions: list, viewer_user_id: str | None
+) -> list[dict]:
+    """Group raw reaction rows by emoji and emit summary dicts.
+
+    Each summary has ``{emoji, count, viewer_reacted, user_ids}`` where
+    ``user_ids`` is the full list of users that reacted with that emoji. The
+    list is ordered by descending count, then emoji string for stability.
+    """
+    groups: dict[str, list[str]] = {}
+    for reaction in reactions:
+        groups.setdefault(reaction.emoji, []).append(str(reaction.user_id))
+
+    summary: list[dict] = []
+    for emoji, user_ids in groups.items():
+        summary.append({
+            "emoji": emoji,
+            "count": len(user_ids),
+            "viewer_reacted": bool(viewer_user_id) and viewer_user_id in user_ids,
+            "user_ids": user_ids,
+        })
+    summary.sort(key=lambda entry: (-entry["count"], entry["emoji"]))
+    return summary
+
+
 class MessagesManager:
     """Messages manager class"""
 
@@ -38,6 +63,7 @@ class MessagesManager:
         page: int | None = 1,
         websocket: bool | None = False,
         viewed_messages_ids: list | None = None,
+        viewer_user_id: str | None = None,
     ) -> list[dict]:
         """
         Load a specific messages number from a given channel's `channel_id
@@ -48,6 +74,8 @@ class MessagesManager:
             page (int, optional, default: 1): The page number (pages start from 1 to `x` depending on how many messages a channel contains).
             websocket (bool, optional, default: False): Weither the function was called from a websocket function.
             viewed_messages_ids (list, optional, default: None): Viewed messages ids by the user/client.
+            viewer_user_id (str, optional, default: None): The viewer's user_id;
+                used to flag ``viewer_reacted`` on each reaction summary.
 
         Returns:
             list[dict]: A list of messages' metadata in dict format.
@@ -60,7 +88,7 @@ class MessagesManager:
             messages = self.database_handler.fetch_unviewed_channel_messages(
                 channel_id=channel_id, viewed_messages_ids=viewed_messages_ids
             )
-        return self._hydrate_messages(messages)
+        return self._hydrate_messages(messages, viewer_user_id=viewer_user_id)
 
     def search_messages(
         self,
@@ -68,6 +96,7 @@ class MessagesManager:
         query: str,
         scan_limit: int,
         max_results: int,
+        viewer_user_id: str | None = None,
     ) -> tuple[list[dict], int, bool]:
         """
         Substring search across a channel's most recent ``scan_limit`` messages.
@@ -115,7 +144,7 @@ class MessagesManager:
                 if len(matches) >= max_results:
                     break
 
-        hydrated = self._hydrate_messages(matches)
+        hydrated = self._hydrate_messages(matches, viewer_user_id=viewer_user_id)
         truncated = len(candidates) >= scan_limit
         return hydrated, len(candidates), truncated
 
@@ -124,6 +153,7 @@ class MessagesManager:
         conversation_id: str,
         messages_per_page: int | None = 20,
         page: int | None = 1,
+        viewer_user_id: str | None = None,
     ) -> list[dict]:
         """
         Load direct messages for a conversation_id.
@@ -133,7 +163,32 @@ class MessagesManager:
             messages_per_page=messages_per_page,
             page=page,
         )
-        return self._hydrate_messages(messages)
+        return self._hydrate_messages(messages, viewer_user_id=viewer_user_id)
+
+    # --- Reactions -------------------------------------------------------
+
+    def add_reaction(self, message_id: str, user_id: str, emoji: str) -> bool:
+        """Apply a reaction. Returns True if newly added, False if no-op."""
+        return self.database_handler.add_message_reaction(
+            message_id=message_id, user_id=user_id, emoji=emoji
+        )
+
+    def remove_reaction(self, message_id: str, user_id: str, emoji: str) -> bool:
+        """Remove a reaction. Returns True if removed, False if not present."""
+        return self.database_handler.remove_message_reaction(
+            message_id=message_id, user_id=user_id, emoji=emoji
+        )
+
+    def get_reaction_summary(
+        self, message_id: str, viewer_user_id: str | None = None
+    ) -> list[dict]:
+        """Return the reaction summary for a single message."""
+        grouped = self.database_handler.get_reactions_for_messages(
+            message_ids=[message_id]
+        )
+        return _summarize_reactions(
+            grouped.get(message_id, []), viewer_user_id=viewer_user_id
+        )
 
     def send_message(
         self,
@@ -393,11 +448,24 @@ class MessagesManager:
         )
         return message_metadata, encryption_key
 
-    def _hydrate_messages(self, messages: list[tuple[Messages, object | None]]) -> list[dict]:
+    def _hydrate_messages(
+        self,
+        messages: list[tuple[Messages, object | None]],
+        viewer_user_id: str | None = None,
+    ) -> list[dict]:
         """
         Convert DB message tuples to client-facing dictionaries.
+
+        When ``viewer_user_id`` is supplied each reaction summary includes a
+        ``viewer_reacted`` flag indicating whether the viewer is in the set of
+        users that applied that emoji to the message.
         """
         messages_metadata: list[dict] = []
+
+        message_ids = [m[0].message_id for m in messages]
+        reactions_by_message = self.database_handler.get_reactions_for_messages(
+            message_ids=message_ids
+        )
 
         for message_tuple in messages:
             message_data = message_tuple[0]
@@ -456,6 +524,12 @@ class MessagesManager:
                 json_metadata_format["attachments"] = []
 
             json_metadata_format["sender_user_id"] = str(message_data.sender_id)
+
+            message_reactions = reactions_by_message.get(message_data.message_id, [])
+            json_metadata_format["reactions"] = _summarize_reactions(
+                message_reactions, viewer_user_id=viewer_user_id
+            )
+
             messages_metadata.append(json_metadata_format)
 
         logger.debug(f"{messages = }")

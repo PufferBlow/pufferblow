@@ -250,6 +250,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         "/api/v1/channel/*/mark_message_as_read",
         "/api/v1/channel/*/delete_message",
         "/api/v1/channels/*/search",
+        "/api/v1/channels/*/messages/*/reactions",
     )
 
     ROUTE_TO_MODEL: dict[str, type[BaseModel]] = {
