@@ -76,6 +76,11 @@ api = FastAPI(lifespan=lifespan)
     cors_allow_methods,
     cors_allow_headers,
 ) = _load_cors_settings()
+api.add_middleware(SecurityMiddleware)
+api.add_middleware(RateLimitingMiddleware)
+# CORSMiddleware must be added last so it runs outermost and attaches
+# Access-Control-Allow-Origin headers even when downstream middleware
+# or route handlers return 4xx/5xx responses.
 if cors_origins or cors_origin_regex:
     api.add_middleware(
         CORSMiddleware,
@@ -89,9 +94,6 @@ else:
     logger.warning(
         "CORS middleware disabled because [security].cors_origins or [security].cors_origin_regex is not set in ~/.pufferblow/config.toml"
     )
-
-api.add_middleware(SecurityMiddleware)
-api.add_middleware(RateLimitingMiddleware)
 
 register_routers(api)
 
