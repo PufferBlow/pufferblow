@@ -569,8 +569,15 @@ async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Resp
     }
     if file_object.created_at:
         created_utc = file_object.created_at
+        # `format_datetime(..., usegmt=True)` requires a UTC datetime. Postgres
+        # `TIMESTAMP WITH TIME ZONE` can come back tz-aware in the server's
+        # local zone instead of UTC, so handle both shapes:
+        #   - naive  → assume UTC (matches how rows are written)
+        #   - aware  → convert to UTC explicitly
         if created_utc.tzinfo is None:
             created_utc = created_utc.replace(tzinfo=timezone.utc)
+        else:
+            created_utc = created_utc.astimezone(timezone.utc)
         cache_headers["Last-Modified"] = format_datetime(created_utc, usegmt=True)
 
     return _build_storage_response(
