@@ -1235,6 +1235,24 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             result = session.execute(stmt).fetchall()
             return [row[0] for row in result]
 
+    def is_activitypub_inbox_known(self, activity_uri: str) -> bool:
+        """Return True if an inbox row for ``activity_uri`` already exists.
+
+        Used by the ActivityPub inbox handler to short-circuit replay attacks
+        and accidental redelivery: a remote that resends the same Follow /
+        Create / Accept should be stored once but never trigger handler side
+        effects (DM duplication, double-Accept, etc.) on every retry.
+        """
+        if not activity_uri:
+            return False
+        with self.database_session() as session:
+            row = session.execute(
+                select(ActivityPubInboxActivity.activity_uri).where(
+                    ActivityPubInboxActivity.activity_uri == activity_uri
+                )
+            ).first()
+            return row is not None
+
     def store_activitypub_inbox_activity(
         self,
         activity_uri: str,

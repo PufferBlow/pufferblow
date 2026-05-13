@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import json
@@ -12,6 +13,13 @@ import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from loguru import logger
+
+# Outbound POST retry policy. Network errors and 5xx responses are retried up
+# to OUTBOUND_POST_MAX_ATTEMPTS times with exponential backoff
+# (OUTBOUND_POST_BACKOFF_BASE_SECONDS * 2**i). 4xx responses are surfaced
+# immediately because they signal protocol errors, not transient flakes.
+OUTBOUND_POST_MAX_ATTEMPTS = 3
+OUTBOUND_POST_BACKOFF_BASE_SECONDS = 1.0
 
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.messages.messages_manager import MessagesManager
@@ -242,15 +250,72 @@ class ActivityPubManager:
             return response.json()
 
     async def _http_post_json(self, url: str, payload: dict, timeout: float = 10.0) -> None:
-        """Http post json."""
+        """POST an ActivityPub payload with retry-on-transient-failure.
+
+        Retries up to :data:`OUTBOUND_POST_MAX_ATTEMPTS` times on network
+        errors and 5xx responses with exponential backoff. 4xx responses are
+        re-raised immediately (the remote is rejecting us at the protocol
+        layer; retrying won't help). The final exception is re-raised so
+        callers can decide whether to surface to the user, persist for a
+        background retry, or just log.
+        """
         headers = {
             "Content-Type": "application/activity+json",
             "Accept": "application/activity+json, application/json",
             "User-Agent": "PufferBlow-ActivityPub/0.0.1-beta",
         }
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            response = await client.post(url, headers=headers, content=json.dumps(payload))
-            response.raise_for_status()
+        body = json.dumps(payload)
+        last_error: Exception | None = None
+
+        for attempt in range(1, OUTBOUND_POST_MAX_ATTEMPTS + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                    response = await client.post(url, headers=headers, content=body)
+                # 4xx: client/protocol error — don't retry.
+                if 400 <= response.status_code < 500:
+                    response.raise_for_status()
+                    return
+                response.raise_for_status()
+                return
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                # Don't retry 4xx; bail out so the caller sees the real status.
+                if 400 <= status < 500:
+                    logger.warning(
+                        "ActivityPub POST rejected with {status} (no retry): "
+                        "url={url}",
+                        status=status,
+                        url=url,
+                    )
+                    raise
+                last_error = exc
+            except (httpx.RequestError, asyncio.TimeoutError) as exc:
+                last_error = exc
+
+            if attempt < OUTBOUND_POST_MAX_ATTEMPTS:
+                delay = OUTBOUND_POST_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "ActivityPub POST attempt {attempt}/{max_attempts} failed "
+                    "({error}); retrying in {delay:.1f}s. url={url}",
+                    attempt=attempt,
+                    max_attempts=OUTBOUND_POST_MAX_ATTEMPTS,
+                    error=last_error,
+                    delay=delay,
+                    url=url,
+                )
+                await asyncio.sleep(delay)
+
+        # Exhausted retries — surface the last failure so the caller's
+        # exception handler can record it.
+        logger.error(
+            "ActivityPub POST failed after {max_attempts} attempts: url={url} "
+            "error={error}",
+            max_attempts=OUTBOUND_POST_MAX_ATTEMPTS,
+            url=url,
+            error=last_error,
+        )
+        assert last_error is not None
+        raise last_error
 
     async def resolve_actor_uri_from_handle(self, handle: str) -> str:
         """
@@ -553,13 +618,35 @@ class ActivityPubManager:
     ) -> dict:
         """
         Process incoming ActivityPub activity.
+
+        Replay protection: if the inbox already contains a row for
+        ``activity.id`` we short-circuit and return ``action='duplicate'``
+        instead of re-running side effects. Activities arriving without an
+        ``id`` get a synthetic uuid (which is by definition unique) so they
+        fall through to the normal handlers exactly once.
         """
         activity_type = str(activity.get("type", "")).strip()
         actor_uri = str(activity.get("actor", "")).strip()
         if not activity_type or not actor_uri:
             raise ValueError("Incoming activity must include 'type' and 'actor'")
 
-        activity_uri = str(activity.get("id") or f"urn:uuid:{uuid.uuid4()}")
+        provided_activity_id = str(activity.get("id") or "").strip()
+        if provided_activity_id and self.database_handler.is_activitypub_inbox_known(
+            activity_uri=provided_activity_id
+        ):
+            logger.info(
+                "Replay short-circuit: activity_uri={activity_uri} already "
+                "processed (type={activity_type})",
+                activity_uri=provided_activity_id,
+                activity_type=activity_type,
+            )
+            return {
+                "processed": True,
+                "activity_type": activity_type,
+                "action": "duplicate",
+            }
+
+        activity_uri = provided_activity_id or f"urn:uuid:{uuid.uuid4()}"
         self.database_handler.store_activitypub_inbox_activity(
             activity_uri=activity_uri,
             activity_type=activity_type,
