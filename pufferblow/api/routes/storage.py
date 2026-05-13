@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from email.utils import format_datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,7 @@ from sqlalchemy import delete, select
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
 from pufferblow.api.dependencies import require_privilege
 from pufferblow.api.logger.logger import logger
+from pufferblow.api.utils.http_datetime import http_last_modified
 from pufferblow.api.storage.path_utils import (
     is_sha256_hash,
     normalize_storage_relative_path,
@@ -567,18 +567,9 @@ async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Resp
     cache_headers: dict[str, str] = {
         "Cache-Control": "public, max-age=31536000, immutable",
     }
-    if file_object.created_at:
-        created_utc = file_object.created_at
-        # `format_datetime(..., usegmt=True)` requires a UTC datetime. Postgres
-        # `TIMESTAMP WITH TIME ZONE` can come back tz-aware in the server's
-        # local zone instead of UTC, so handle both shapes:
-        #   - naive  → assume UTC (matches how rows are written)
-        #   - aware  → convert to UTC explicitly
-        if created_utc.tzinfo is None:
-            created_utc = created_utc.replace(tzinfo=timezone.utc)
-        else:
-            created_utc = created_utc.astimezone(timezone.utc)
-        cache_headers["Last-Modified"] = format_datetime(created_utc, usegmt=True)
+    last_modified = http_last_modified(file_object.created_at)
+    if last_modified is not None:
+        cache_headers["Last-Modified"] = last_modified
 
     return _build_storage_response(
         content=content,
