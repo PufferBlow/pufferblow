@@ -14,7 +14,7 @@
 [![GitHub Issues](https://img.shields.io/github/issues/PufferBlow/pufferblow?style=flat-square)](https://github.com/PufferBlow/pufferblow/issues)
 [![Version](https://img.shields.io/badge/version-0.0.1--beta-orange?style=flat-square)](https://github.com/PufferBlow/pufferblow/releases)
 
-> **Note:** The project is currently in beta. Breaking changes may occur before v1.0.
+> **Note:** The project is currently in beta. Breaking changes may occur before v1.0. Read [What v1.0 Does and Doesn't Do](V1_0_CAVEATS.md) before deploying — it spells out which features are real today (search, voice, federation) and which (E2EE, simulcast, FTS) are explicitly deferred.
 
 </div>
 

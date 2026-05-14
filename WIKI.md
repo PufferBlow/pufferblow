@@ -2,6 +2,8 @@
 
 This wiki documents how the `pufferblow` server works today, with focus on decentralization, federation, and the current runtime architecture.
 
+> **Heads up:** before you deploy or evaluate this for a real community, read [V1_0_CAVEATS.md](V1_0_CAVEATS.md) — it's a plain-English contract of what the v1.0 line actually does (and explicitly does not do, like end-to-end encryption).
+
 ## 1. Platform Model
 
 PufferBlow is designed as an **instance-first communication platform**:
