@@ -515,7 +515,7 @@ async def channel_add_message_reaction(
         await api_initializer.websockets_manager.broadcast_to_eligible_users(
             channel_id,
             {
-                "event": "message_reaction_added",
+                "type": "message_reaction_added",
                 "message_id": message_id,
                 "channel_id": channel_id,
                 "user_id": str(user_id),
@@ -578,7 +578,7 @@ async def channel_remove_message_reaction(
         await api_initializer.websockets_manager.broadcast_to_eligible_users(
             channel_id,
             {
-                "event": "message_reaction_removed",
+                "type": "message_reaction_removed",
                 "message_id": message_id,
                 "channel_id": channel_id,
                 "user_id": str(user_id),

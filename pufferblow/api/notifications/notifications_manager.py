@@ -166,11 +166,11 @@ class NotificationsManager:
     def serialize_for_broadcast(notification: Notifications) -> dict:
         """Build the WebSocket payload for a freshly-created notification.
 
-        The ``event`` discriminator matches the existing chat WS conventions
-        ('user_status_changed', 'message_reaction_added', ...) so client
-        dispatch stays uniform.
+        Uses the ``type`` discriminator already established by the rest of
+        the chat WS surface ('user_status_changed', 'user_joined', etc.) so
+        the client's normalize_chat_websocket_message dispatch stays uniform.
         """
         return {
-            "event": "notification_created",
+            "type": "notification_created",
             "notification": notification.to_dict(),
         }
