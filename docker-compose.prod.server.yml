@@ -8,7 +8,11 @@ services:
     ports:
       - "7575:7575"
     environment:
-      PUFFERBLOW_DATABASE_URI: ${PUFFERBLOW_DATABASE_URI:-}
+      # If empty, the server falls back to config.toml in pufferblow_data.
+      # The default below assembles a URI against the bundled postgres
+      # service using the values you set in .env, so a fresh stack works
+      # out of the box.
+      PUFFERBLOW_DATABASE_URI: ${PUFFERBLOW_DATABASE_URI:-postgresql://${POSTGRES_USER:-pufferblow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pufferblow}}
       PUFFERBLOW_API_HOST: ${PUFFERBLOW_API_HOST:-0.0.0.0}
       PUFFERBLOW_API_PORT: ${PUFFERBLOW_API_PORT:-7575}
     volumes:
@@ -16,6 +20,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      # /readyz mirrors instance health: returns 200 once the API has
+      # finished bootstrap (DB connect + manager wiring). media-sfu waits
+      # on this rather than `service_started` so it doesn't race past
+      # the bootstrap callback endpoint not being ready yet.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7575/readyz', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - pufferblow-server-net
 
@@ -33,7 +47,7 @@ services:
       - pufferblow_data:/root/.pufferblow
     depends_on:
       pufferblow-server:
-        condition: service_started
+        condition: service_healthy
     networks:
       - pufferblow-server-net
 

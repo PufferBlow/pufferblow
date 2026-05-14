@@ -88,37 +88,48 @@ class ConfigHandler:
 
     def resolve_database_uri(self) -> str | None:
         """
-        Resolve database URI from config.toml [database] section.
-        
-        Reads database configuration from ~/.pufferblow/config.toml [database] section.
-        Supports two formats:
-        - Full URI: database_uri = "postgresql://..."
-        - Individual params: host, port, username, password, database
-        
-        Returns None if config.toml or database section not found.
+        Resolve database URI in priority order:
+
+        1. ``~/.pufferblow/config.toml`` ``[database]`` section
+           - explicit ``database_uri = "..."``, OR
+           - individual ``host`` / ``port`` / ``username`` / ``password`` /
+             ``database`` keys (assembled into a postgresql:// URI).
+        2. ``PUFFERBLOW_DATABASE_URI`` environment variable.
+
+        Returns ``None`` if neither source resolves a URI.
+
+        The env var fallback exists so the Docker Compose stack can run
+        `pufferblow serve` without first sshing into the container to
+        run `pufferblow setup` — the compose file already exports this
+        variable to both the server and the media-sfu sidecar.
         """
-        # Load from config.toml only
+        # Source 1: config.toml [database]
         config = self._load_config_toml()
         if config.get("database"):
             db_config = config["database"]
-            
+
             # Approach 1: Full URI in config.toml
             if "database_uri" in db_config:
                 uri = str(db_config.get("database_uri", "")).strip()
                 if uri:
                     return uri
-            
+
             # Approach 2: Build URI from individual parameters
             host = db_config.get("host", "localhost")
             port = db_config.get("port", 5432)
             username = db_config.get("username", "pufferblow")
             password = db_config.get("password", "")
             database = db_config.get("database", "pufferblow")
-            
+
             if all([host, username, password, database]):
                 uri = f"postgresql://{username}:{password}@{host}:{port}/{database}"
                 return uri
-        
+
+        # Source 2: PUFFERBLOW_DATABASE_URI environment variable.
+        env_uri = os.getenv("PUFFERBLOW_DATABASE_URI", "").strip()
+        if env_uri:
+            return env_uri
+
         return None
 
     def check_config(self) -> bool:
