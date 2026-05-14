@@ -13,6 +13,16 @@ PufferBlow is designed as an **instance-first communication platform**:
 
 This keeps local server governance simple (Discord-style server ownership) while still enabling federated communication between instances.
 
+### Datastore — what PufferBlow actually uses
+
+PufferBlow is a **plain Python/FastAPI server** backed by **PostgreSQL** (or SQLite in tests) via SQLAlchemy. Object storage uses either a local filesystem backend or an S3-compatible API (MinIO, R2, S3). **It does not use Supabase, Firebase, or any other Backend-as-a-Service.** Older revisions of `docs/get_started.rst` shipped Supabase setup screenshots; those have been removed because they misled new self-hosters into thinking a Supabase account was required. The setup flow is:
+
+1. Install PostgreSQL locally (or point at an existing instance).
+2. Run `pufferblow setup` — it provisions the database, generates a `~/.pufferblow/config.toml`, and seeds the default roles.
+3. Run `pufferblow serve`.
+
+If a screenshot or guide elsewhere implies otherwise, treat it as stale and update it.
+
 ## 2. Current Server Layout
 
 Main server package: `pufferblow/pufferblow/`
