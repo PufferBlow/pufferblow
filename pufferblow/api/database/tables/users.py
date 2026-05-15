@@ -53,6 +53,19 @@ class Users(Base):
     about: Mapped[str | None] = mapped_column(String, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     banner_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Appearance mode + identicon/color state. See
+    # ``pufferblow.api.utils.appearance`` for the curated palette and
+    # seed format. avatar_kind/banner_kind are explicit so a user who
+    # uploaded a custom image and then deleted it still has a sane
+    # fallback (set kind back to identicon/solid manually).
+    avatar_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="identicon", server_default="identicon"
+    )
+    banner_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="solid", server_default="solid"
+    )
+    accent_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    avatar_seed: Mapped[str | None] = mapped_column(String(64), nullable=True)
     inbox_id: Mapped[UUID | None] = mapped_column(
         SA_UUID(as_uuid=True), nullable=True
     )
@@ -97,6 +110,10 @@ class Users(Base):
             "about": self.about,
             "avatar_url": self.avatar_url,
             "banner_url": self.banner_url,
+            "avatar_kind": self.avatar_kind,
+            "banner_kind": self.banner_kind,
+            "accent_color": self.accent_color,
+            "avatar_seed": self.avatar_seed,
             "status": self.status,
             "origin_server": self.origin_server,
             "inbox_id": self.inbox_id,

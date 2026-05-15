@@ -186,6 +186,23 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 logger.error(f"PostgreSQL table creation failed: {e}")
                 raise
 
+        # Backfill appearance defaults for any rows that pre-date the
+        # appearance feature. Idempotent — only touches rows where the
+        # derived columns are still NULL. Runs on both SQLite (tests /
+        # local dev) and Postgres (prod) so a long-lived dev DB doesn't
+        # render with broken banners after the schema upgrade.
+        try:
+            self._backfill_appearance_defaults()
+        except Exception as exc:
+            # Backfill is best-effort. A failure here shouldn't block
+            # boot — the column-level server_default for the kind
+            # fields still gives a sane fallback at the SQL layer, and
+            # the API resolves missing accent_color/avatar_seed on the
+            # fly client-side.
+            logger.warning(
+                "Appearance backfill skipped due to error: {err}", err=str(exc)
+            )
+
     def _create_tables_safely(self, base: DeclarativeBase) -> None:
         """
         Create all declared tables in a single idempotent call.
@@ -196,6 +213,69 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         except Exception as e:
             logger.error(f"Table creation failed: {str(e)}")
             raise
+
+    def _backfill_appearance_defaults(self) -> None:
+        """Populate accent_color + avatar_seed for pre-feature rows.
+
+        New users and servers get these set on creation. Rows that
+        existed before the appearance feature shipped have NULLs, and
+        the client wouldn't have a color to render. This walks both
+        tables once at startup and fills the gaps using the same
+        derivation the creation path uses, so an existing user sees a
+        consistent default the moment the new schema ships.
+
+        Idempotent: rows with non-null values are skipped. Safe to
+        call on every boot; once the data is filled it's a no-op.
+        """
+        from pufferblow.api.database.tables.server import Server as _ServerTable
+        from pufferblow.api.database.tables.users import Users as _UsersTable
+        from pufferblow.api.utils.appearance import derive_accent_color
+
+        with self.database_session() as session:
+            user_rows = (
+                session.query(_UsersTable)
+                .filter(
+                    (_UsersTable.accent_color.is_(None))
+                    | (_UsersTable.avatar_seed.is_(None))
+                )
+                .all()
+            )
+            for row in user_rows:
+                stable_id = str(row.user_id)
+                if not row.accent_color:
+                    row.accent_color = derive_accent_color(stable_id)
+                if not row.avatar_seed:
+                    row.avatar_seed = stable_id
+                if not row.avatar_kind:
+                    row.avatar_kind = "identicon"
+                if not row.banner_kind:
+                    row.banner_kind = "solid"
+
+            server_rows = (
+                session.query(_ServerTable)
+                .filter(
+                    (_ServerTable.accent_color.is_(None))
+                    | (_ServerTable.avatar_seed.is_(None))
+                )
+                .all()
+            )
+            for row in server_rows:
+                stable_id = str(row.server_id)
+                if not row.accent_color:
+                    row.accent_color = derive_accent_color(stable_id)
+                if not row.avatar_seed:
+                    row.avatar_seed = stable_id
+                if not row.avatar_kind:
+                    row.avatar_kind = "identicon"
+                if not row.banner_kind:
+                    row.banner_kind = "solid"
+
+            if user_rows or server_rows:
+                logger.info(
+                    "Backfilled appearance defaults: users={users}, servers={servers}",
+                    users=len(user_rows),
+                    servers=len(server_rows),
+                )
 
     def sign_up(self, user_data: Users) -> None:
         """
@@ -705,21 +785,23 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.commit()
 
     def update_user_avatar(self, user_id: str, new_avatar_url: str) -> None:
-        """Updates the user's avatar URL
+        """Updates the user's avatar URL.
 
-        Args:
-            `user_id` (str): The user's `user_id`.
-            `new_avatar_url` (str): The new avatar URL.
-
-        Returns:
-            `None`.
+        Flips avatar_kind to 'image' as a side effect: uploading IS the
+        signal that the user wants a custom image, so the appearance
+        toggle should follow. The user can switch back to the identicon
+        via the appearance endpoint.
         """
         updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmt = (
                 update(Users)
-                .values(avatar_url=new_avatar_url, updated_at=updated_at)
+                .values(
+                    avatar_url=new_avatar_url,
+                    avatar_kind="image",
+                    updated_at=updated_at,
+                )
                 .where(Users.user_id == user_id)
             )
 
@@ -728,26 +810,107 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.commit()
 
     def update_user_banner(self, user_id: str, new_banner_url: str) -> None:
-        """Updates the user's banner URL
+        """Updates the user's banner URL.
 
-        Args:
-            `user_id` (str): The user's `user_id`.
-            `new_banner_url` (str): The new banner URL.
-
-        Returns:
-            `None`.
+        Flips banner_kind to 'image' (see ``update_user_avatar``).
         """
         updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmt = (
                 update(Users)
-                .values(banner_url=new_banner_url, updated_at=updated_at)
+                .values(
+                    banner_url=new_banner_url,
+                    banner_kind="image",
+                    updated_at=updated_at,
+                )
                 .where(Users.user_id == user_id)
             )
 
             session.execute(stmt)
 
+            session.commit()
+
+    def update_user_appearance(
+        self,
+        *,
+        user_id: str,
+        avatar_kind: str | None = None,
+        banner_kind: str | None = None,
+        accent_color: str | None = None,
+        avatar_seed: str | None = None,
+    ) -> None:
+        """Patch the user's appearance preferences.
+
+        Any subset of the four fields can be provided. None means "leave
+        unchanged." The route layer is responsible for input validation
+        (see ``pufferblow.api.utils.appearance``).
+        """
+        updated_at = datetime.datetime.now(datetime.UTC)
+        values: dict = {"updated_at": updated_at}
+        if avatar_kind is not None:
+            values["avatar_kind"] = avatar_kind
+        if banner_kind is not None:
+            values["banner_kind"] = banner_kind
+        if accent_color is not None:
+            values["accent_color"] = accent_color
+        if avatar_seed is not None:
+            values["avatar_seed"] = avatar_seed
+        if len(values) == 1:
+            # Nothing meaningful to update — caller passed all-None.
+            return
+        with self.database_session() as session:
+            stmt = (
+                update(Users)
+                .values(**values)
+                .where(Users.user_id == user_id)
+            )
+            session.execute(stmt)
+            session.commit()
+
+    def update_server_appearance(
+        self,
+        *,
+        server_id: str,
+        avatar_kind: str | None = None,
+        banner_kind: str | None = None,
+        accent_color: str | None = None,
+        avatar_seed: str | None = None,
+        avatar_url: str | None = None,
+        banner_url: str | None = None,
+    ) -> None:
+        """Patch the server's appearance preferences.
+
+        Same partial-update semantics as ``update_user_appearance``. The
+        ``avatar_url``/``banner_url`` slots are exposed for the (future)
+        server-icon upload route to flip the _kind columns atomically
+        with the URL write.
+        """
+        from pufferblow.api.database.tables.server import Server as _ServerTable
+
+        updated_at = datetime.datetime.now(datetime.UTC)
+        values: dict = {"updated_at": updated_at}
+        if avatar_kind is not None:
+            values["avatar_kind"] = avatar_kind
+        if banner_kind is not None:
+            values["banner_kind"] = banner_kind
+        if accent_color is not None:
+            values["accent_color"] = accent_color
+        if avatar_seed is not None:
+            values["avatar_seed"] = avatar_seed
+        if avatar_url is not None:
+            values["avatar_url"] = avatar_url
+        if banner_url is not None:
+            values["banner_url"] = banner_url
+        if len(values) == 1:
+            return
+        with self.database_session() as session:
+            stmt = (
+                update(_ServerTable)
+                .values(**values)
+                .where(_ServerTable.server_id == server_id)
+            )
+            session.execute(stmt)
             session.commit()
 
     def update_message_hash(self, message_id: str, hashed_message: str) -> None:

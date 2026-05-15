@@ -1,7 +1,7 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
+from fastapi import APIRouter, Body, Depends, Form, UploadFile, exceptions
 from loguru import logger
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
@@ -14,6 +14,12 @@ from pufferblow.api.schemas import (
     SigninQuery,
     SignupRequest,
     UserProfileRequest,
+)
+from pufferblow.api.utils.appearance import (
+    VALID_AVATAR_KINDS,
+    VALID_BANNER_KINDS,
+    generate_shuffle_seed,
+    is_valid_hex_color,
 )
 from pufferblow.api.utils.is_able_to_update import is_able_to_update
 from pufferblow.core.bootstrap import api_initializer
@@ -246,6 +252,69 @@ async def upload_user_banner_route(
         ),
         "banner_url": banner_url,
         "duplicate_status": "existing" if is_duplicate else "new",
+    }
+
+
+@router.put("/profile/appearance", status_code=200)
+async def update_profile_appearance_route(
+    auth_token: str = Body(..., embed=True),
+    avatar_kind: str | None = Body(default=None),
+    banner_kind: str | None = Body(default=None),
+    accent_color: str | None = Body(default=None),
+    shuffle_avatar_seed: bool = Body(default=False),
+):
+    """Switch the viewer's appearance mode without uploading a new file.
+
+    Body (all optional):
+        avatar_kind: 'identicon' | 'image'. Use 'identicon' to revert
+            from a custom upload back to the DiceBear-style identicon.
+            Setting 'image' here without a previously-uploaded
+            avatar_url falls back to identicon rendering client-side.
+        banner_kind: 'solid' | 'image'.
+        accent_color: hex '#RRGGBB' — applied when banner_kind='solid'.
+            Picker UI is expected to enforce a palette, but any valid
+            hex is accepted server-side.
+        shuffle_avatar_seed: when true, regenerate the identicon seed
+            so the same user gets a different identicon. Useful for
+            the 'I don't like my default' case.
+    """
+    user_id = get_current_user(auth_token)
+
+    # Validate everything up front. We want either "all valid" or "no
+    # mutation" — partial application would leave the user with a
+    # half-applied update that's hard to reason about.
+    if avatar_kind is not None and avatar_kind not in VALID_AVATAR_KINDS:
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail=f"avatar_kind must be one of {sorted(VALID_AVATAR_KINDS)}",
+        )
+    if banner_kind is not None and banner_kind not in VALID_BANNER_KINDS:
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail=f"banner_kind must be one of {sorted(VALID_BANNER_KINDS)}",
+        )
+    if accent_color is not None and not is_valid_hex_color(accent_color):
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail="accent_color must be a '#RRGGBB' hex string",
+        )
+
+    new_seed = generate_shuffle_seed() if shuffle_avatar_seed else None
+
+    api_initializer.database_handler.update_user_appearance(
+        user_id=user_id,
+        avatar_kind=avatar_kind,
+        banner_kind=banner_kind,
+        accent_color=accent_color,
+        avatar_seed=new_seed,
+    )
+    return {
+        "status_code": 200,
+        "message": "Appearance updated",
+        "avatar_kind": avatar_kind,
+        "banner_kind": banner_kind,
+        "accent_color": accent_color,
+        "avatar_seed": new_seed,
     }
 
 

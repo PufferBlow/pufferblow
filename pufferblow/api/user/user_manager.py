@@ -27,6 +27,7 @@ from pufferblow.api.logger.msgs import debug, info
 from pufferblow.api.models.config_model import Config
 from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, OWNER_ROLE_ID
 from pufferblow.api.user.status import normalize_user_status
+from pufferblow.api.utils.appearance import derive_accent_color
 
 
 class UserManager:
@@ -98,6 +99,18 @@ class UserManager:
         new_user.origin_server = f"{self.config.API_HOST}:{self.config.API_PORT}"
         new_user.auth_token_expire_time = auth_token_expire_time
         new_user.status = "online"
+
+        # Appearance defaults. avatar_kind / banner_kind default at the
+        # column level too, but setting them here makes the intent
+        # explicit and survives ORM session flush ordering quirks.
+        # accent_color is derived from user_id (stable per user, varies
+        # across users on the same instance). avatar_seed defaults to
+        # the user_id so the identicon is stable until the user clicks
+        # "shuffle" in the appearance settings.
+        new_user.avatar_kind = "identicon"
+        new_user.banner_kind = "solid"
+        new_user.accent_color = derive_accent_color(user_id)
+        new_user.avatar_seed = user_id
         new_user.joined_servers_ids = [
             self.database_handler.get_server_id(),
         ]

@@ -10,7 +10,15 @@ from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, HTTPException
 
+from fastapi import Body
+
 from pufferblow.api.schemas import AuthTokenQuery, RuntimeConfigRequest, RuntimeConfigUpdateRequest, ServerSettingsRequest
+from pufferblow.api.utils.appearance import (
+    VALID_AVATAR_KINDS,
+    VALID_BANNER_KINDS,
+    generate_shuffle_seed,
+    is_valid_hex_color,
+)
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.core.bootstrap import api_initializer
 
@@ -524,6 +532,85 @@ async def update_server_info_route(request: ServerSettingsRequest):
         "status_code": 200,
         "message": "Server settings updated successfully",
         "updated_fields": updated_fields,
+    }
+
+
+@router.put("/api/v1/system/server-appearance", status_code=200)
+async def update_server_appearance_route(
+    auth_token: str = Body(..., embed=True),
+    avatar_kind: str | None = Body(default=None),
+    banner_kind: str | None = Body(default=None),
+    accent_color: str | None = Body(default=None),
+    shuffle_avatar_seed: bool = Body(default=False),
+):
+    """Toggle the server's icon/banner mode without uploading a file.
+
+    Same semantics as ``PUT /api/v1/users/profile/appearance`` but for
+    the server row. Gated by ``manage_server_settings`` so only admins
+    can flip the storefront appearance — community members shouldn't
+    be able to repaint the server's banner.
+
+    Body fields are all optional. Pass only what you want to change.
+    """
+    user_id = require_privilege(auth_token, "manage_server_settings")
+    database_handler = require_component("database_handler")
+
+    if avatar_kind is not None and avatar_kind not in VALID_AVATAR_KINDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"avatar_kind must be one of {sorted(VALID_AVATAR_KINDS)}",
+        )
+    if banner_kind is not None and banner_kind not in VALID_BANNER_KINDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"banner_kind must be one of {sorted(VALID_BANNER_KINDS)}",
+        )
+    if accent_color is not None and not is_valid_hex_color(accent_color):
+        raise HTTPException(
+            status_code=400,
+            detail="accent_color must be a '#RRGGBB' hex string",
+        )
+
+    state = get_server_state()
+    server = state.server
+    if server is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Server instance has not been initialized yet.",
+        )
+
+    new_seed = generate_shuffle_seed() if shuffle_avatar_seed else None
+
+    database_handler.update_server_appearance(
+        server_id=server.server_id,
+        avatar_kind=avatar_kind,
+        banner_kind=banner_kind,
+        accent_color=accent_color,
+        avatar_seed=new_seed,
+    )
+
+    log_activity(
+        activity_type="server_settings_updated",
+        user_id=user_id,
+        title="Server appearance updated",
+        description="Server avatar/banner appearance preferences were updated",
+        metadata={
+            "field": "appearance",
+            "avatar_kind": avatar_kind,
+            "banner_kind": banner_kind,
+            "accent_color": accent_color,
+            "shuffled_seed": new_seed is not None,
+            "setting_type": "server_appearance",
+        },
+    )
+
+    return {
+        "status_code": 200,
+        "message": "Server appearance updated",
+        "avatar_kind": avatar_kind,
+        "banner_kind": banner_kind,
+        "accent_color": accent_color,
+        "avatar_seed": new_seed,
     }
 
 

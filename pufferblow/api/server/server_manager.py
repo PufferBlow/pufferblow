@@ -9,6 +9,9 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 # Tables
 from pufferblow.api.database.tables.server import Server
 
+# Appearance defaults
+from pufferblow.api.utils.appearance import derive_accent_color
+
 
 class ServerManager:
     """
@@ -51,6 +54,15 @@ class ServerManager:
             welcome_message=server_welcome_message,
             host_port=host_port,
             stats_id=stats_id,
+            # Appearance defaults — a fresh server has no uploaded
+            # avatar/banner, so we ship it with a deterministic accent
+            # color derived from its UUID and an identicon seed pinned
+            # to that same UUID. The owner can swap to a custom image
+            # via the server settings tab any time.
+            avatar_kind="identicon",
+            banner_kind="solid",
+            accent_color=derive_accent_color(server_id),
+            avatar_seed=server_id,
         )
 
         # Create the server row first
