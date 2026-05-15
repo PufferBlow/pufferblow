@@ -224,6 +224,22 @@ Pufferblow implements a subset of ActivityPub so instances can talk to each othe
 
 Relevant endpoints: `/.well-known/webfinger`, `/ap/users/{id}`, `/api/v1/federation/*`
 
+For operating a federated instance — TURN setup, latency expectations,
+debugging stuck deliveries — see [FEDERATION.md](FEDERATION.md).
+
+---
+
+## Operator documentation
+
+| Doc                                          | Purpose                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------ |
+| [V1_0_CAVEATS.md](V1_0_CAVEATS.md)           | What ships in v1.0 and what's deferred.                            |
+| [DOCKER_PRODUCTION.md](DOCKER_PRODUCTION.md) | One-command Compose stack: services, ports, env vars.              |
+| [ADMIN.md](ADMIN.md)                         | CLI reference, secret rotation, storage, audit log, blocked IPs.   |
+| [BACKUP.md](BACKUP.md)                       | What to back up, how often, and how to restore on a fresh host.    |
+| [FEDERATION.md](FEDERATION.md)               | What federates, TURN setup, latency, debugging stuck deliveries.   |
+| [SECURITY.md](SECURITY.md)                   | Security model, threat boundaries, vulnerability reporting.        |
+
 ---
 
 ## Star History
