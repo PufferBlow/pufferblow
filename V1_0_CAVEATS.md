@@ -34,7 +34,11 @@ plan on it; don't tell users they have it.
   (`media-sfu`). Tested to 1000 peers per instance.
 - ✅ Opus audio, VP8/VP9 video at a configurable default profile
   (720p target). Bitrate is configured, not adaptive — see below.
-- ✅ Screen share (single screen, no per-window selection).
+- ✅ Screen share — picks a screen via the browser's native chooser
+  (single screen, no per-window selection). Includes system audio if
+  the user opts in at the picker. Track-to-user binding goes through
+  the SFU's screen_share_started/stopped broadcasts; other peers'
+  shared screens render as video tiles above the participant grid.
 - ✅ PLI / FIR forwarding so receivers can ask the publisher for a
   fresh keyframe after packet loss.
 
