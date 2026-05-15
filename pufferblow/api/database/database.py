@@ -48,9 +48,31 @@ class Database:
                 {
                     "pool_size": 20,
                     "max_overflow": 10,
-                    "pool_recycle": 3600 * 3,  # recycled every three hours
+                    "pool_recycle": 1800,    # recycle every 30 min
                     "pool_timeout": 27,
-                    "pool_pre_ping": True,  # prevents stale connections
+                    "pool_pre_ping": True,   # validate connection on checkout
+                    # TCP keepalives at the OS level. Without these, an idle
+                    # connection sitting between FastAPI and Postgres can be
+                    # silently killed by an intermediate firewall / NAT /
+                    # cloud load balancer after as little as 60s of silence,
+                    # producing "server closed the connection unexpectedly"
+                    # on the next query. pool_pre_ping only validates at
+                    # checkout — it can't help if the connection dies
+                    # mid-query. Keepalives close that gap by keeping the
+                    # TCP path warm.
+                    #
+                    # The values mirror what psycopg2 / libpq recommend for
+                    # cloud-hosted Postgres:
+                    #   keepalives=1                  enable
+                    #   keepalives_idle=30            send first probe after 30s idle
+                    #   keepalives_interval=10        probe interval
+                    #   keepalives_count=3            give up after 3 missed probes
+                    "connect_args": {
+                        "keepalives": 1,
+                        "keepalives_idle": 30,
+                        "keepalives_interval": 10,
+                        "keepalives_count": 3,
+                    },
                 }
             )
 

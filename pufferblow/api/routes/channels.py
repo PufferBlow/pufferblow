@@ -31,6 +31,7 @@ from pufferblow.api.dependencies import (
 from pufferblow.core.bootstrap import api_initializer
 from pufferblow.api.logger.msgs import info
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
+from pufferblow.api.utils.db_retry import read_with_retry
 
 # Create router for channel-related endpoints
 router = APIRouter(prefix="/api/v1/channels")
@@ -59,11 +60,20 @@ async def list_channels_route(request: AuthTokenQuery):
     user_id = get_current_user(request.auth_token)
 
     try:
-        channels_list = api_initializer.channels_manager.list_channels(
-            user_id=user_id,
-            include_private_channels=api_initializer.user_manager.has_privilege(
-                user_id=user_id, privilege_id="view_private_channels"
+        # Wrap in read_with_retry so a transient DB connection drop mid-
+        # query (Postgres restart, NAT idle-timeout dropping the TCP
+        # connection between pool_pre_ping and this query, etc.) gets
+        # one automatic retry on a freshly-checked-out connection.
+        # Both list_channels and has_privilege are read-only, so retry
+        # is safe — no risk of double-applied side effects.
+        channels_list = read_with_retry(
+            lambda: api_initializer.channels_manager.list_channels(
+                user_id=user_id,
+                include_private_channels=api_initializer.user_manager.has_privilege(
+                    user_id=user_id, privilege_id="view_private_channels"
+                ),
             ),
+            label="list_channels",
         )
 
         logger.info(
