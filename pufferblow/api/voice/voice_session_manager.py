@@ -277,7 +277,11 @@ class VoiceSessionManager:
             "server_id": str(server_id),
             "channel_id": str(channel_id),
             "session_id": str(session_id),
-            "scope": "recv send_audio",
+            # Grant publish rights for both audio and video. The SFU enforces
+            # scope per-track when the client actually publishes, so granting
+            # `send_video` here doesn't cost anything for audio-only callers —
+            # it just unblocks screen share without a second token roundtrip.
+            "scope": "recv send_audio send_video",
             "iat": int(now.timestamp()),
             "exp": int(exp.timestamp()),
             "jti": jti,
