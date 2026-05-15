@@ -4,11 +4,16 @@ Lists the viewer's notifications (newest first), exposes the unread badge
 count, and lets the viewer mark notifications read individually or in bulk.
 Notification creation is server-internal — the route layer never accepts a
 client-supplied notification body.
+
+Per-channel mute prefs live under ``/preferences`` and are honored by the
+notification recording path so muted channels never produce notification
+rows in the first place — the badge stays accurate, the WS broadcast is
+skipped, and the in-app notification list isn't polluted.
 """
 
-from fastapi import APIRouter, exceptions
+from fastapi import APIRouter, Body, exceptions
 
-from pufferblow.api.dependencies import get_current_user
+from pufferblow.api.dependencies import check_channel_access, get_current_user
 from pufferblow.core.bootstrap import api_initializer
 
 
@@ -93,4 +98,78 @@ async def mark_all_notifications_read(auth_token: str):
         "status_code": 200,
         "marked": marked,
         "unread_count": 0,
+    }
+
+
+# ─────────────────────────────────────────────
+# Per-channel preferences
+# ─────────────────────────────────────────────
+
+
+@router.get("/preferences", status_code=200)
+async def list_notification_preferences(auth_token: str):
+    """Return every persisted notification preference for the viewer.
+
+    Only deviations from the default (notify normally) are stored, so the
+    returned list is small in practice. Channels not present in the list
+    behave as default — no client-side state needed beyond rendering the
+    ones that are explicitly set.
+    """
+    user_id = get_current_user(auth_token)
+    rows = api_initializer.database_handler.list_notification_preferences_for_user(
+        user_id=user_id
+    )
+    return {
+        "status_code": 200,
+        "preferences": [row.to_dict() for row in rows],
+    }
+
+
+@router.put("/preferences/{channel_id}", status_code=200)
+async def upsert_notification_preference(
+    channel_id: str,
+    auth_token: str,
+    muted: bool = Body(default=False, embed=True),
+    mention_only: bool = Body(default=False, embed=True),
+):
+    """Set the viewer's notification preference for a channel.
+
+    Body:
+        muted: when true, suppress all notifications for this channel.
+        mention_only: reserved for v1.1 — currently affects nothing
+            because the only notification class emitted in v1.0 is
+            ``mention``. Stored for forward compatibility so the wire
+            surface stays stable.
+    """
+    user_id = get_current_user(auth_token)
+    # Re-use the same channel-access guard the rest of the channel routes
+    # use — non-members shouldn't even be able to read whether a channel
+    # exists, much less mute it.
+    check_channel_access(user_id=user_id, channel_id=channel_id)
+    row = api_initializer.database_handler.upsert_notification_preference(
+        user_id=user_id,
+        channel_id=channel_id,
+        muted=bool(muted),
+        mention_only=bool(mention_only),
+    )
+    return {
+        "status_code": 200,
+        "preference": row.to_dict(),
+    }
+
+
+@router.delete("/preferences/{channel_id}", status_code=200)
+async def reset_notification_preference(channel_id: str, auth_token: str):
+    """Reset a channel's preferences to defaults (delete the row).
+
+    Idempotent — returns ``existed=False`` when no row was stored.
+    """
+    user_id = get_current_user(auth_token)
+    check_channel_access(user_id=user_id, channel_id=channel_id)
+    existed = api_initializer.database_handler.delete_notification_preference(
+        user_id=user_id, channel_id=channel_id
+    )
+    return {
+        "status_code": 200,
+        "existed": existed,
     }

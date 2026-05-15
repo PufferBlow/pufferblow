@@ -38,6 +38,7 @@ from pufferblow.api.database.tables.keys import Keys
 from pufferblow.api.database.tables.message_reactions import MessageReactions
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
 from pufferblow.api.database.tables.messages import Messages
+from pufferblow.api.database.tables.notification_preferences import NotificationPreferences
 from pufferblow.api.database.tables.notifications import Notifications
 from pufferblow.api.database.tables.privileges import Privileges
 from pufferblow.api.database.tables.roles import Roles
@@ -1918,6 +1919,124 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 )
             )
         return int(count or 0)
+
+    # --- Notification preferences ---------------------------------------
+
+    def get_notification_preference(
+        self, user_id: str, channel_id: str
+    ) -> NotificationPreferences | None:
+        """Return the (user, channel) pref row when present, else None.
+
+        Absent rows mean "use the default (notify normally)" — that's the
+        deliberately implicit baseline so we don't have to populate a row
+        for every (user, channel) pair on signup.
+        """
+        with self.database_session() as session:
+            return (
+                session.query(NotificationPreferences)
+                .filter(
+                    NotificationPreferences.user_id == user_id,
+                    NotificationPreferences.channel_id == channel_id,
+                )
+                .first()
+            )
+
+    def list_notification_preferences_for_user(
+        self, user_id: str
+    ) -> list[NotificationPreferences]:
+        """Return every persisted pref for ``user_id``.
+
+        Used by the prefs index endpoint so the client can build its
+        muted-channels list in one round trip. The list is small in
+        practice (only deviations from default are stored), so we don't
+        paginate.
+        """
+        with self.database_session() as session:
+            return (
+                session.query(NotificationPreferences)
+                .filter(NotificationPreferences.user_id == user_id)
+                .all()
+            )
+
+    def upsert_notification_preference(
+        self,
+        *,
+        user_id: str,
+        channel_id: str,
+        muted: bool,
+        mention_only: bool,
+    ) -> NotificationPreferences:
+        """Insert or update a (user, channel) preference.
+
+        When ``muted`` and ``mention_only`` are both False the caller is
+        effectively saying "back to defaults" — we still persist the row
+        so the client can readback its choice (it's a 0-difference write
+        but the explicit "I unmuted this channel" state is sometimes
+        useful UI-side). Use ``delete_notification_preference`` to fully
+        reset.
+        """
+        now = _datetime.now(timezone.utc)
+        with self.database_session() as session:
+            row = (
+                session.query(NotificationPreferences)
+                .filter(
+                    NotificationPreferences.user_id == user_id,
+                    NotificationPreferences.channel_id == channel_id,
+                )
+                .first()
+            )
+            if row is None:
+                row = NotificationPreferences(
+                    user_id=user_id,
+                    channel_id=channel_id,
+                    muted=muted,
+                    mention_only=mention_only,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.muted = muted
+                row.mention_only = mention_only
+                row.updated_at = now
+            session.flush()
+            session.refresh(row)
+        return row
+
+    def delete_notification_preference(
+        self, user_id: str, channel_id: str
+    ) -> bool:
+        """Delete a stored preference. Returns True iff a row existed.
+
+        Equivalent to "reset this channel to defaults." Idempotent.
+        """
+        with self.database_session() as session:
+            deleted = (
+                session.query(NotificationPreferences)
+                .filter(
+                    NotificationPreferences.user_id == user_id,
+                    NotificationPreferences.channel_id == channel_id,
+                )
+                .delete(synchronize_session=False)
+            )
+        return bool(deleted)
+
+    def is_channel_muted_for_user(self, user_id: str, channel_id: str) -> bool:
+        """Hot-path check called from record_mentions_for_message.
+
+        Returns True iff the user has explicitly muted the channel. False
+        for either "no row stored" or "row stored but muted=False" —
+        muting is opt-in, never default-on.
+        """
+        with self.database_session() as session:
+            row = (
+                session.query(NotificationPreferences.muted)
+                .filter(
+                    NotificationPreferences.user_id == user_id,
+                    NotificationPreferences.channel_id == channel_id,
+                )
+                .first()
+            )
+        return bool(row and row[0])
 
     def update_channel_participants(
         self, channel_id: str, participant_ids: list[str]

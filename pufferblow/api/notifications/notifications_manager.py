@@ -105,6 +105,31 @@ class NotificationsManager:
                 continue
             seen_user_ids.add(recipient_id)
 
+            # Per-channel mute. We honor the recipient's explicit
+            # "mute #channel" choice by not recording the notification
+            # row at all — that way the badge count stays correct, the
+            # in-app notification list doesn't grow, AND no WS
+            # notification_created event will fire from the caller (the
+            # rows list filters out muted recipients before broadcast).
+            #
+            # Mentions in muted channels are intentional: a user who
+            # muted #general doesn't want pings every time someone says
+            # their handle there. Matches Discord and Slack semantics.
+            try:
+                if self.database_handler.is_channel_muted_for_user(
+                    user_id=recipient_id, channel_id=channel_id
+                ):
+                    continue
+            except Exception:
+                # Mute lookup must never block notification delivery.
+                # Fall through to the default (notify).
+                logger.exception(
+                    "Failed to read mute pref for user={user_id} "
+                    "channel={channel_id}; defaulting to notify",
+                    user_id=recipient_id,
+                    channel_id=channel_id,
+                )
+
             rows.append(
                 Notifications(
                     notification_id=str(uuid.uuid4()),
