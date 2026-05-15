@@ -186,6 +186,24 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 logger.error(f"PostgreSQL table creation failed: {e}")
                 raise
 
+        # Add appearance columns to pre-existing Users / Server tables.
+        # SQLAlchemy's create_all() only creates missing TABLES — it does
+        # NOT alter existing tables, so a long-running instance that
+        # upgrades to the appearance feature would otherwise be left
+        # with the OLD schema and crash on every query like:
+        #   psycopg2.errors.UndefinedColumn: column users.avatar_kind
+        #   does not exist
+        # This runs an idempotent ALTER TABLE ADD COLUMN IF NOT EXISTS
+        # per column on Postgres, and the equivalent best-effort path
+        # on SQLite. Skipped silently when the column already exists.
+        try:
+            self._apply_appearance_column_migration()
+        except Exception as exc:
+            logger.error(
+                "Appearance column migration failed: {err}", err=str(exc)
+            )
+            raise
+
         # Backfill appearance defaults for any rows that pre-date the
         # appearance feature. Idempotent — only touches rows where the
         # derived columns are still NULL. Runs on both SQLite (tests /
@@ -213,6 +231,79 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         except Exception as e:
             logger.error(f"Table creation failed: {str(e)}")
             raise
+
+    def _apply_appearance_column_migration(self) -> None:
+        """Add appearance columns to users + server if missing.
+
+        SQLAlchemy ``create_all`` only creates missing TABLES. When the
+        appearance feature shipped, the new columns were never added to
+        long-running instances' existing ``users`` / ``server`` tables,
+        which broke every query that touches those tables.
+
+        This walks both tables, inspects the live column list, and
+        issues ``ALTER TABLE ... ADD COLUMN`` for any column that's
+        absent. The DEFAULT clause on the NOT NULL columns
+        (``avatar_kind``, ``banner_kind``) backfills every existing
+        row in the same statement, so the ALTER doesn't leave the new
+        column with NULLs that would violate the constraint.
+
+        Idempotent: a column that already exists is skipped, so this
+        is safe to run on every boot. Works on both Postgres and
+        SQLite — both dialects accept ``ALTER TABLE ADD COLUMN``.
+        """
+        from sqlalchemy import inspect, text
+
+        # (column_name, column_type_clause). Order matters: the NOT
+        # NULL columns must include DEFAULT so the ALTER can backfill
+        # existing rows in one statement.
+        appearance_columns: list[tuple[str, str]] = [
+            ("avatar_kind", "VARCHAR(16) NOT NULL DEFAULT 'identicon'"),
+            ("banner_kind", "VARCHAR(16) NOT NULL DEFAULT 'solid'"),
+            ("accent_color", "VARCHAR(7)"),
+            ("avatar_seed", "VARCHAR(64)"),
+        ]
+
+        inspector = inspect(self.database_engine)
+        added: list[str] = []
+
+        for table_name in ("users", "server"):
+            try:
+                existing = {col["name"] for col in inspector.get_columns(table_name)}
+            except Exception as exc:
+                # Table doesn't exist yet — create_all should have made
+                # it. Log and skip; the outer setup_tables catch will
+                # surface real failures.
+                logger.warning(
+                    "Could not inspect table {table}: {err}",
+                    table=table_name,
+                    err=str(exc),
+                )
+                continue
+
+            for col_name, col_clause in appearance_columns:
+                if col_name in existing:
+                    continue
+                ddl = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_clause}"
+                try:
+                    with self.database_engine.begin() as conn:
+                        conn.execute(text(ddl))
+                except Exception as exc:
+                    # Re-raise: a failed ALTER is a real problem.
+                    # Subsequent queries will fail too.
+                    logger.error(
+                        "Failed to add column {table}.{col}: {err}",
+                        table=table_name,
+                        col=col_name,
+                        err=str(exc),
+                    )
+                    raise
+                added.append(f"{table_name}.{col_name}")
+
+        if added:
+            logger.info(
+                "Appearance columns added to live schema: {cols}",
+                cols=", ".join(added),
+            )
 
     def _backfill_appearance_defaults(self) -> None:
         """Populate accent_color + avatar_seed for pre-feature rows.
