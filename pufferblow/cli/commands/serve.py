@@ -60,6 +60,7 @@ def serve_command(
                 port=int(config.API_PORT),
                 reload=True,
                 log_level=log_level_name.lower(),
+                log_config=None,
                 access_log=False,
                 server_header=False,
                 date_header=False,

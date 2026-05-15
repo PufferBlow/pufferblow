@@ -196,21 +196,22 @@ def configure_structured_logging(
     logging.root.handlers = [intercept_handler]
     logging.root.setLevel(log_level_name)
 
-    seen_roots: set[str] = set()
-    for name in [
-        *logging.root.manager.loggerDict.keys(),
-        "gunicorn",
-        "gunicorn.access",
-        "gunicorn.error",
+    _always_intercept = [
         "uvicorn",
         "uvicorn.access",
         "uvicorn.error",
-    ]:
-        root_name = name.split(".")[0]
-        if root_name in seen_roots:
+        "gunicorn",
+        "gunicorn.access",
+        "gunicorn.error",
+    ]
+    seen: set[str] = set()
+    for name in [*logging.root.manager.loggerDict.keys(), *_always_intercept]:
+        if name in seen:
             continue
-        seen_roots.add(root_name)
-        logging.getLogger(name).handlers = [intercept_handler]
+        seen.add(name)
+        log = logging.getLogger(name)
+        log.handlers = [intercept_handler]
+        log.propagate = False
 
     logger.remove()
     logger.add(
