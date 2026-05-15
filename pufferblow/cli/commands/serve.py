@@ -39,15 +39,18 @@ def serve_command(
     if not database_uri:
         logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
         raise typer.Exit(code=1)
-    ensure_database_exists(database_uri)
-    load_runtime(database_uri=database_uri, setup_tables=True)
-    config = api_initializer.config
 
+    # Configure logging before load_runtime so startup/DB-setup logs use the
+    # same format as everything that follows, not Loguru's bare default.
     log_level_name = configure_structured_logging(
         config=config,
         log_level=log_level,
         debug=debug,
     )
+
+    ensure_database_exists(database_uri)
+    load_runtime(database_uri=database_uri, setup_tables=True)
+    config = api_initializer.config
 
     if dev:
         logger.info("Starting development server with hot reload.")
