@@ -69,3 +69,6 @@ nav:
       - Federation: operator/federation.md
       - Operations & CLI: operator/operations.md
       - v1.0 release notes: operator/release-notes-v1.0.md
+  - Developer:
+      - developer/index.md
+      - Server architecture: developer/architecture.md
