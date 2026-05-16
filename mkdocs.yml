@@ -1,0 +1,71 @@
+site_name: Pufferblow
+site_description: Self-hosted, open-source community server — encrypted messaging, ActivityPub federation, voice channels, role-based access control.
+site_url: https://docs.pufferblow.space/
+repo_url: https://github.com/PufferBlow/pufferblow
+repo_name: PufferBlow/pufferblow
+edit_uri: edit/main/docs/
+
+# `docs/` shares space with the legacy Sphinx RST tree during the migration.
+# MkDocs only renders files explicitly listed in `nav` below, so the .rst
+# files coexist harmlessly until commit 8 removes Sphinx entirely.
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+# Nav is intentionally small in this commit. Subsequent commits add the
+# Developer and User sections; this commit just lands the operator docs
+# verbatim from the repo root.
+nav:
+  - Home: index.md
+  - Operator:
+      - operator/index.md
+      - Docker (production): operator/docker.md
+      - Backup & restore: operator/backup.md
+      - Federation: operator/federation.md
+      - Operations & CLI: operator/operations.md
+      - v1.0 release notes: operator/release-notes-v1.0.md
