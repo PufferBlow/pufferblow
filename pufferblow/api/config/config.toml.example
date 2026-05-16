@@ -76,8 +76,14 @@ bootstrap_config_url = "http://localhost:7575/api/internal/v1/voice/bootstrap-co
 # Bootstrap secret (must match server's RTC_BOOTSTRAP_SECRET)
 bootstrap_secret = "change-me-in-production"
 
-# WebSocket server bind address
-bind_addr = ":8787"
+# WebSocket server bind address.
+#
+# Use "0.0.0.0:8787" (the default) rather than the bare ":8787". On Windows,
+# Go's bare-port form can end up bound to "[::1]:8787" (IPv6 loopback only),
+# which the client -- dialing ws://127.0.0.1:8787 -- can't reach. "0.0.0.0"
+# forces IPv4 and works identically in Docker (the container's published
+# port maps through to its IPv4 listener).
+bind_addr = "0.0.0.0:8787"
 
 # Bootstrap HTTP timeout (how long to wait for config fetch)
 bootstrap_http_timeout = "5s"

@@ -137,7 +137,7 @@ cors_allow_credentials = true
 [media-sfu]
 bootstrap_secret    = "change-this"
 bootstrap_config_url = "http://localhost:7575/api/internal/v1/voice/bootstrap-config"
-bind_addr           = ":8787"
+bind_addr           = "0.0.0.0:8787"
 ```
 
 After any change, restart the server to apply it.

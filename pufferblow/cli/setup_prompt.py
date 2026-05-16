@@ -265,9 +265,14 @@ def _get_media_sfu_config() -> dict[str, str | int] | None:
             default="http://localhost:7575/api/internal/v1/voice/bootstrap-config",
         )
 
+        # Default to 0.0.0.0 (not :port) so Windows binds IPv4 explicitly --
+        # Go's bare ":8787" can resolve to "[::1]:8787" on Windows, which the
+        # client (which dials 127.0.0.1:8787) can't reach. 0.0.0.0 also keeps
+        # the Docker production setup working since the published port maps
+        # through to the container's IPv4 listener.
         bind_addr = typer.prompt(
             "WebSocket bind address",
-            default=":8787",
+            default="0.0.0.0:8787",
         )
 
         max_total_peers = typer.prompt(
