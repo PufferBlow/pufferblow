@@ -12,16 +12,18 @@ server, or writing a client. This section is for you.
   the FastAPI app's OpenAPI schema. Includes how to view it on
   a running instance and how to regenerate the embedded copy.
 
-## Coming next
+## Building against Pufferblow
 
-The following pages land in subsequent commits as the docs
-modernization continues:
-
-- **Client** — the Electron / React client, deep-link protocol,
-  auto-updater, voice DSP wiring, localStorage cache strategy.
-- **SDK** — using `pypufferblow` to write bots and integrations.
-- **Contributing internals** — manager pattern, adding a route,
-  the testing layout.
+- **[Client (web + desktop)](client.md)** — the integration
+  points the official Electron / React client uses, including
+  the `pufferblow://` deep-link scheme, auto-updater, voice
+  DSP wiring, and the localStorage cache strategy. Useful both
+  for understanding the reference client and for building
+  alternative ones.
+- **[Python SDK](sdk.md)** — using `pypufferblow` to write
+  bots and integrations. Brief tour of the client API, async
+  variants, the decorator-style bot framework, and what's out
+  of scope.
 
 ## Outside this site
 
