@@ -9,7 +9,10 @@ from typing import Any
 from fastapi import APIRouter, Request, UploadFile, Form, exceptions, responses
 from sqlalchemy import delete, select
 
+from pufferblow.api.database.tables.channels import Channels
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
+from pufferblow.api.database.tables.messages import Messages
+from pufferblow.api.database.tables.users import Users
 from pufferblow.api.dependencies import require_privilege
 from pufferblow.api.logger.logger import logger
 from pufferblow.api.utils.http_datetime import http_last_modified
@@ -337,6 +340,12 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
 
     all_relative_paths = [rp for _, _, rp in all_file_paths]
     file_objects_by_path: dict[str, Any] = {}
+    # `provenance_by_hash` maps file_hash -> a dict with whatever uploader /
+    # message / channel context we managed to resolve. Populated in three
+    # batched lookups below so the per-file loop stays O(1) per file. Keys
+    # we may populate: reference_type, message_id, channel_id, channel_name,
+    # uploader_user_id, uploader_username. Any key may be absent.
+    provenance_by_hash: dict[str, dict[str, Any]] = {}
     if all_relative_paths:
         try:
             with api_initializer.database_handler.database_session() as session:
@@ -344,8 +353,113 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
                     select(FileObjects).where(FileObjects.file_path.in_(all_relative_paths))
                 ).scalars().all()
                 file_objects_by_path = {obj.file_path: obj for obj in results}
-        except Exception:
-            pass
+
+                # Enrich with FileReferences so the admin storage UI can show
+                # "who uploaded this and where" without N+1 lookups per file.
+                # We resolve only the *first* reference per hash here -- a file
+                # can be deduped across many messages, but for the admin
+                # preview panel the first reference is enough context to
+                # answer "is this an orphan, an avatar, or an attachment".
+                file_hashes = [
+                    obj.file_hash for obj in results if obj.file_hash is not None
+                ]
+                if file_hashes:
+                    refs = session.execute(
+                        select(FileReferences)
+                        .where(FileReferences.file_hash.in_(file_hashes))
+                        .order_by(FileReferences.created_at.asc())
+                    ).scalars().all()
+                    # Group by hash, keep the earliest reference per hash.
+                    first_ref_by_hash: dict[str, FileReferences] = {}
+                    for ref in refs:
+                        if ref.file_hash not in first_ref_by_hash:
+                            first_ref_by_hash[ref.file_hash] = ref
+
+                    # Pre-bucket reference IDs by what kind of lookup they need.
+                    # message_attachment refs point at a message_id -> resolve
+                    # sender + channel via the Messages table. user_avatar /
+                    # user_banner / server_avatar / server_banner point at a
+                    # user_id directly (the entity the asset belongs to is
+                    # also conceptually the uploader, for owner attribution).
+                    message_ids: set[str] = set()
+                    direct_user_ids: set[str] = set()
+                    for ref in first_ref_by_hash.values():
+                        if ref.reference_type == "message_attachment":
+                            message_ids.add(ref.reference_entity_id)
+                        elif ref.reference_type in {
+                            "user_avatar",
+                            "user_banner",
+                            "server_avatar",
+                            "server_banner",
+                        }:
+                            direct_user_ids.add(ref.reference_entity_id)
+
+                    # Batch-fetch Messages (sender_id + channel_id).
+                    messages_by_id: dict[str, Messages] = {}
+                    if message_ids:
+                        msg_rows = session.execute(
+                            select(Messages).where(Messages.message_id.in_(message_ids))
+                        ).scalars().all()
+                        messages_by_id = {m.message_id: m for m in msg_rows}
+                        # Sender user_ids from those messages join the user lookup set.
+                        for m in msg_rows:
+                            if m.sender_id is not None:
+                                direct_user_ids.add(str(m.sender_id))
+
+                    # Batch-fetch Users for both attachment senders and
+                    # direct-reference owners.
+                    users_by_id: dict[str, Users] = {}
+                    if direct_user_ids:
+                        user_rows = session.execute(
+                            select(Users).where(Users.user_id.in_(direct_user_ids))
+                        ).scalars().all()
+                        users_by_id = {str(u.user_id): u for u in user_rows}
+
+                    # Batch-fetch Channels referenced by any of those messages.
+                    channel_ids = {
+                        m.channel_id for m in messages_by_id.values() if m.channel_id
+                    }
+                    channels_by_id: dict[str, Channels] = {}
+                    if channel_ids:
+                        ch_rows = session.execute(
+                            select(Channels).where(Channels.channel_id.in_(channel_ids))
+                        ).scalars().all()
+                        channels_by_id = {c.channel_id: c for c in ch_rows}
+
+                    # Assemble the per-hash provenance record.
+                    for file_hash, ref in first_ref_by_hash.items():
+                        entry: dict[str, Any] = {"reference_type": ref.reference_type}
+                        if ref.reference_type == "message_attachment":
+                            msg = messages_by_id.get(ref.reference_entity_id)
+                            if msg is not None:
+                                entry["message_id"] = msg.message_id
+                                if msg.channel_id:
+                                    entry["channel_id"] = msg.channel_id
+                                    ch = channels_by_id.get(msg.channel_id)
+                                    if ch is not None:
+                                        entry["channel_name"] = ch.channel_name
+                                if msg.sender_id is not None:
+                                    sender_id_str = str(msg.sender_id)
+                                    entry["uploader_user_id"] = sender_id_str
+                                    sender = users_by_id.get(sender_id_str)
+                                    if sender is not None:
+                                        entry["uploader_username"] = sender.username
+                        elif ref.reference_type in {
+                            "user_avatar",
+                            "user_banner",
+                            "server_avatar",
+                            "server_banner",
+                        }:
+                            entry["uploader_user_id"] = ref.reference_entity_id
+                            owner = users_by_id.get(ref.reference_entity_id)
+                            if owner is not None:
+                                entry["uploader_username"] = owner.username
+                        provenance_by_hash[file_hash] = entry
+        except Exception as exc:
+            # Provenance enrichment is best-effort -- if it fails we still
+            # want to return the file list (the admin can see the file even
+            # without sender/channel context). Log so it's noticed.
+            logger.warning(f"Storage list provenance enrichment failed: {exc}")
 
     files: list[dict[str, Any]] = []
     for directory, file_path, relative_path in all_file_paths:
@@ -355,6 +469,7 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
         file_hash = file_obj.file_hash if file_obj else None
         mime_type = file_obj.mime_type if file_obj else "application/octet-stream"
         original_filename = file_obj.filename if file_obj else file_path.name
+        provenance = provenance_by_hash.get(file_hash, {}) if file_hash else {}
 
         files.append(
             {
@@ -368,7 +483,16 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
                 "url": _build_public_storage_url(file_hash) if file_hash else f"/api/v1/storage/file/{relative_path}",
                 "subdirectory": directory,
                 "type": mime_type,
-                "uploader": "Unknown",
+                # `uploader` stays as the human-readable username string for
+                # back-compat with existing UI; the new structured fields
+                # below are what the file-preview sidebar consumes.
+                "uploader": provenance.get("uploader_username") or "Unknown",
+                "uploader_user_id": provenance.get("uploader_user_id"),
+                "uploader_username": provenance.get("uploader_username"),
+                "reference_type": provenance.get("reference_type"),
+                "message_id": provenance.get("message_id"),
+                "channel_id": provenance.get("channel_id"),
+                "channel_name": provenance.get("channel_name"),
                 "is_orphaned": file_hash is None,
             }
         )
