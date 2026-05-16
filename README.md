@@ -9,7 +9,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![CI](https://img.shields.io/github/actions/workflow/status/PufferBlow/pufferblow/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/PufferBlow/pufferblow/actions)
+[![Lint](https://img.shields.io/github/actions/workflow/status/PufferBlow/pufferblow/lint.yaml?branch=main&style=flat-square&label=lint)](https://github.com/PufferBlow/pufferblow/actions/workflows/lint.yaml)
 [![GitHub Stars](https://img.shields.io/github/stars/PufferBlow/pufferblow?style=flat-square&color=yellow)](https://github.com/PufferBlow/pufferblow/stargazers)
 [![GitHub Issues](https://img.shields.io/github/issues/PufferBlow/pufferblow?style=flat-square)](https://github.com/PufferBlow/pufferblow/issues)
 [![Version](https://img.shields.io/badge/version-0.0.1--beta-orange?style=flat-square)](https://github.com/PufferBlow/pufferblow/releases)
@@ -29,7 +29,7 @@ You host the server on your own machine or VPS. You control the data, the rules,
 Key properties:
 
 - **Self-hosted** — runs on any Linux machine or VPS; no cloud dependency
-- **End-to-end secure** — messages are encrypted with Blowfish; passwords hashed with bcrypt
+- **Encrypted at rest** — messages are AES-encrypted in the database; passwords hashed with bcrypt. (Transport is TLS; end-to-end encryption is on the roadmap, not in v1.0 — see [`V1_0_CAVEATS.md`](V1_0_CAVEATS.md).)
 - **Federated** — instances can connect to each other via ActivityPub, so communities on separate servers can interact
 - **Role-based** — a fine-grained privilege system lets you delegate moderation, file management, channel control, and more
 - **Voice-capable** — integrated WebRTC voice channels through the companion `media-sfu` service
@@ -65,19 +65,27 @@ Optional but recommended for voice channels:
 
 ## Installation
 
-### 1. Install via pip
+### 1. Install from source
 
-```bash
-pip install pufferblow
-```
-
-Or install from source:
+Pufferblow isn't on PyPI yet — install from the repository:
 
 ```bash
 git clone https://github.com/PufferBlow/pufferblow.git
 cd pufferblow
+poetry install
+```
+
+If you'd rather not use Poetry:
+
+```bash
 pip install .
 ```
+
+A published PyPI release will land alongside the v1.0 tag. For
+the most stable deploy path today, see
+[`DOCKER_PRODUCTION.md`](DOCKER_PRODUCTION.md) — the Compose stack
+boots the server, Postgres, memcached, and (optionally) media-sfu
+in one command.
 
 ### 2. First-time setup
 
@@ -170,7 +178,7 @@ The REST API is available at `/api/v1/`. Interactive documentation (Swagger UI) 
 | Storage | `/api/v1/storage` |
 | Roles & Privileges | `/api/v1/system` |
 | Federation | `/api/v1/federation` |
-| Voice | `/api/v1/voice` |
+| Voice | `/api/v2/voice` |
 | Direct Messages | `/api/v1/dms` |
 
 ---
@@ -198,7 +206,7 @@ The REST API is available at `/api/v1/`. Interactive documentation (Swagger UI) 
 ## Security Model
 
 - **Passwords** are hashed with bcrypt before storage. Plain-text passwords are never persisted.
-- **Messages** are encrypted with Blowfish (configurable key derivation rounds) before they are written to the database.
+- **Messages** are AES-encrypted (with a PBKDF2-derived per-record key) before they are written to the database. This protects against database leaks — it is **not** end-to-end encryption; the server holds the keys.
 - **Auth tokens** are JWT-based with configurable access (15 min default) and refresh (30 day default) lifetimes.
 - **Rate limiting** is applied per IP before requests reach route handlers.
 - **CORS** origins are explicitly allowlisted in `config.toml`.
