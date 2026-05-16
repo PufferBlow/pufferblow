@@ -57,6 +57,13 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
+plugins:
+  - search
+  # Renders the OpenAPI schema dropped by scripts/export_openapi.py as
+  # Swagger UI inside docs/developer/api-reference.md (look for `!!swagger`).
+  - render_swagger:
+      allow_arbitrary_locations: true
+
 # Nav is intentionally small in this commit. Subsequent commits add the
 # Developer and User sections; this commit just lands the operator docs
 # verbatim from the repo root.
@@ -75,6 +82,7 @@ nav:
   - Developer:
       - developer/index.md
       - Server architecture: developer/architecture.md
+      - Roles & privileges: developer/roles.md
       - API reference: developer/api-reference.md
       - Client (web + desktop): developer/client.md
       - Python SDK: developer/sdk.md

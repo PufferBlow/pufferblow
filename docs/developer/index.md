@@ -8,6 +8,9 @@ server, or writing a client. This section is for you.
 - **[Server architecture](architecture.md)** — runtime layout,
   boot sequence, manager map, request pipeline, auth, federation,
   voice, storage. The canonical "how the server works" document.
+- **[Roles & privileges](roles.md)** — the per-instance role
+  system, the full privilege catalog, and how custom roles
+  resolve through the API to gate real server behavior.
 - **[API reference](api-reference.md)** — auto-generated from
   the FastAPI app's OpenAPI schema. Includes how to view it on
   a running instance and how to regenerate the embedded copy.

@@ -28,21 +28,9 @@ it reflects exactly the code that server is running.
 
 **Embedded here** — this page renders the OpenAPI schema
 exported at docs-build time, which is whatever shipped with the
-last commit on `main`. Once the docs site is deployed, the
-embedded Swagger UI will appear below. For now (the docs site
-isn't yet deployed) follow the live link above.
+last commit on `main`.
 
-<!--
-The MkDocs build wires in `mkdocs-render-swagger-plugin` to
-render the JSON below as Swagger UI. The plugin + the build
-workflow land in the same commit that retires Sphinx; until
-then, this page is a pointer to /docs on a running instance.
-
-When the plugin is wired:
-
-    !!swagger ./openapi.json!!
-
--->
+!!swagger ./openapi.json!!
 
 ## Regenerating the embedded schema
 

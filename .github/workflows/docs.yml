@@ -1,0 +1,77 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'scripts/export_openapi.py'
+      - 'pufferblow/**.py'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# One concurrent build of the docs at a time. A second push while a build is
+# in flight queues; a third overwrites the queued run. Avoids racing two
+# `mike` deploys onto gh-pages.
+concurrency:
+  group: docs
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build & deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # mkdocs-material reads git history for "last updated"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: "1.8.3"
+          virtualenvs-in-project: true
+
+      # Install runtime deps plus the `docs` extra so we can both build the
+      # MkDocs site and run `scripts/export_openapi.py` against the real app.
+      # The export script imports pufferblow.api.api, so the runtime deps
+      # need to be present.
+      - name: Install dependencies
+        run: poetry install --with docs --no-interaction --no-ansi
+
+      - name: Export OpenAPI schema
+        run: poetry run python scripts/export_openapi.py docs/developer/openapi.json --pretty
+
+      - name: Build MkDocs site
+        run: poetry run mkdocs build --strict
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
