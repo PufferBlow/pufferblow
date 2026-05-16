@@ -6,18 +6,14 @@ channels, and a role-based privilege system.
 
 This site is organized by **who you are**:
 
-[Operator :octicons-arrow-right-24:](operator/index.md){ .md-button }
-You're running an instance. Start here.
-
-<!-- Future sections — added in later commits:
-
 [User :octicons-arrow-right-24:](user/index.md){ .md-button }
-You want to join a community.
+You want to join a community or run a small server for friends.
+
+[Operator :octicons-arrow-right-24:](operator/index.md){ .md-button }
+You're running a production instance.
 
 [Developer :octicons-arrow-right-24:](developer/index.md){ .md-button }
 You're building against the API or hacking on the server.
-
--->
 
 ## Where things live
 

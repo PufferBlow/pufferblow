@@ -62,6 +62,9 @@ markdown_extensions:
 # verbatim from the repo root.
 nav:
   - Home: index.md
+  - User:
+      - user/index.md
+      - Install your own server: user/install.md
   - Operator:
       - operator/index.md
       - Docker (production): operator/docker.md
