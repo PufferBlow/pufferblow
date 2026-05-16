@@ -112,7 +112,8 @@ def _prompt_media_sfu_config() -> dict[str, str | int]:
         "Bootstrap config URL",
         default="http://localhost:7575/api/internal/v1/voice/bootstrap-config",
     ).strip()
-    bind_addr = Prompt.ask("WebSocket bind address", default=":8787").strip()
+    # See setup_prompt.py for why we default to 0.0.0.0 instead of bare :port.
+    bind_addr = Prompt.ask("WebSocket bind address", default="0.0.0.0:8787").strip()
     max_total_peers = int(
         Prompt.ask("Max total peers across all rooms", default="1000").strip()
     )
@@ -207,7 +208,7 @@ def _run_full_setup(
     media_sfu_config = {
         "bootstrap_config_url": "http://localhost:7575/api/internal/v1/voice/bootstrap-config",
         "bootstrap_secret": bootstrap_secret,
-        "bind_addr": ":8787",
+        "bind_addr": "0.0.0.0:8787",
         "max_total_peers": 1000,
         "max_room_peers": 100,
         "room_end_grace_seconds": 15,
