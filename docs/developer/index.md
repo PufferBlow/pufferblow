@@ -8,15 +8,15 @@ server, or writing a client. This section is for you.
 - **[Server architecture](architecture.md)** — runtime layout,
   boot sequence, manager map, request pipeline, auth, federation,
   voice, storage. The canonical "how the server works" document.
+- **[API reference](api-reference.md)** — auto-generated from
+  the FastAPI app's OpenAPI schema. Includes how to view it on
+  a running instance and how to regenerate the embedded copy.
 
 ## Coming next
 
 The following pages land in subsequent commits as the docs
 modernization continues:
 
-- **API reference** — auto-generated from the live FastAPI
-  OpenAPI schema. The hand-written `api_reference.rst` is being
-  retired.
 - **Client** — the Electron / React client, deep-link protocol,
   auto-updater, voice DSP wiring, localStorage cache strategy.
 - **SDK** — using `pypufferblow` to write bots and integrations.

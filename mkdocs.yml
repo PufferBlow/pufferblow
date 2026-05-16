@@ -75,3 +75,4 @@ nav:
   - Developer:
       - developer/index.md
       - Server architecture: developer/architecture.md
+      - API reference: developer/api-reference.md
