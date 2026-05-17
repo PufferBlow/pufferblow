@@ -104,6 +104,14 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             client_ip = request.client.host
 
         if api_initializer.database_handler.check_is_ip_blocked(ip=client_ip):
+            # Count this rejection on the BlockedIPS row so the operator
+            # tab can show how many times this IP has knocked on the
+            # door since it was blocked. Best-effort — failures here
+            # must not gate the 403 response.
+            try:
+                api_initializer.database_handler.increment_blocked_ip_attempt(ip=client_ip)
+            except Exception:
+                pass
             return ORJSONResponse(
                 status_code=403,
                 content={

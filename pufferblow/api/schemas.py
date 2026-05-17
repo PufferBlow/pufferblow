@@ -146,6 +146,21 @@ class CreateChannelRequest(BaseModel):
     channel_type: str = Field(default="text", pattern="^(text|voice|mixed)$")
 
 
+class UpdateChannelRequest(BaseModel):
+    """UpdateChannelRequest class.
+
+    Used by the admin "edit channel" flow in the control panel.
+    ``channel_type`` is intentionally NOT included here: switching a
+    text channel into voice (or vice versa) is treated as a separate
+    destructive operation (different message vs. participant
+    semantics, different SFU plumbing) and the UI surfaces it as a
+    fixed badge. To change a channel's medium, delete and recreate.
+    """
+    auth_token: str = Field(min_length=1)
+    channel_name: str | None = Field(default=None, min_length=1)
+    is_private: bool | None = None
+
+
 class CreateChannelResponse(BaseModel):
     """CreateChannelResponse class."""
     status_code: int

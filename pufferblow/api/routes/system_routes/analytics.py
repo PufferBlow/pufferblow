@@ -32,10 +32,23 @@ async def _chart_response(chart_type: str, period: str | None) -> dict:
         return _empty_chart_response("Background tasks manager not initialized")
 
     try:
+        # `get_chart_data` returns the FULL envelope (chart_type,
+        # period, chart_data, raw_stats, last_updated). We unwrap it
+        # here so the HTTP response has a clean {chart_data, raw_stats}
+        # shape — otherwise the outer `chart_data` field on the
+        # response would itself be a dict containing another
+        # `chart_data` array, which broke the frontend parser.
+        envelope = manager.get_chart_data(chart_type, period) or {}
+        chart_payload = envelope.get("chart_data", [])
+        raw_stats = (
+            envelope.get("raw_stats")
+            or manager.get_raw_stats(chart_type, period)
+            or {}
+        )
         return {
             "status_code": 200,
-            "chart_data": manager.get_chart_data(chart_type, period),
-            "raw_stats": manager.get_raw_stats(chart_type, period) or {},
+            "chart_data": chart_payload,
+            "raw_stats": raw_stats,
         }
     except Exception as exc:
         raise HTTPException(
@@ -70,5 +83,47 @@ async def get_channel_creation_chart_route(request: ChartRequest):
 
 @router.post("/api/v1/system/charts/user-status", status_code=200)
 async def get_user_status_chart_route(request: UserStatusChartRequest):
-    """Get user status distribution chart data."""
-    return await _chart_response("user_status", None)
+    """Get user status distribution chart data.
+
+    Unlike the time-series charts, user_status is a *snapshot* —
+    "how many users are online right now" — and the
+    `_update_user_status_chart` task only stores it in process-local
+    memory, never in the `chart_data` table. Reading from the table
+    therefore always returns an empty pie. We instead read the live
+    counts straight from `users.status` and shape them into the same
+    {chart_data, raw_stats} envelope the time-series routes return,
+    so the frontend can treat them uniformly.
+    """
+    try:
+        status_counts = api_initializer.database_handler.get_user_status_counts() or {}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get user status chart data: {exc}",
+        ) from exc
+
+    online = int(status_counts.get("online", 0) or 0)
+    offline = int(status_counts.get("offline", 0) or 0)
+    away = int(status_counts.get("away", 0) or 0)
+    total = online + offline + away
+
+    # Pie-chart shape: a list of {label, value} pairs. The frontend's
+    # formatChartData maps `label` → `labels[i]` and `value` →
+    # `datasets[0].data[i]` so this drops straight into the existing
+    # transform without a special case.
+    chart_data = [
+        {"label": "Online", "value": online},
+        {"label": "Offline", "value": offline},
+        {"label": "Away", "value": away},
+    ]
+
+    return {
+        "status_code": 200,
+        "chart_data": chart_data,
+        "raw_stats": {
+            "online_users": online,
+            "offline_users": offline,
+            "away_users": away,
+            "total_users": total,
+        },
+    }

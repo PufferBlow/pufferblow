@@ -204,6 +204,18 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             )
             raise
 
+        # Same pattern for the blocked_ips attempt-counter columns.
+        # Pre-existing rows backfill to 0 attempts (no observed traffic
+        # yet) and NULL last_attempt_at (unknown) so the operator UI can
+        # show "0" instead of crashing on a missing column.
+        try:
+            self._apply_blocked_ips_counter_migration()
+        except Exception as exc:
+            logger.error(
+                "Blocked IPs counter migration failed: {err}", err=str(exc)
+            )
+            raise
+
         # Backfill appearance defaults for any rows that pre-date the
         # appearance feature. Idempotent — only touches rows where the
         # derived columns are still NULL. Runs on both SQLite (tests /
@@ -302,6 +314,69 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         if added:
             logger.info(
                 "Appearance columns added to live schema: {cols}",
+                cols=", ".join(added),
+            )
+
+    def _apply_blocked_ips_counter_migration(self) -> None:
+        """Add block_attempts_count + last_attempt_at if missing.
+
+        These columns power the operator-facing "how many times has
+        this blocked IP knocked on the door" metric in the Blocked IPs
+        admin tab. Adding them mid-life on a running instance, like
+        the appearance migration above, has to be an ALTER -- SQLAlchemy
+        ``create_all`` won't touch existing tables. Idempotent: a
+        column that already exists is skipped, so this can run on
+        every boot.
+
+        Both columns get safe defaults so backfill happens in a single
+        statement and existing rows don't break NOT NULL on the
+        counter.
+        """
+        from sqlalchemy import inspect, text
+
+        blocked_columns: list[tuple[str, str]] = [
+            ("block_attempts_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_attempt_at", "TIMESTAMP WITH TIME ZONE"),
+        ]
+
+        inspector = inspect(self.database_engine)
+        try:
+            existing = {col["name"] for col in inspector.get_columns("blocked_ips")}
+        except Exception as exc:
+            # Table not yet created — create_all should make it next
+            # boot. Nothing to do here.
+            logger.warning(
+                "Could not inspect blocked_ips for counter migration: {err}",
+                err=str(exc),
+            )
+            return
+
+        added: list[str] = []
+        for col_name, col_clause in blocked_columns:
+            if col_name in existing:
+                continue
+            # SQLite doesn't understand TIMESTAMP WITH TIME ZONE; fall
+            # back to DATETIME there. Detected via dialect name to avoid
+            # hard-coding driver versions.
+            clause = col_clause
+            if self.database_engine.dialect.name == "sqlite" and "TIMESTAMP" in clause:
+                clause = clause.replace("TIMESTAMP WITH TIME ZONE", "DATETIME")
+            ddl = f"ALTER TABLE blocked_ips ADD COLUMN {col_name} {clause}"
+            try:
+                with self.database_engine.begin() as conn:
+                    conn.execute(text(ddl))
+            except Exception as exc:
+                logger.error(
+                    "Failed to add column blocked_ips.{col}: {err}",
+                    col=col_name,
+                    err=str(exc),
+                )
+                raise
+            added.append(f"blocked_ips.{col_name}")
+
+        if added:
+            logger.info(
+                "Blocked IP counter columns added to live schema: {cols}",
                 cols=", ".join(added),
             )
 
@@ -1810,6 +1885,39 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             session.commit()
 
+    def update_channel_metadata(
+        self,
+        channel_id: str,
+        channel_name: str | None = None,
+        is_private: bool | None = None,
+    ) -> Channels | None:
+        """
+        Update mutable metadata on a channel.
+
+        Deliberately scoped to ``channel_name`` and ``is_private``;
+        ``channel_type`` is NOT writable through this path because
+        flipping text<->voice would orphan messages or participant
+        records depending on direction. Switching medium is treated
+        as a delete-and-recreate operation upstream.
+
+        Returns the updated row, or None if the channel doesn't exist.
+        """
+        with self.database_session() as session:
+            row = session.execute(
+                select(Channels).where(Channels.channel_id == channel_id)
+            ).fetchone()
+            if row is None:
+                return None
+            channel = row[0]
+            if channel_name is not None:
+                channel.channel_name = channel_name
+            if is_private is not None:
+                channel.is_private = bool(is_private)
+            session.add(channel)
+            session.commit()
+            session.refresh(channel)
+            return channel
+
     def add_user_to_channel(self, to_add_user_id: str, channel_id: str) -> None:
         """
         Add a `user` to a private channel
@@ -2492,6 +2600,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                         "ip": blocked_ip.ip,
                         "reason": blocked_ip.block_reason,
                         "blocked_at": blocked_ip.blocked_at.isoformat(),
+                        # Operator-facing counter: how many times this
+                        # IP has been turned away after being blocked.
+                        # Surfaces ongoing attacks vs. quiet entries.
+                        "block_attempts_count": int(getattr(blocked_ip, "block_attempts_count", 0) or 0),
+                        "last_attempt_at": (
+                            blocked_ip.last_attempt_at.isoformat()
+                            if getattr(blocked_ip, "last_attempt_at", None) is not None
+                            else None
+                        ),
                     }
                 )
 
@@ -2514,6 +2631,41 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             is_blocked = len(response) != 0
 
         return is_blocked
+
+    def increment_blocked_ip_attempt(self, ip: str) -> None:
+        """
+        Increment the rejection counter on an existing blocked IP.
+
+        Called from the rate-limit middleware every time a blocked IP
+        makes another request and gets the 403. Best-effort — if the
+        update fails (race with manual unblock, transient DB error,
+        etc.) we swallow the exception because the security path
+        already returned the rejection response and shouldn't be held
+        up by audit accounting.
+
+        Args:
+            ip (str): The raw ip address that was rejected.
+
+        Returns:
+            None.
+        """
+        try:
+            from datetime import datetime, timezone
+            with self.database_session() as session:
+                stmt = (
+                    update(BlockedIPS)
+                    .where(BlockedIPS.ip == ip)
+                    .values(
+                        block_attempts_count=BlockedIPS.block_attempts_count + 1,
+                        last_attempt_at=datetime.now(timezone.utc),
+                    )
+                )
+                session.execute(stmt)
+                session.commit()
+        except Exception:
+            # Audit-only — never let counter bookkeeping mask the real
+            # rejection that the middleware is returning to the client.
+            pass
 
     def delete_blocked_ip(
         self, blocked_ip: BlockedIPS | None = None, ip: str | None = None

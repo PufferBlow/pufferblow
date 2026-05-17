@@ -19,6 +19,7 @@ from loguru import logger
 from pufferblow.api.schemas import (
     AuthTokenQuery,
     CreateChannelRequest,
+    UpdateChannelRequest,
     VoiceChannelJoinResponse,
     VoiceChannelStatusResponse,
 )
@@ -191,6 +192,62 @@ async def create_new_channel_route(request: CreateChannelRequest):
         "status_code": 200,
         "message": "Channel created successfully",
         "channel_data": channel_data.to_dict(),
+    }
+
+
+@router.put("/{channel_id}/update", status_code=200)
+async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
+    """
+    Update an existing channel (admin/owner only).
+
+    Mutable fields: ``channel_name`` (must not collide with another
+    existing channel), ``is_private``. The channel's ``channel_type``
+    (text vs voice) is intentionally NOT mutable here — flipping the
+    medium would orphan existing messages or participant rows
+    depending on the direction. To change a channel's type, delete
+    and recreate.
+
+    Returns:
+        200 OK: Channel updated
+        403 FORBIDDEN: User lacks edit_channels
+        404 NOT FOUND: Channel does not exist
+        409 CONFLICT: New channel name collides with an existing one
+    """
+    user_id = require_privilege(request.auth_token, "edit_channels")
+
+    existing = api_initializer.database_handler.get_channel_data(channel_id=channel_id)
+    if existing is None:
+        raise exceptions.HTTPException(
+            status_code=404, detail=f"Channel '{channel_id}' not found."
+        )
+
+    if request.channel_name is not None and request.channel_name != existing.channel_name:
+        channels_names = api_initializer.database_handler.get_channels_names()
+        if request.channel_name in channels_names:
+            raise exceptions.HTTPException(
+                status_code=409,
+                detail="Channel name already exists, please choose a different name.",
+            )
+
+    updated = api_initializer.database_handler.update_channel_metadata(
+        channel_id=channel_id,
+        channel_name=request.channel_name,
+        is_private=request.is_private,
+    )
+    if updated is None:
+        raise exceptions.HTTPException(
+            status_code=404, detail=f"Channel '{channel_id}' not found."
+        )
+
+    logger.info(
+        f"Channel {channel_id} updated by user {user_id} "
+        f"(name={updated.channel_name!r}, is_private={updated.is_private})"
+    )
+
+    return {
+        "status_code": 200,
+        "message": "Channel updated successfully",
+        "channel_data": updated.to_dict(),
     }
 
 
