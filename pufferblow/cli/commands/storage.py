@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
-from loguru import logger
 from rich.prompt import Confirm, Prompt
 
 if TYPE_CHECKING:
@@ -18,6 +17,16 @@ def _console():
     from pufferblow.cli.common import console
 
     return console
+
+
+def _ui_error(message: str) -> None:
+    """Print a red wizard-style error.
+
+    Mirrors `setup._ui_error`: validation feedback and aborts go
+    through Rich so storage commands look like the same product as
+    `pufferblow setup`, not like a stack-trace prelude.
+    """
+    _console().print(f"[bold red]{message}[/bold red]")
 
 
 def _api_initializer():
@@ -34,7 +43,7 @@ def _load_runtime_config_or_exit() -> Config:
     config_handler = ConfigHandler()
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
-        logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
+        _ui_error("No bootstrap database URI found. Run `pufferblow setup` first.")
         raise typer.Exit(code=1)
 
     ensure_database_exists(database_uri)
@@ -68,7 +77,7 @@ def _prompt_local_config() -> dict:
         if allocated_gb <= 0:
             raise ValueError
     except ValueError:
-        logger.error("Allocated storage must be a positive number.")
+        _ui_error("Allocated storage must be a positive number.")
         raise typer.Exit(code=1)
 
     return {
@@ -90,7 +99,7 @@ def _prompt_s3_config(*, is_aws: bool) -> dict:
         endpoint_url = Prompt.ask("Endpoint URL").strip()
 
     if not bucket_name or not access_key or not secret_key:
-        logger.error("Bucket name, access key, and secret key are required for S3.")
+        _ui_error("Bucket name, access key, and secret key are required for S3.")
         raise typer.Exit(code=1)
 
     return {
@@ -187,6 +196,9 @@ def _config_to_storage_dict(config: Config) -> dict:
 
 def setup_storage_command() -> None:
     """Interactive storage backend setup wizard."""
+    from pufferblow.cli.common import configure_cli_logging
+
+    configure_cli_logging()
     console = _console()
     provider_choice = _prompt_provider()
     if provider_choice == "4":
@@ -219,6 +231,9 @@ def setup_storage_command() -> None:
 
 def test_storage_command() -> None:
     """Test the currently configured storage backend."""
+    from pufferblow.cli.common import configure_cli_logging
+
+    configure_cli_logging()
     console = _console()
     config = _load_runtime_config_or_exit()
     storage_config = _config_to_storage_dict(config)
@@ -251,8 +266,12 @@ def migrate_storage_command(
     ),
 ) -> None:
     """Migrate files between configured storage backends."""
+    from pufferblow.cli.common import configure_cli_logging
+
+    configure_cli_logging()
+
     if source_provider not in {"local", "s3"} or target_provider not in {"local", "s3"}:
-        logger.error("source/target provider must be either 'local' or 's3'.")
+        _ui_error("source/target provider must be either 'local' or 's3'.")
         raise typer.Exit(code=1)
 
     config = _load_runtime_config_or_exit()
@@ -261,7 +280,7 @@ def migrate_storage_command(
     try:
         from scripts.migrate_storage import StorageMigrator
     except ImportError as exc:
-        logger.error("Storage migrator script is unavailable: {error}", error=str(exc))
+        _ui_error(f"Storage migrator script is unavailable: {exc}")
         raise typer.Exit(code=1)
 
     source_config = _config_to_storage_dict(config)

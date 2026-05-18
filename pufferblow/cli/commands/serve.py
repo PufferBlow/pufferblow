@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import typer
 from loguru import logger
 
@@ -22,7 +24,9 @@ def serve_command(
     """Start the API server."""
     from pufferblow.api.config.config_handler import ConfigHandler
     from pufferblow.cli.common import (
-        configure_structured_logging,
+        ENV_DEBUG,
+        ENV_LOG_LEVEL,
+        configure_server_logging,
         ensure_database_exists,
         load_config_or_exit,
         load_runtime,
@@ -42,7 +46,7 @@ def serve_command(
 
     # Configure logging before load_runtime so startup/DB-setup logs use the
     # same format as everything that follows, not Loguru's bare default.
-    log_level_name = configure_structured_logging(
+    log_level_name = configure_server_logging(
         config=config,
         log_level=log_level,
         debug=debug,
@@ -56,6 +60,16 @@ def serve_command(
         logger.info("Starting development server with hot reload.")
         try:
             import uvicorn
+
+            # Forward the resolved log preferences across the
+            # process boundary. uvicorn's `reload=True` spawns a
+            # fresh worker subprocess on every file change; that
+            # worker imports `pufferblow.server.app` cold and would
+            # otherwise lose this logger configuration. The worker
+            # re-applies it on import via
+            # `maybe_configure_server_logging_from_env`.
+            os.environ[ENV_LOG_LEVEL] = str(log_level)
+            os.environ[ENV_DEBUG] = "1" if debug else "0"
 
             uvicorn.run(
                 "pufferblow.server.app:api",

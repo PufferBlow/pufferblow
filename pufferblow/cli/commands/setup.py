@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
-from loguru import logger
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
@@ -53,6 +52,18 @@ def _launch_setup_wizard(has_existing_config: bool):
     return run_setup_wizard(has_existing_config=has_existing_config)
 
 
+def _ui_error(message: str) -> None:
+    """Print a red one-liner for wizard validation failures.
+
+    Validation feedback ("X is required") is UI, not a log event. Using
+    `logger.error` here was producing loguru's full timestamp +
+    module:line stamp in the middle of a Rich-styled wizard, which read
+    like a crash. This keeps the output style coherent with the green
+    success Panels the same flow emits.
+    """
+    _console().print(f"[bold red]{message}[/bold red]")
+
+
 def _prompt_database_credentials() -> DatabaseCredentials:
     """Prompt user for PostgreSQL connection details."""
     from pufferblow.cli.common import DatabaseCredentials
@@ -64,7 +75,7 @@ def _prompt_database_credentials() -> DatabaseCredentials:
     port_raw = Prompt.ask("PostgreSQL port", default="5432").strip()
 
     if not port_raw.isdigit():
-        logger.error("Database port must be numeric.")
+        _ui_error("Database port must be numeric.")
         raise typer.Exit(code=1)
 
     return DatabaseCredentials(
@@ -83,7 +94,7 @@ def _prompt_server_details() -> ServerDetails:
     welcome_message = Prompt.ask("Server welcome message").strip()
 
     if not name or not description or not welcome_message:
-        logger.error("Server name, description, and welcome message are required.")
+        _ui_error("Server name, description, and welcome message are required.")
         raise typer.Exit(code=1)
 
     return ServerDetails(
@@ -99,7 +110,7 @@ def _prompt_owner_details() -> OwnerDetails:
     password = Prompt.ask("Owner password", password=True)
 
     if not username or not password:
-        logger.error("Owner username and password are required.")
+        _ui_error("Owner username and password are required.")
         raise typer.Exit(code=1)
 
     return OwnerDetails(username=username, password=password)
@@ -125,7 +136,7 @@ def _prompt_media_sfu_config() -> dict[str, str | int]:
     )
 
     if not bootstrap_secret:
-        logger.error("Bootstrap secret is required.")
+        _ui_error("Bootstrap secret is required.")
         raise typer.Exit(code=1)
 
     return {
@@ -180,7 +191,7 @@ def _run_full_setup(
     load_runtime(database_uri=database_uri)
 
     if api_initializer.server_manager.check_server_exists():
-        logger.error(
+        _ui_error(
             "Server already exists for this database. Use --update-server for changes."
         )
         raise typer.Exit(code=1)
@@ -304,7 +315,7 @@ def _run_server_only_setup(
     api_initializer = _api_initializer()
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
-        logger.error(
+        _ui_error(
             "No bootstrap database URI found. Run `pufferblow setup` first."
         )
         raise typer.Exit(code=1)
@@ -313,16 +324,14 @@ def _run_server_only_setup(
     load_runtime(database_uri=database_uri)
 
     if not is_update and api_initializer.server_manager.check_server_exists():
-        logger.error("Server already exists. Use --update-server to modify it.")
+        _ui_error("Server already exists. Use --update-server to modify it.")
         raise typer.Exit(code=1)
 
     _apply_server_configuration(server=server, is_update=is_update)
     if security_config is not None:
         config_handler.write_config_toml(security_config=security_config)
-    logger.info(
-        "Server information {action} successfully.",
-        action="updated" if is_update else "created",
-    )
+    action = "updated" if is_update else "created"
+    _console().print(f"[green]Server information {action} successfully.[/green]")
 
 
 def _run_media_sfu_only_setup(
@@ -331,7 +340,7 @@ def _run_media_sfu_only_setup(
     """Execute setup flow that only updates the shared Pufferblow config [media-sfu] section."""
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
-        logger.error(
+        _ui_error(
             "No bootstrap database URI found. Run `pufferblow setup` first."
         )
         raise typer.Exit(code=1)
@@ -361,7 +370,7 @@ def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
     # Handle media-sfu only mode
     if payload.mode == "media_sfu_only":
         if payload.media_sfu_config is None:
-            logger.error("No shared Pufferblow config values were provided for the [media-sfu] section.")
+            _ui_error("No shared Pufferblow config values were provided for the [media-sfu] section.")
             raise typer.Exit(code=1)
         _run_media_sfu_only_setup(
             config_handler=config_handler,
@@ -415,7 +424,7 @@ def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
     try:
         schedule_hours = int(schedule_hours_raw)
     except ValueError:
-        logger.error("Schedule hours must be a number.")
+        _ui_error("Schedule hours must be a number.")
         raise typer.Exit(code=1)
 
     backup_config: dict[str, object] = {
@@ -437,7 +446,7 @@ def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
     else:
         mirror_dsn = Prompt.ask("Mirror database DSN (postgresql://user:pass@host/db)").strip()
         if not mirror_dsn:
-            logger.error("Mirror DSN is required for mirror mode.")
+            _ui_error("Mirror DSN is required for mirror mode.")
             raise typer.Exit(code=1)
         backup_config["mirror_dsn"] = mirror_dsn
 
@@ -478,19 +487,25 @@ def setup_command(
 ) -> None:
     """Configure database, server metadata, and owner account."""
     from pufferblow.api.config.config_handler import ConfigHandler
+    from pufferblow.cli.common import configure_cli_logging
+
+    # Quiet loguru so library code (database, bootstrap) doesn't echo
+    # info-level startup chatter into the wizard. Wizard output goes
+    # through Rich Panels and the _ui_error helper above.
+    configure_cli_logging()
 
     config_handler = ConfigHandler()
     has_bootstrap_config = config_handler.resolve_database_uri() is not None
-    
+
     # Validate that only one flag is used
     flags_used = sum([is_setup_server, is_update_server, is_setup_media_sfu, is_setup_backup])
     if flags_used > 1:
-        logger.error("Choose only one of --setup-server, --update-server, or --setup-media-sfu.")
+        _ui_error("Choose only one of --setup-server, --update-server, or --setup-media-sfu.")
         raise typer.Exit(code=1)
 
     if is_setup_media_sfu:
         if not has_bootstrap_config:
-            logger.error(
+            _ui_error(
                 "No bootstrap database URI found. Run `pufferblow setup` first."
             )
             raise typer.Exit(code=1)

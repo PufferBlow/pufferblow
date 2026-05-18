@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -17,6 +18,16 @@ LOG_LEVEL_MAP = {
     2: "ERROR",
     3: "CRITICAL",
 }
+
+# Env vars used to forward CLI logging preferences across a process
+# boundary. They exist for the uvicorn `--dev` reload path: uvicorn
+# spawns a fresh worker subprocess on every file change and that
+# worker imports the server app cold, so the logger configuration the
+# CLI parent applied is lost. The worker reads these on import and
+# re-applies the same configuration so every reload renders identical
+# log lines.
+ENV_LOG_LEVEL = "PUFFERBLOW_LOG_LEVEL"
+ENV_DEBUG = "PUFFERBLOW_DEBUG"
 
 if TYPE_CHECKING:
     from pufferblow.api.config.config_handler import ConfigHandler
@@ -180,10 +191,41 @@ def load_runtime(*, database_uri: str | None = None, setup_tables: bool = False)
         api_initializer.database_handler.setup_tables(Base)
 
 
-def configure_structured_logging(
+def configure_cli_logging(*, level: str = "WARNING") -> None:
+    """Configure loguru for interactive CLI commands.
+
+    Setup / storage / migration commands present their primary output
+    via `rich.console.Console.print` so the experience reads like a
+    wizard, not a server log tail. Loguru is still active because
+    library modules (database, config, bootstrap) emit through it, but
+    we keep it quiet (WARNING+) and use a one-line compact format so
+    those library messages don't compete with the wizard surface.
+
+    Validation feedback ("Owner password required", etc.) should go
+    through `console.print("[red]…[/red]")` rather than `logger.error`
+    — that's user-facing UI, not a log event.
+    """
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        level=level,
+        format="<level>{level: <8}</level>  {message}",
+        colorize=True,
+        backtrace=False,
+        diagnose=False,
+    )
+
+
+def configure_server_logging(
     *, config: Config, log_level: int, debug: bool
 ) -> str:
-    """Configure stdlib/loguru integration and return resolved log level name."""
+    """Configure stdlib/loguru integration and return resolved log level name.
+
+    Used by the `serve` command and by `pufferblow.server.app` on
+    import so that uvicorn-reload worker subprocesses (which start
+    cold and lose the CLI parent's logger config) render the same
+    structured lines as the parent.
+    """
     if log_level not in LOG_LEVEL_MAP:
         logger.error("Invalid log level: {level}. Allowed: 0..3.", level=log_level)
         raise typer.Exit(code=1)
@@ -230,6 +272,52 @@ def configure_structured_logging(
         colorize=False,
     )
     return log_level_name
+
+
+# Backwards-compat shim: the previous name is exported so anything
+# importing it (third-party scripts, tests, in-flight branches) keeps
+# working. New code should use `configure_server_logging`.
+configure_structured_logging = configure_server_logging
+
+
+def maybe_configure_server_logging_from_env() -> None:
+    """Re-apply server logging in a child process spawned by uvicorn --reload.
+
+    The CLI parent sets `PUFFERBLOW_LOG_LEVEL` / `PUFFERBLOW_DEBUG`
+    before handing off to `uvicorn.run(..., reload=True)`. uvicorn
+    spawns a watcher and a fresh worker subprocess on every file
+    change; the worker imports `pufferblow.server.app` cold, which
+    means loguru is back to its default sink and format. This helper
+    is invoked from `pufferblow.server.app` on import — when those
+    env vars are present, it rebuilds the same configuration the
+    parent used so reload-driven restarts don't silently change the
+    log format.
+
+    A no-op when the env vars are missing (e.g. running under
+    Gunicorn in production, where each worker shares the parent's
+    process image and inherits the already-configured sinks).
+    """
+    level_raw = os.environ.get(ENV_LOG_LEVEL)
+    if level_raw is None:
+        return
+    try:
+        log_level = int(level_raw)
+    except ValueError:
+        return
+
+    debug = os.environ.get(ENV_DEBUG, "0") == "1"
+    try:
+        config = load_config_or_exit()
+    except Exception:
+        # Worker came up without a usable bootstrap config or some
+        # other transient failure — let the main server bootstrap
+        # raise its own clearer error a few lines later rather than
+        # crashing here on a best-effort log shim.
+        return
+    try:
+        configure_server_logging(config=config, log_level=log_level, debug=debug)
+    except Exception:
+        return
 
 
 def run_gunicorn_server(*, app, config: Config, log_level_name: str) -> None:
