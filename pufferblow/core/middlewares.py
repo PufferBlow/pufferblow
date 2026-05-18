@@ -233,6 +233,13 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         return "default"
 
 
+# Re-export PrivateNetworkAccessMiddleware from its leaf module so existing
+# imports (`from pufferblow.core.middlewares import PrivateNetworkAccessMiddleware`)
+# keep working. The middleware lives in pna_middleware.py because this module
+# pulls in the bootstrap object, which on import triggers full server init.
+from pufferblow.core.pna_middleware import PrivateNetworkAccessMiddleware  # noqa: E402, F401
+
+
 class SecurityMiddleware(BaseHTTPMiddleware):
     """
     Centralized security middleware for privileged API routes.

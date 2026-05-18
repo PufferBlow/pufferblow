@@ -19,7 +19,11 @@ from pufferblow.api.routes.system_routes.server_runtime import (
     build_instance_health_payload,
 )
 from pufferblow.core.bootstrap import api_initializer
-from pufferblow.server.middlewares import RateLimitingMiddleware, SecurityMiddleware
+from pufferblow.server.middlewares import (
+    PrivateNetworkAccessMiddleware,
+    RateLimitingMiddleware,
+    SecurityMiddleware,
+)
 
 
 def _mount_static_routes() -> None:
@@ -78,9 +82,26 @@ api = FastAPI(lifespan=lifespan)
 ) = _load_cors_settings()
 api.add_middleware(SecurityMiddleware)
 api.add_middleware(RateLimitingMiddleware)
-# CORSMiddleware must be added last so it runs outermost and attaches
-# Access-Control-Allow-Origin headers even when downstream middleware
-# or route handlers return 4xx/5xx responses.
+# Middleware order, from innermost to outermost (the LAST add_middleware
+# call is OUTERMOST in Starlette's stack):
+#
+#   SecurityMiddleware           (innermost; param validation)
+#   RateLimitingMiddleware
+#   CORSMiddleware               (attaches Access-Control-Allow-Origin
+#                                 to every response, including the
+#                                 4xx/5xx that the inner middleware
+#                                 returns)
+#   PrivateNetworkAccessMiddleware (outermost; decorates the CORS
+#                                 preflight with the extra PNA header
+#                                 when the browser requested it)
+#
+# PNA being outermost is deliberate. CORSMiddleware short-circuits on
+# preflight requests — it builds the response itself without calling
+# downstream. We need to see and modify that already-built response,
+# which means sitting one layer further out. PNA does NOT replace CORS
+# auth: a preflight that CORS declines still has no
+# Access-Control-Allow-Origin, and the browser will reject it
+# regardless of the PNA header.
 if cors_origins or cors_origin_regex:
     api.add_middleware(
         CORSMiddleware,
@@ -94,6 +115,7 @@ else:
     logger.warning(
         "CORS middleware disabled because [security].cors_origins or [security].cors_origin_regex is not set in ~/.pufferblow/config.toml"
     )
+api.add_middleware(PrivateNetworkAccessMiddleware)
 
 register_routers(api)
 
