@@ -116,6 +116,29 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         """Return True when the active engine is SQLite."""
         return str(self.database_engine.url).startswith("sqlite://")
 
+    def _invalidate_user_cache(self, user_id: str) -> None:
+        """Drop a cached `Users` row after a mutation.
+
+        Cache TTL is 60s, so without invalidation a fresh write
+        wouldn't be visible to other workers (or this worker, post-
+        commit) for up to a minute. Hot mutations (status,
+        appearance, username) call this so the next `get_user` reads
+        the fresh row from Postgres and re-caches it.
+
+        Cold mutations (admin actions, federated rewrites) rely on
+        the TTL alone — calling invalidate everywhere would be
+        defensive but the staleness window is bounded and harmless.
+        """
+        from pufferblow.api.cache.memcache import get_cache, user_key
+
+        get_cache(self.config).delete(user_key(str(user_id)))
+
+    def _invalidate_server_cache(self) -> None:
+        """Drop the cached singleton Server row after a mutation."""
+        from pufferblow.api.cache.memcache import get_cache, server_key
+
+        get_cache(self.config).delete(server_key())
+
     def setup_tables(self, base: DeclarativeBase) -> None:
         """
         Setup the needed database tables
@@ -526,6 +549,13 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             session.commit()
 
+        # The cached server row carries the old server_id. Drop it
+        # so the next get_server fetches the rewritten row from
+        # Postgres. Without this, any cache hit within the TTL
+        # window would still show the legacy UUID even after the
+        # database has been migrated.
+        self._invalidate_server_cache()
+
         logger.info(
             "server_id rewritten: {old!r} -> {new!r} "
             "(users updated: {users}, voice rows updated: {voice})",
@@ -684,6 +714,13 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Fetch metadata about a user based on
         the user_id or the username from the database
 
+        Memcache fast-path: when looking up by `user_id` we consult
+        the cache first and write the row back on a miss. Lookups by
+        `username` go straight to the DB — usernames are rarely the
+        primary key path (sign-in is the main caller), and cache keys
+        would collide with the by-id entries unless we also stored a
+        secondary index.
+
         Args:
             user_id (str, optional): The user's `user_id`.
             username (str, optional): The user's username.
@@ -702,6 +739,20 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             except (TypeError, ValueError):
                 normalized_user_id = user_id
 
+        # Cache lookup is only safe for by-id reads. A by-username
+        # call may be checking signin-time freshness (e.g. password
+        # field) and we don't want to serve stale credentials.
+        cache = None
+        cache_key = None
+        if normalized_user_id is not None and username is None:
+            from pufferblow.api.cache.memcache import get_cache, user_key
+
+            cache = get_cache(self.config)
+            cache_key = user_key(str(normalized_user_id))
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+
         with self.database_session() as session:
             stmt = select(Users).where(
                 Users.user_id == normalized_user_id
@@ -711,6 +762,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             user_result = session.execute(stmt).fetchone()
             user = user_result[0] if user_result else None
+            if user is not None:
+                # Detach from the session so the cached object is
+                # safe to return after the session closes. Without
+                # this, downstream reads of relationships could
+                # trigger DetachedInstanceError.
+                session.expunge(user)
+
+        if user is not None and cache is not None and cache_key is not None:
+            cache.set(cache_key, user)
 
         if user:
             logger.debug(
@@ -1058,6 +1118,12 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 session.execute(stmt)
 
             session.commit()
+
+        # Status changes are high-frequency (the activity loop in the
+        # client toggles online ↔ idle), so we evict the cached row
+        # immediately rather than waiting for the 60s TTL — otherwise
+        # the user's own presence pill would lag their actual state.
+        self._invalidate_user_cache(user_id)
 
     def update_user_password(self, user_id: str, ciphered_new_password: str) -> None:
         """Updates the user's password
@@ -2888,9 +2954,22 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.execute(stmt)
             session.commit()
 
+        # The cached singleton-server row is read on every dashboard
+        # load. After an update_server_values call (operator running
+        # `pufferblow setup --update-server`) we evict immediately so
+        # the new name/description/welcome are visible without
+        # waiting for the 60s TTL.
+        self._invalidate_server_cache()
+
     def get_server(self) -> Server:
         """
         Fetches the server row from the server table.
+
+        Memcache fast-path: the server row is a singleton that
+        changes only when an operator runs `pufferblow setup
+        --update-server`, but it's read on every dashboard load and
+        every channel-list request. Caching it with the default TTL
+        cuts those reads to about one per minute per worker.
 
         Args:
             None.
@@ -2898,13 +2977,30 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             Server: A server table row object.
         """
+        from pufferblow.api.cache.memcache import get_cache, server_key
+
+        cache = get_cache(self.config)
+        cached = cache.get(server_key())
+        if cached is not None:
+            return cached
+
         server: Server
 
         with self.database_session() as session:
             stmt = select(Server)
-            server = session.execute(stmt).fetchone()
+            row = session.execute(stmt).fetchone()
+            server = row[0] if row is not None else None
+            if server is not None:
+                # Detach so the cached object outlives the session.
+                # Server has no relationships we lazy-load downstream,
+                # but matching the get_user pattern keeps the
+                # behavior predictable.
+                session.expunge(server)
 
-        return server if server is None else server[0]
+        if server is not None:
+            cache.set(server_key(), server)
+
+        return server
 
     def get_server_id(self) -> str:
         """

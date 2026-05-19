@@ -116,6 +116,19 @@ class Config:
     BACKUP_SCHEDULE_HOURS: int = 24
     BACKUP_MAX_FILES: int = 7
 
+    # Memcache. Disabled by default; an operator opts in by setting
+    # MEMCACHE_ENABLED = true and pointing MEMCACHE_HOST at a running
+    # daemon. When disabled the cache wrapper is a no-op so the
+    # database paths fall through to a direct query — the rest of
+    # the app doesn't need to know whether the cache is on.
+    MEMCACHE_ENABLED: bool = False
+    MEMCACHE_HOST: str = "127.0.0.1"
+    MEMCACHE_PORT: int = 11211
+    # Default TTL for cached rows (seconds). User / server records
+    # are read on most authenticated requests; a 60-second TTL cuts
+    # the DB load substantially while keeping staleness bounded.
+    MEMCACHE_DEFAULT_TTL: int = 60
+
     def __init__(self, config: dict | None = None) -> None:
         """Initialize the instance."""
         if config is not None:
