@@ -14,7 +14,8 @@ Files used by this flow:
 | Service            | Image / build              | Purpose                                                                |
 | ------------------ | -------------------------- | ---------------------------------------------------------------------- |
 | `postgres`         | `postgres:16-alpine`       | Primary datastore.                                                     |
-| `pufferblow-server`| `./Dockerfile`             | The Python/FastAPI API. Waits for postgres health, exposes `:7575`.    |
+| `memcached`        | `memcached:1.6-alpine`     | In-memory cache for hot read paths (Users, Server). Internal only.     |
+| `pufferblow-server`| `./Dockerfile`             | The Python/FastAPI API. Waits for postgres + memcached, exposes `:7575`. |
 | `media-sfu`        | media-sfu repo (Go SFU)    | WebRTC SFU. Waits for `pufferblow-server` health, exposes `:8787`.     |
 | `coturn`           | `instrumentisto/coturn`    | TURN relay for clients behind strict NAT. Exposes `:3478` + UDP range. |
 
@@ -29,10 +30,13 @@ docker compose --env-file .env -f docker-compose.prod.server.yml up -d --build
 First boot order (you should see this in `docker compose logs -f`):
 
 1. `postgres` reports healthy.
-2. `pufferblow-server` builds, starts, hits `/readyz` once initialized.
-3. `media-sfu` builds, starts, fetches its bootstrap config from
+2. `memcached` comes up alongside — no healthcheck needed; the
+   server's own cache wrapper falls through quietly if the daemon
+   is briefly unreachable.
+3. `pufferblow-server` builds, starts, hits `/readyz` once initialized.
+4. `media-sfu` builds, starts, fetches its bootstrap config from
    `pufferblow-server`.
-4. `coturn` is independent and comes up alongside.
+5. `coturn` is independent and comes up alongside.
 
 The stack is reachable at:
 
@@ -48,6 +52,25 @@ The stack is reachable at:
 `POSTGRES_*` variables in your `.env`, so a fresh stack works without
 any host-side `pufferblow setup` call. The runtime falls back to
 `~/.pufferblow/config.toml` only if the env var is absent or empty.
+
+### Memcache
+
+Memcache is required in v1.0 — the API uses it to cache the hot
+read paths (Users by id, Server singleton). The bundled
+`memcached:1.6-alpine` service is the default target; the server
+reaches it via the service name `memcached` on the internal network,
+set through the `PUFFERBLOW_MEMCACHE_HOST` env var in the compose
+file.
+
+To point at an external memcache cluster, set
+`PUFFERBLOW_MEMCACHE_HOST` (and `PUFFERBLOW_MEMCACHE_PORT` if needed)
+in your `.env`, or run `pufferblow setup --setup-memcache` to persist
+a `[memcache]` block in `~/.pufferblow/config.toml`. Memory budget
+defaults to 64 MB; bump via `PUFFERBLOW_MEMCACHE_MEMORY_MB`.
+
+Connection failures fall through silently at runtime — a flaky
+daemon slows the API modestly (one TCP timeout per call) rather
+than crashing it.
 
 ### SFU bootstrap
 

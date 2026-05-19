@@ -323,6 +323,53 @@ def _run_server_only_setup(
     logger.success("Server information {action} successfully.", action=action)
 
 
+def _prompt_memcache_config() -> dict[str, str | int]:
+    """Prompt user for the [memcache] section.
+
+    Memcache is required in v1.0. Two questions: host + port. The
+    defaults assume the bundled Docker Compose stack (service name
+    `memcached` on the internal network); operators running a
+    standalone install can point this at a different host or port.
+    """
+    host = Prompt.ask("Memcache host", default="memcached").strip()
+    port_raw = Prompt.ask("Memcache port", default="11211").strip()
+
+    if not host:
+        _ui_error("Memcache host is required.")
+        raise SystemExit(1)
+    try:
+        port = int(port_raw)
+    except ValueError:
+        _ui_error("Memcache port must be numeric.")
+        raise SystemExit(1)
+
+    return {
+        "host": host,
+        "port": port,
+    }
+
+
+def _run_memcache_only_setup(
+    *, config_handler: ConfigHandler, memcache_config: dict[str, str | int]
+) -> None:
+    """Execute setup flow that only updates the [memcache] section."""
+    database_uri = config_handler.resolve_database_uri()
+    if not database_uri:
+        _ui_error(
+            "No bootstrap database URI found. Run `pufferblow setup` first."
+        )
+        raise SystemExit(1)
+
+    config_handler.write_config_toml(
+        memcache_config=memcache_config,
+    )
+
+    logger.success("Updated [memcache] section in ~/.pufferblow/config.toml.")
+    logger.info("  host={host}", host=memcache_config["host"])
+    logger.info("  port={port}", port=memcache_config["port"])
+    logger.info("Restart the server for the new cache target to take effect.")
+
+
 def _run_media_sfu_only_setup(
     *, config_handler: ConfigHandler, media_sfu_config: dict[str, str | int]
 ) -> None:
@@ -444,6 +491,7 @@ def setup_command(
     is_update_server: bool = False,
     is_setup_media_sfu: bool = False,
     is_setup_backup: bool = False,
+    is_setup_memcache: bool = False,
 ) -> None:
     """Configure database, server metadata, and owner account."""
     from pufferblow.api.config.config_handler import ConfigHandler
@@ -458,9 +506,20 @@ def setup_command(
     has_bootstrap_config = config_handler.resolve_database_uri() is not None
 
     # Validate that only one flag is used
-    flags_used = sum([is_setup_server, is_update_server, is_setup_media_sfu, is_setup_backup])
+    flags_used = sum(
+        [
+            is_setup_server,
+            is_update_server,
+            is_setup_media_sfu,
+            is_setup_backup,
+            is_setup_memcache,
+        ]
+    )
     if flags_used > 1:
-        _ui_error("Choose only one of --setup-server, --update-server, or --setup-media-sfu.")
+        _ui_error(
+            "Choose only one of --setup-server, --update-server, "
+            "--setup-media-sfu, --backup, --setup-memcache."
+        )
         raise SystemExit(1)
 
     if is_setup_media_sfu:
@@ -473,6 +532,19 @@ def setup_command(
         _run_media_sfu_only_setup(
             config_handler=config_handler,
             media_sfu_config=media_sfu_config,
+        )
+        return
+
+    if is_setup_memcache:
+        if not has_bootstrap_config:
+            _ui_error(
+                "No bootstrap database URI found. Run `pufferblow setup` first."
+            )
+            raise SystemExit(1)
+        memcache_config = _prompt_memcache_config()
+        _run_memcache_only_setup(
+            config_handler=config_handler,
+            memcache_config=memcache_config,
         )
         return
 

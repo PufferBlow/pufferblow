@@ -5,7 +5,8 @@ memcached daemon. The MemcacheCache uses a lazily-constructed
 `pymemcache.client.base.Client`; we substitute a fake client via
 monkeypatch so the behavior under test is the wrapper's own logic:
 
-  - enabled vs disabled (NullCache fallback)
+  - get_cache always returns a real cache (memcache is required in
+    v1.0; there is no NullCache opt-out anymore)
   - pickle round-trips through set/get
   - quiet fallthrough on backend errors (connection refused, raised
     exception, garbage payload on read)
@@ -22,7 +23,6 @@ import pytest
 from pufferblow.api.cache import memcache as memcache_module
 from pufferblow.api.cache.memcache import (
     MemcacheCache,
-    NullCache,
     get_cache,
     server_key,
     user_key,
@@ -42,9 +42,8 @@ def _reset_singleton():
     memcache_module._singleton = None
 
 
-def _config(enabled: bool = True, host: str = "127.0.0.1", port: int = 11211, ttl: int = 60):
+def _config(host: str = "127.0.0.1", port: int = 11211, ttl: int = 60):
     return types.SimpleNamespace(
-        MEMCACHE_ENABLED=enabled,
         MEMCACHE_HOST=host,
         MEMCACHE_PORT=port,
         MEMCACHE_DEFAULT_TTL=ttl,
@@ -86,23 +85,31 @@ class FakeClient:
 # ── get_cache ────────────────────────────────────────────────────────
 
 
-def test_get_cache_returns_null_when_disabled():
-    cache = get_cache(_config(enabled=False))
-    assert isinstance(cache, NullCache)
-    assert cache.get("anything") is None
-    cache.set("anything", "value")
-    cache.delete("anything")  # must not raise
-
-
-def test_get_cache_returns_real_cache_when_enabled():
-    cache = get_cache(_config(enabled=True))
+def test_get_cache_returns_real_cache():
+    """v1.0 made memcache required: there's no NullCache opt-out anymore."""
+    cache = get_cache(_config())
     assert isinstance(cache, MemcacheCache)
 
 
 def test_get_cache_is_singleton_within_process():
-    first = get_cache(_config(enabled=True))
-    second = get_cache(_config(enabled=False))  # disabled config ignored — singleton wins
+    """The cache is built once per process and reused.
+
+    Subsequent calls with a different config don't rebuild — that
+    matches how the rest of the server treats config.toml (re-read on
+    boot, not at runtime).
+    """
+    first = get_cache(_config(host="127.0.0.1"))
+    second = get_cache(_config(host="some-other-host"))
     assert first is second
+
+
+def test_get_cache_uses_configured_host_and_port():
+    """Lock the host/port pickup from config so a wiring regression is caught."""
+    cache = get_cache(_config(host="custom-host", port=22222, ttl=15))
+    assert isinstance(cache, MemcacheCache)
+    assert cache._host == "custom-host"
+    assert cache._port == 22222
+    assert cache._default_ttl == 15
 
 
 # ── MemcacheCache happy path ─────────────────────────────────────────

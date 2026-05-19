@@ -1,27 +1,29 @@
 """Thin pickle-backed wrapper over `pymemcache.Client`.
 
-`pymemcache` has been listed as a dependency since v0.x without
-anything actually using it. This module wires it up — but as a small,
-opt-in caching layer rather than a system everything in the codebase
-has to know about. Three properties drive the design:
+Memcache is a required runtime dependency of the v1.0 server. The
+bundled Docker Compose stack ships a memcached service the API
+depends on, so a fresh install has nothing to configure; operators
+running an existing memcache cluster point `MEMCACHE_HOST` at it
+via `pufferblow setup --setup-memcache`.
 
-1. **Disabled by default.** Operators opt in via `[memcache]` in
-   `config.toml`. When disabled, `get_cache()` returns a `NullCache`
-   that drops all writes and returns `None` for every read. Callers
-   only have to write the cache path — the disabled path is the same
-   code.
+Two properties drive the wrapper:
 
-2. **Failure is invisible.** A memcache that goes down should slow
+1. **Failure is invisible.** A memcache that goes down should slow
    the server modestly (one TCP timeout per call), never crash it.
    Every operation is wrapped in a broad except that logs at debug
    level and falls back to the un-cached path. Cache misses (because
    the daemon is gone) look identical to cache misses (because the
    key wasn't set) at the call site.
 
-3. **Process-local singleton.** The `Client` is built once per
+2. **Process-local singleton.** The `Client` is built once per
    process via `get_cache()`. Workers under gunicorn each build
    their own connection on first use, which matches pymemcache's
    own thread-safety model.
+
+The wrapper does NOT have an "off" mode. Callers can't disable the
+cache; the only escape hatch is the `_is_sqlite()` short-circuit
+inside `database_handler` that skips the cache for the SQLite test
+harness (the test runner doesn't spin up a memcached daemon).
 
 Values are pickled before write and unpickled on read. That lets us
 cache ORM rows (Users, Server) without a separate serialization
@@ -36,25 +38,6 @@ import pickle
 from typing import Any
 
 from loguru import logger
-
-
-class NullCache:
-    """No-op cache used when the operator hasn't enabled memcache.
-
-    Keeps the call-site signature identical to a real client so the
-    caller doesn't branch on enablement at every read.
-    """
-
-    enabled = False
-
-    def get(self, key: str) -> Any | None:  # noqa: ARG002 — signature parity
-        return None
-
-    def set(self, key: str, value: Any, ttl: int | None = None) -> None:  # noqa: ARG002
-        return None
-
-    def delete(self, key: str) -> None:  # noqa: ARG002
-        return None
 
 
 class MemcacheCache:
@@ -129,24 +112,21 @@ class MemcacheCache:
 # instance. `_singleton` is module-level state, NOT inside a class,
 # so each gunicorn worker has its own connection — matching
 # pymemcache's per-process model.
-_singleton: NullCache | MemcacheCache | None = None
+_singleton: MemcacheCache | None = None
 
 
-def get_cache(config) -> NullCache | MemcacheCache:
+def get_cache(config) -> MemcacheCache:
     """Return the process-wide cache instance.
 
-    Reads enablement + host/port from the bootstrap config the first
-    time it's called and stores the result. A subsequent config flip
-    (e.g. via `pufferblow setup`) won't take effect until the worker
-    restarts — which is consistent with how the rest of the server
-    treats `config.toml` (re-read on boot, not at runtime).
+    Reads host/port from the bootstrap config the first time it's
+    called and stores the result. A subsequent config change (e.g.
+    via `pufferblow setup --setup-memcache`) won't take effect until
+    the worker restarts — which is consistent with how the rest of
+    the server treats `config.toml` (re-read on boot, not at
+    runtime).
     """
     global _singleton
     if _singleton is not None:
-        return _singleton
-
-    if not getattr(config, "MEMCACHE_ENABLED", False):
-        _singleton = NullCache()
         return _singleton
 
     host = getattr(config, "MEMCACHE_HOST", "127.0.0.1")
@@ -154,7 +134,7 @@ def get_cache(config) -> NullCache | MemcacheCache:
     ttl = int(getattr(config, "MEMCACHE_DEFAULT_TTL", 60))
     _singleton = MemcacheCache(host=host, port=port, default_ttl=ttl)
     logger.info(
-        "Memcache enabled at {host}:{port} (default TTL {ttl}s)",
+        "Memcache wired at {host}:{port} (default TTL {ttl}s)",
         host=host,
         port=port,
         ttl=ttl,

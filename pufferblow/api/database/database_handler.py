@@ -128,13 +128,19 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Cold mutations (admin actions, federated rewrites) rely on
         the TTL alone — calling invalidate everywhere would be
         defensive but the staleness window is bounded and harmless.
+
+        No-op on SQLite to match the get_user fast-path skip.
         """
+        if self._is_sqlite():
+            return
         from pufferblow.api.cache.memcache import get_cache, user_key
 
         get_cache(self.config).delete(user_key(str(user_id)))
 
     def _invalidate_server_cache(self) -> None:
         """Drop the cached singleton Server row after a mutation."""
+        if self._is_sqlite():
+            return
         from pufferblow.api.cache.memcache import get_cache, server_key
 
         get_cache(self.config).delete(server_key())
@@ -742,9 +748,17 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         # Cache lookup is only safe for by-id reads. A by-username
         # call may be checking signin-time freshness (e.g. password
         # field) and we don't want to serve stale credentials.
+        # SQLite (the test harness) skips the cache entirely — the
+        # test runner doesn't spin up a memcached daemon and the
+        # `localhost:11211` default would otherwise mean a 1-second
+        # connect timeout on every test that calls get_user.
         cache = None
         cache_key = None
-        if normalized_user_id is not None and username is None:
+        if (
+            normalized_user_id is not None
+            and username is None
+            and not self._is_sqlite()
+        ):
             from pufferblow.api.cache.memcache import get_cache, user_key
 
             cache = get_cache(self.config)
@@ -2977,12 +2991,18 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Returns:
             Server: A server table row object.
         """
-        from pufferblow.api.cache.memcache import get_cache, server_key
+        # SQLite (test harness) skips the cache — see the same note
+        # in get_user. Otherwise this is the read of read paths and
+        # caching it knocks ~95% of the calls off Postgres.
+        skip_cache = self._is_sqlite()
+        cache = None
+        if not skip_cache:
+            from pufferblow.api.cache.memcache import get_cache, server_key as _server_key
 
-        cache = get_cache(self.config)
-        cached = cache.get(server_key())
-        if cached is not None:
-            return cached
+            cache = get_cache(self.config)
+            cached = cache.get(_server_key())
+            if cached is not None:
+                return cached
 
         server: Server
 
@@ -2997,8 +3017,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 # behavior predictable.
                 session.expunge(server)
 
-        if server is not None:
-            cache.set(server_key(), server)
+        if server is not None and cache is not None:
+            from pufferblow.api.cache.memcache import server_key as _server_key
+
+            cache.set(_server_key(), server)
 
         return server
 

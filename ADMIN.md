@@ -23,6 +23,7 @@ Compose stack.
 | `pufferblow setup --update-server`     | Update an existing server's name/description/welcome.                     |
 | `pufferblow setup --setup-media-sfu`   | Write a fresh `[media-sfu]` section to `config.toml` (rotates the secret).|
 | `pufferblow setup --backup`            | Configure scheduled backups (file dump or mirror). Writes `config.toml`.  |
+| `pufferblow setup --setup-memcache`    | Set the `[memcache]` host/port the server connects to.                    |
 | `pufferblow serve`                     | Run the API. Same entry point the container uses.                         |
 | `pufferblow serve --log-level 1`       | Verbose (DEBUG). `--log-level 0=INFO 1=DEBUG 2=ERROR 3=CRITICAL`.         |
 | `pufferblow serve --debug`             | Include tracebacks in error responses. Don't enable in production.        |

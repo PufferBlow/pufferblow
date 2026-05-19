@@ -195,6 +195,37 @@ class ConfigHandler:
             config.CORS_ALLOW_CREDENTIALS,
         )
 
+        # Memcache settings — required service in v1.0. Resolution
+        # priority mirrors the rest of the bootstrap: [memcache] in
+        # config.toml beats env vars beats defaults. The Docker
+        # Compose stack ships an env var pointing at the bundled
+        # memcached service, so a fresh install has nothing to set.
+        memcache_section = config_toml.get("memcache", {})
+        if isinstance(memcache_section, dict):
+            config.MEMCACHE_HOST = (
+                memcache_section.get("host")
+                or os.getenv("PUFFERBLOW_MEMCACHE_HOST")
+                or config.MEMCACHE_HOST
+            )
+            config.MEMCACHE_PORT = int(
+                memcache_section.get("port")
+                or _env_int("PUFFERBLOW_MEMCACHE_PORT", int(config.MEMCACHE_PORT))
+            )
+            if memcache_section.get("default_ttl"):
+                try:
+                    config.MEMCACHE_DEFAULT_TTL = int(memcache_section["default_ttl"])
+                except (ValueError, TypeError):
+                    pass
+        else:
+            # No [memcache] section in config.toml — fall back to env
+            # vars (set by Docker Compose) or stay on the defaults.
+            config.MEMCACHE_HOST = (
+                os.getenv("PUFFERBLOW_MEMCACHE_HOST") or config.MEMCACHE_HOST
+            )
+            config.MEMCACHE_PORT = _env_int(
+                "PUFFERBLOW_MEMCACHE_PORT", int(config.MEMCACHE_PORT)
+            )
+
         # Backup settings
         backup_section = config_toml.get("backup", {})
         if isinstance(backup_section, dict):
@@ -298,6 +329,7 @@ class ConfigHandler:
         media_sfu_config: dict[str, object] | None = None,
         security_config: dict[str, object] | None = None,
         backup_config: dict[str, object] | None = None,
+        memcache_config: dict[str, object] | None = None,
     ) -> None:
         """
         Write or update the shared Pufferblow config.toml.
@@ -332,6 +364,9 @@ class ConfigHandler:
 
         if backup_config:
             existing_config["backup"] = backup_config
+
+        if memcache_config:
+            existing_config["memcache"] = memcache_config
 
         # Convert to TOML and write
         toml_content = self._dict_to_toml_string(existing_config)

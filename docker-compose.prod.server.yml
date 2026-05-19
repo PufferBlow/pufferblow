@@ -15,11 +15,20 @@ services:
       PUFFERBLOW_DATABASE_URI: ${PUFFERBLOW_DATABASE_URI:-postgresql://${POSTGRES_USER:-pufferblow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pufferblow}}
       PUFFERBLOW_API_HOST: ${PUFFERBLOW_API_HOST:-0.0.0.0}
       PUFFERBLOW_API_PORT: ${PUFFERBLOW_API_PORT:-7575}
+      # Memcache is required in v1.0 — the API uses it to cache the
+      # hot read paths (Users by id, Server singleton). The bundled
+      # memcached service below is the default target. An operator
+      # pointing at an external memcache cluster can override
+      # PUFFERBLOW_MEMCACHE_HOST in .env.
+      PUFFERBLOW_MEMCACHE_HOST: ${PUFFERBLOW_MEMCACHE_HOST:-memcached}
+      PUFFERBLOW_MEMCACHE_PORT: ${PUFFERBLOW_MEMCACHE_PORT:-11211}
     volumes:
       - pufferblow_data:/root/.pufferblow
     depends_on:
       postgres:
         condition: service_healthy
+      memcached:
+        condition: service_started
     healthcheck:
       # /readyz mirrors instance health: returns 200 once the API has
       # finished bootstrap (DB connect + manager wiring). media-sfu waits
@@ -88,6 +97,27 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - pufferblow-server-net
+
+  memcached:
+    # Pinned to alpine for the same reason postgres is: tiny images
+    # the operator can read end-to-end. The official `memcached`
+    # image is built on Debian; the alpine variant is ~10 MB vs
+    # ~80 MB and ships the same binary.
+    image: memcached:1.6-alpine
+    container_name: pufferblow-memcached
+    restart: unless-stopped
+    # `-m` is the in-memory budget in MB. 64 is enough for the small
+    # set of cached rows the v1.0 server uses (Users by id + Server
+    # singleton, ~1 KB each, TTL 60s). Bump it via .env if you cache
+    # more aggressively in a downstream fork.
+    command: ["memcached", "-m", "${PUFFERBLOW_MEMCACHE_MEMORY_MB:-64}"]
+    # No host port mapped — the cache lives on the internal network
+    # and the server reaches it by service name. Exposing 11211 on
+    # the host would let any process on the host run commands; the
+    # daemon has no auth, so the right deployment shape is "private
+    # network + service-name DNS".
     networks:
       - pufferblow-server-net
 

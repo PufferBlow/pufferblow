@@ -88,6 +88,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Configure database backup settings (file dump or mirror).",
     )
+    setup_p.add_argument(
+        "--setup-memcache",
+        dest="is_setup_memcache",
+        action="store_true",
+        help="Configure the [memcache] host/port the server connects to.",
+    )
 
     # ── serve ────────────────────────────────────────────────────
     serve_p = subparsers.add_parser("serve", help="Start the API server.")
@@ -207,6 +213,7 @@ def _dispatch(args: argparse.Namespace) -> int:
                 is_update_server=args.is_update_server,
                 is_setup_media_sfu=args.is_setup_media_sfu,
                 is_setup_backup=args.is_setup_backup,
+                is_setup_memcache=args.is_setup_memcache,
             )
             return 0
 

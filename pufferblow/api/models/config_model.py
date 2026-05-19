@@ -116,12 +116,19 @@ class Config:
     BACKUP_SCHEDULE_HOURS: int = 24
     BACKUP_MAX_FILES: int = 7
 
-    # Memcache. Disabled by default; an operator opts in by setting
-    # MEMCACHE_ENABLED = true and pointing MEMCACHE_HOST at a running
-    # daemon. When disabled the cache wrapper is a no-op so the
-    # database paths fall through to a direct query — the rest of
-    # the app doesn't need to know whether the cache is on.
-    MEMCACHE_ENABLED: bool = False
+    # Memcache. Required in v1.0 — the API uses it for the hot read
+    # paths (Users by id, Server singleton). The bundled Docker
+    # Compose stack ships a memcached service the server depends on,
+    # so a fresh install has nothing to configure. Operators who
+    # already run a memcache cluster point MEMCACHE_HOST at it via
+    # `pufferblow setup --setup-memcache` or `[memcache]` in
+    # config.toml.
+    #
+    # Connection failures at runtime fall through silently (the
+    # cache wrapper logs at debug level and serves None on read,
+    # drops the write) — a flaky daemon must not crash the API.
+    # What's REQUIRED is that the daemon be *configured*; what's
+    # tolerated is that it be *unreachable*.
     MEMCACHE_HOST: str = "127.0.0.1"
     MEMCACHE_PORT: int = 11211
     # Default TTL for cached rows (seconds). User / server records
