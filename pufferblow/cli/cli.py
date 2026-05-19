@@ -17,6 +17,8 @@ cli = typer.Typer(
 )
 storage_cli = typer.Typer(help="Manage server storage backends.")
 cli.add_typer(storage_cli, name="storage")
+backup_cli = typer.Typer(help="On-demand database backup operations.")
+cli.add_typer(backup_cli, name="backup")
 
 
 @cli.command("version")
@@ -59,6 +61,44 @@ def setup_command_entry(
         is_setup_media_sfu=is_setup_media_sfu,
         is_setup_backup=is_setup_backup
     )
+
+
+@cli.command("migrate")
+def migrate_command_entry(
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Report schema drift without applying it. Exits 1 if drift exists.",
+    ),
+) -> None:
+    """Apply database schema changes (idempotent) or report drift in --check mode."""
+    from pufferblow.cli.commands.migrate import migrate_command
+
+    migrate_command(check=check)
+
+
+@cli.command("doctor")
+def doctor_command_entry() -> None:
+    """Run a read-only health check across DB, schema, storage, and config."""
+    from pufferblow.cli.commands.doctor import doctor_command
+
+    doctor_command()
+
+
+@backup_cli.command("now")
+def backup_now_command_entry() -> None:
+    """Run pg_dump against the configured database immediately."""
+    from pufferblow.cli.commands.backup import backup_now_command
+
+    backup_now_command()
+
+
+@backup_cli.command("mirror")
+def backup_mirror_command_entry() -> None:
+    """Mirror the database to the configured BACKUP_MIRROR_DSN target."""
+    from pufferblow.cli.commands.backup import backup_mirror_command
+
+    backup_mirror_command()
 
 
 @cli.command("serve")
