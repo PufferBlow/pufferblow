@@ -147,12 +147,26 @@ After any change, restart the server to apply it.
 ## CLI Reference
 
 ```
-pufferblow setup              First-time setup wizard
-pufferblow serve              Start the API server
-pufferblow setup --update-server   Update server name/description
-pufferblow setup --setup-media-sfu Configure the media-sfu integration
-pufferblow version            Print the installed version
+pufferblow version                    Print the installed version.
+pufferblow setup                      Interactive first-time setup wizard.
+pufferblow setup --update-server      Update server name/description/welcome.
+pufferblow setup --setup-media-sfu    Rotate the [media-sfu] section of config.toml.
+pufferblow setup --backup             Configure scheduled database backups.
+pufferblow serve                      Start the API server.
+pufferblow serve --dev                Run with uvicorn auto-reload (development only).
+pufferblow migrate                    Apply pending schema changes (idempotent).
+pufferblow migrate --check            Report schema drift without applying (exits 1 on drift).
+pufferblow doctor                     Read-only health check (DB, schema, storage, secrets, SFU).
+pufferblow backup now                 Run pg_dump immediately.
+pufferblow backup mirror              Mirror the database to BACKUP_MIRROR_DSN immediately.
+pufferblow storage setup              Wizard for the storage backend (local FS vs S3).
+pufferblow storage test               Round-trip a small upload through the configured backend.
+pufferblow storage migrate ...        Move file objects between backends.
 ```
+
+`migrate` is the *database schema* migration; `storage migrate` moves
+uploaded *files* between backends. They're independent — see
+[ADMIN.md](ADMIN.md#cli-quick-reference) for the full operator guide.
 
 ---
 

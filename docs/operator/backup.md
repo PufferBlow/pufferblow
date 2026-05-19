@@ -23,15 +23,25 @@ gone, every message in the DB becomes unreadable ciphertext.
 
 ---
 
-## What v1.0 deliberately doesn't back up automatically
+## What ships and what doesn't
 
-- There is no scheduler that runs `pg_dump` for you.
-- There is no built-in S3 bucket-to-bucket copy.
-- `pufferblow setup --backup` does NOT back up message history — it
-  only writes the server metadata row (name/description/welcome) to a
-  timestamped JSON. Useful before reconfiguring; useless as a DR plan.
+- **Scheduler** — `pufferblow setup --backup` writes a `[backup]`
+  section into `config.toml` (file dump or mirror mode, hourly cron
+  interval). The server's background task manager then runs `pg_dump`
+  or `pg_dump | psql` on the schedule you picked. Default is *off* —
+  you have to run setup first.
+- **On-demand triggers** — `pufferblow backup now` and
+  `pufferblow backup mirror` invoke the same code paths immediately,
+  useful before a risky change or as part of an external cron that
+  pins its own schedule.
+- **Not included** — built-in S3 bucket-to-bucket copy, automatic
+  off-host upload, anything outside Postgres.
 
-You need cron + your own discipline.
+The scheduled backup uses `BACKUP_PATH` (default
+`~/.pufferblow/backups`) inside the container's volume. Treat that
+directory as on-host: if the host dies, the backups die with it.
+You still need off-host copies — `rsync`, `aws s3 sync`, or restic
+against `BACKUP_PATH` on whatever cron interval suits your RPO.
 
 ---
 
@@ -51,6 +61,22 @@ rather than manually copying files.
 ---
 
 ## Postgres — pg_dump
+
+Two ways to drive the dump, depending on what you want.
+
+**Through the CLI** (uses the config you've already set up — credentials,
+path, retention all come from `config.toml`):
+
+```bash
+docker compose exec pufferblow-server pufferblow backup now
+```
+
+Output lands under `BACKUP_PATH` inside the data volume and the
+rotation policy (`BACKUP_MAX_FILES`, default 7) prunes oldest first.
+
+**Directly against Postgres** (the rest of this section). Use this when
+you want the dump file written to a path the CLI doesn't know about —
+e.g. straight onto a host-mounted off-host volume.
 
 Connect using the same `POSTGRES_USER` / `POSTGRES_PASSWORD` the
 container uses (look in your `.env`).

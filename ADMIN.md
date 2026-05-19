@@ -22,14 +22,106 @@ Compose stack.
 | `pufferblow setup --setup-server`      | Only (re)create the initial server row (name, description, welcome).      |
 | `pufferblow setup --update-server`     | Update an existing server's name/description/welcome.                     |
 | `pufferblow setup --setup-media-sfu`   | Write a fresh `[media-sfu]` section to `config.toml` (rotates the secret).|
-| `pufferblow setup --backup`            | Dump server metadata to a timestamped JSON before any setup change.       |
+| `pufferblow setup --backup`            | Configure scheduled backups (file dump or mirror). Writes `config.toml`.  |
 | `pufferblow serve`                     | Run the API. Same entry point the container uses.                         |
 | `pufferblow serve --log-level 1`       | Verbose (DEBUG). `--log-level 0=INFO 1=DEBUG 2=ERROR 3=CRITICAL`.         |
 | `pufferblow serve --debug`             | Include tracebacks in error responses. Don't enable in production.        |
 | `pufferblow serve --dev`               | Uvicorn auto-reload. Local development only.                              |
+| `pufferblow migrate`                   | Apply pending schema changes (idempotent). Safe to run on a live instance.|
+| `pufferblow migrate --check`           | Report schema drift without applying it. Exits 1 if anything is missing.  |
+| `pufferblow doctor`                    | Read-only health check across DB, schema, storage, secrets, media-sfu.    |
+| `pufferblow backup now`                | Run `pg_dump` against the configured database immediately.                |
+| `pufferblow backup mirror`             | Mirror the database to `BACKUP_MIRROR_DSN` immediately.                   |
 | `pufferblow storage setup`             | Interactive wizard for the storage backend (local FS vs S3).              |
 | `pufferblow storage test`              | Round-trip a small upload against the configured backend.                 |
 | `pufferblow storage migrate ...`       | Move file objects between backends. See `--help` for flags.               |
+
+> **`migrate` vs `storage migrate`** — `migrate` is the *database schema*
+> migration (table / column shape on Postgres). `storage migrate` moves
+> uploaded *files* between backends (local FS ↔ S3). They're independent
+> tools that just happen to share a verb.
+
+---
+
+## Schema migrations
+
+Pufferblow does not use Alembic. The declarative SQLAlchemy tables plus
+a small set of idempotent `ALTER TABLE ADD COLUMN IF NOT EXISTS`
+scripts inside `database_handler.setup_tables()` are the whole story.
+Every `pufferblow serve` boot runs them, so a single-box restart-on-
+upgrade picks up schema changes automatically.
+
+You only need `migrate` when boot-time application isn't what you want:
+
+- **Multi-replica deploys** — one box applies schema before the others
+  accept traffic, instead of every worker racing the same DDL.
+- **Maintenance-window upgrades** — apply schema, verify with `doctor`,
+  *then* start the server. No production traffic during the rough
+  window.
+- **CI gates** — `pufferblow migrate --check` exits non-zero on drift,
+  so a deploy script can refuse to proceed against a divergent DB.
+
+```bash
+# Apply pending schema changes. Idempotent — safe to re-run.
+docker compose exec pufferblow-server pufferblow migrate
+
+# Report drift without applying. Exits 1 if there's anything missing.
+docker compose exec pufferblow-server pufferblow migrate --check
+```
+
+The `--check` report lists every missing table and every missing
+column (`table.column` form). Columns present on the live DB but
+absent from the model are **not** flagged — those are leftover state
+from earlier versions and the server doesn't care about them.
+
+---
+
+## Health check (`doctor`)
+
+`pufferblow doctor` runs a read-only inspection that surfaces the
+common post-upgrade failure modes in one pass:
+
+```bash
+docker compose exec pufferblow-server pufferblow doctor
+```
+
+Five rows, in checklist order:
+
+| Check     | What it verifies                                                                   |
+| --------- | ---------------------------------------------------------------------------------- |
+| Database  | Bootstrap URI is reachable and the DB exists.                                      |
+| Schema    | Declarative metadata matches the live DB. (Same logic as `migrate --check`.)       |
+| Storage   | Upload → download → delete a 64-byte test file against the configured backend.    |
+| Secrets   | `JWT_SECRET` / `RTC_*_SECRET` are no longer the `change-this-*` placeholders.      |
+| Media SFU | `RTC_BOOTSTRAP_SECRET` and `RTC_BOOTSTRAP_CONFIG_URL` are populated. WARN-level.   |
+
+WARN rows leave the exit code at 0 (an instance that doesn't run voice
+is still "healthy"); FAIL rows force exit 1. The storage row is the
+only step that touches state — bounded to one small upload + delete
+under `cli-healthcheck/`, safe on production.
+
+---
+
+## On-demand backups
+
+`pufferblow backup now` triggers the same `pg_dump` the scheduler
+runs, just on demand:
+
+```bash
+# Dump to BACKUP_PATH (default: ~/.pufferblow/backups).
+docker compose exec pufferblow-server pufferblow backup now
+
+# Mirror to BACKUP_MIRROR_DSN (set up via `pufferblow setup --backup`).
+docker compose exec pufferblow-server pufferblow backup mirror
+```
+
+Both commands shell out to `pg_dump` / `psql`. The most common failure
+mode in lean containers is a missing client — the command translates
+`pg_dump not found` into an install hint (`apt install postgresql-client`)
+rather than a raw stack trace.
+
+For policy on what to back up, frequency, and disaster-recovery
+restore paths, see [BACKUP.md](BACKUP.md).
 
 ---
 
