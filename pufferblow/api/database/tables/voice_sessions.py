@@ -15,7 +15,13 @@ class VoiceSession(Base):
 
     session_id: Mapped[str] = mapped_column(String(64), primary_key=True, nullable=False)
     channel_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    server_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # `server_id` mirrors the canonical instance identifier from the
+    # Server table. Since v1.0, that's the instance's host:port (e.g.
+    # "chat.alice.example:7575"), which can exceed the previous 64-char
+    # bound on long fully-qualified domains. 255 matches the cap used
+    # on Users.origin_server, keeping the format consistent everywhere
+    # an instance is referenced by string.
+    server_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     backend: Mapped[str] = mapped_column(String(24), default="sfu_v2", nullable=False)
     quality_profile: Mapped[str] = mapped_column(String(24), default="balanced", nullable=False)
     signaling_url: Mapped[str] = mapped_column(String(512), nullable=False)

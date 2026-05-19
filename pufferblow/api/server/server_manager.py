@@ -44,7 +44,21 @@ class ServerManager:
             f"{self.database_handler.config.API_HOST}:"
             f"{self.database_handler.config.API_PORT}"
         )
-        server_id = str(uuid.uuid4())
+        # `server_id` IS the instance's addressable identity.
+        #
+        # Previously server_id was a random UUID, which gave us a stable
+        # primary key but no way to look at an id and know which instance
+        # it belonged to. Federation then had to carry a separate domain
+        # alongside every server reference. By making server_id equal to
+        # `host:port`, the id is self-describing: a client receiving
+        # `server_id="chat.alice.example:7575"` already knows where to
+        # reach that server.
+        #
+        # Existing pre-migration instances rewrite their old UUID to this
+        # form via `_apply_server_id_domain_migration` on next boot. The
+        # `host_port` column stays as a separate field for readability /
+        # historical reasons but now mirrors `server_id` byte-for-byte.
+        server_id = host_port
         stats_id = str(uuid.uuid4())
 
         server = Server(
@@ -56,9 +70,9 @@ class ServerManager:
             stats_id=stats_id,
             # Appearance defaults — a fresh server has no uploaded
             # avatar/banner, so we ship it with a deterministic accent
-            # color derived from its UUID and an identicon seed pinned
-            # to that same UUID. The owner can swap to a custom image
-            # via the server settings tab any time.
+            # color derived from the server id (now the domain, so the
+            # color/identicon stay stable across instance restarts and
+            # are recognizably "this domain" across federation peers).
             avatar_kind="identicon",
             banner_kind="solid",
             accent_color=derive_accent_color(server_id),

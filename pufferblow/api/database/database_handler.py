@@ -233,6 +233,23 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 "Appearance backfill skipped due to error: {err}", err=str(exc)
             )
 
+        # Rewrite `server_id` from the legacy random UUID to the
+        # instance's `host_port`, propagating the change everywhere the
+        # old id was referenced (joined_servers_ids, voice_sessions). An
+        # instance running v0.x with a uuid4 server_id transparently
+        # upgrades on next boot; freshly-set-up instances already write
+        # the host_port form and this is a no-op for them.
+        try:
+            self._apply_server_id_domain_migration()
+        except Exception as exc:
+            # If the rewrite fails halfway, the server still works — the
+            # old UUID is still a unique string and existing rows can
+            # still join it back together. Don't block boot.
+            logger.warning(
+                "server_id → host_port migration skipped due to error: {err}",
+                err=str(exc),
+            )
+
     def _create_tables_safely(self, base: DeclarativeBase) -> None:
         """
         Create all declared tables in a single idempotent call.
@@ -379,6 +396,144 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 "Blocked IP counter columns added to live schema: {cols}",
                 cols=", ".join(added),
             )
+
+    def _apply_server_id_domain_migration(self) -> None:
+        """Rewrite the legacy random-UUID ``server_id`` to the host:port.
+
+        v0.x set ``server_id`` to a fresh ``uuid.uuid4()`` at first
+        ``pufferblow setup``. That made server_id useless as a federation
+        primitive: a peer receiving the id had no idea where the server
+        actually lived. v1.0 onward, ``server_id`` IS the host:port of
+        the instance (``"chat.alice.example:7575"``), so any client or
+        peer holding it knows how to reach the box.
+
+        This migration converts in place:
+
+          1. The single Server row's ``server_id`` is rewritten to the
+             value already stored in ``host_port`` (they were derived
+             from the same config either way).
+          2. Every Users row that listed the old UUID inside
+             ``joined_servers_ids`` is rewritten to use the new id.
+          3. ``voice_sessions.server_id`` rows that pointed at the old
+             UUID are updated likewise. Voice sessions are short-lived
+             so most of the time this list is empty, but a hot upgrade
+             during a call should not strand a session row.
+
+        Idempotent: if the Server row's server_id already equals its
+        host_port, nothing happens.
+        """
+        # SQLite test suites exclude the server table entirely (see
+        # PostgreSQL-only set inside setup_tables). Skip there.
+        if self._is_sqlite():
+            return
+
+        from sqlalchemy import select, text, update
+        from pufferblow.api.database.tables.server import Server as _ServerTable
+        from pufferblow.api.database.tables.users import Users as _UsersTable
+
+        # Widen voice_sessions.server_id from VARCHAR(64) to VARCHAR(255)
+        # so longer host:port values fit. Postgres treats this as a
+        # metadata-only change — no table rewrite, no lock escalation.
+        # Wrapped in its own try so a transient ALTER failure doesn't
+        # block the id rewrite below.
+        try:
+            with self.database_engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE voice_sessions "
+                        "ALTER COLUMN server_id TYPE VARCHAR(255)"
+                    )
+                )
+        except Exception as exc:
+            # Already widened, or column missing on an SQLite tester —
+            # both are fine. Log at debug level so it doesn't look like
+            # a real failure on every boot.
+            logger.debug(
+                "voice_sessions.server_id widen skipped: {err}", err=str(exc)
+            )
+
+        with self.database_session() as session:
+            server_row = session.execute(select(_ServerTable)).scalars().first()
+            if server_row is None:
+                # No server set up yet — nothing to rewrite. The next
+                # `create_server` will write the host_port form
+                # directly.
+                return
+
+            old_id = str(server_row.server_id)
+            new_id = str(server_row.host_port)
+            if not new_id or old_id == new_id:
+                return
+
+            # If the new id is already taken by a stale row (e.g. a
+            # partially-completed earlier migration), bail rather than
+            # collide. The next setup_tables pass will retry.
+            collision = (
+                session.execute(
+                    select(_ServerTable).where(_ServerTable.server_id == new_id)
+                )
+                .scalars()
+                .first()
+            )
+            if collision is not None and collision is not server_row:
+                logger.warning(
+                    "server_id migration aborted: a row with server_id={new!r} "
+                    "already exists. Resolve the collision manually.",
+                    new=new_id,
+                )
+                return
+
+            session.execute(
+                update(_ServerTable)
+                .where(_ServerTable.server_id == old_id)
+                .values(server_id=new_id)
+            )
+
+            # joined_servers_ids is a JSON list on the Users table — no
+            # FK, no index, just a stringly-typed payload. SQLAlchemy
+            # doesn't have a portable JSON-array-replace, so do it the
+            # boring way: read each user, swap the entry, write it
+            # back. Users without the old id in their list are left
+            # untouched.
+            users_rows = (
+                session.execute(select(_UsersTable))
+                .scalars()
+                .all()
+            )
+            users_touched = 0
+            for user in users_rows:
+                if not user.joined_servers_ids:
+                    continue
+                if old_id not in user.joined_servers_ids:
+                    continue
+                user.joined_servers_ids = [
+                    new_id if sid == old_id else sid
+                    for sid in user.joined_servers_ids
+                ]
+                users_touched += 1
+
+            # voice_sessions.server_id is a plain indexed column; a
+            # single UPDATE handles it. Use raw SQL so we don't have to
+            # pull the voice_sessions ORM model into this file just for
+            # one statement.
+            voice_result = session.execute(
+                text(
+                    "UPDATE voice_sessions SET server_id = :new "
+                    "WHERE server_id = :old"
+                ),
+                {"new": new_id, "old": old_id},
+            )
+
+            session.commit()
+
+        logger.info(
+            "server_id rewritten: {old!r} -> {new!r} "
+            "(users updated: {users}, voice rows updated: {voice})",
+            old=old_id,
+            new=new_id,
+            users=users_touched,
+            voice=voice_result.rowcount,
+        )
 
     def _backfill_appearance_defaults(self) -> None:
         """Populate accent_color + avatar_seed for pre-feature rows.
