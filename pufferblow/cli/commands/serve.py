@@ -4,24 +4,20 @@ from __future__ import annotations
 
 import os
 
-import typer
 from loguru import logger
 
 
 def serve_command(
-    log_level: int = typer.Option(
-        0,
-        "--log-level",
-        help="Log level [0=INFO, 1=DEBUG, 2=ERROR, 3=CRITICAL].",
-    ),
-    debug: bool = typer.Option(
-        False, "--debug", help="Enable debug traces and diagnostics."
-    ),
-    dev: bool = typer.Option(
-        False, "--dev", help="Run with uvicorn auto-reload for development."
-    ),
+    log_level: int = 0,
+    debug: bool = False,
+    dev: bool = False,
 ) -> None:
-    """Start the API server."""
+    """Start the API server.
+
+    Argument metadata (flag names, help strings) lives in
+    `pufferblow.cli.cli._build_parser`. The implementation here only
+    cares about the resolved values.
+    """
     from pufferblow.api.config.config_handler import ConfigHandler
     from pufferblow.cli.common import (
         ENV_DEBUG,
@@ -42,7 +38,7 @@ def serve_command(
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
         logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     # Configure logging before load_runtime so startup/DB-setup logs use the
     # same format as everything that follows, not Loguru's bare default.

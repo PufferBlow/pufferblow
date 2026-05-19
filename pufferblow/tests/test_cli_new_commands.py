@@ -19,9 +19,33 @@ from __future__ import annotations
 
 import sys
 import types
+from dataclasses import dataclass
 
 import pytest
-from typer.testing import CliRunner
+
+from pufferblow.cli.cli import invoke as _invoke
+
+
+@dataclass
+class _Result:
+    """Drop-in shape of typer's CliRunner result.
+
+    Tests still consult `exit_code` and `stdout`. The new `invoke()`
+    helper returns `(exit_code, stdout, stderr)` — we wrap it in a
+    small dataclass so the existing assertions keep working without
+    a per-test rewrite. `stdout` here is the union of both streams
+    because the loguru sink writes to stderr while the rich console
+    writes to stdout, and tests don't care which it was.
+    """
+
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+def _run(argv: list[str]) -> _Result:
+    code, out, err = _invoke(argv)
+    return _Result(exit_code=code, stdout=out + err, stderr=err)
 
 
 def _silence_loguru(monkeypatch):
@@ -78,8 +102,6 @@ def _stub_runtime(monkeypatch, *, with_manager: bool = False):
 
 def test_migrate_check_clean_exits_zero(monkeypatch):
     """No drift → `migrate --check` reports clean and exits 0."""
-    from pufferblow.cli.cli import cli
-
     _silence_loguru(monkeypatch)
     _stub_runtime(monkeypatch)
     monkeypatch.setattr(
@@ -87,7 +109,7 @@ def test_migrate_check_clean_exits_zero(monkeypatch):
         lambda: ([], []),
     )
 
-    result = CliRunner().invoke(cli, ["migrate", "--check"])
+    result = _run(["migrate", "--check"])
     assert result.exit_code == 0
     assert "up to date" in result.stdout.lower()
 
@@ -98,8 +120,6 @@ def test_migrate_check_drift_exits_non_zero(monkeypatch):
     Important for use as a deploy gate: 'pufferblow migrate --check ||
     exit 1' must fail when schema is behind.
     """
-    from pufferblow.cli.cli import cli
-
     _silence_loguru(monkeypatch)
     _stub_runtime(monkeypatch)
     monkeypatch.setattr(
@@ -107,7 +127,7 @@ def test_migrate_check_drift_exits_non_zero(monkeypatch):
         lambda: (["new_table"], [("users", "new_col")]),
     )
 
-    result = CliRunner().invoke(cli, ["migrate", "--check"])
+    result = _run(["migrate", "--check"])
     assert result.exit_code == 1
     assert "new_table" in result.stdout
     assert "users.new_col" in result.stdout
@@ -118,7 +138,6 @@ def test_migrate_check_drift_exits_non_zero(monkeypatch):
 
 def test_doctor_all_pass_exits_zero(monkeypatch):
     """Every check returning pass → exit 0 and a success Panel."""
-    from pufferblow.cli.cli import cli
     from pufferblow.cli.commands import doctor as doctor_module
 
     _silence_loguru(monkeypatch)
@@ -136,7 +155,7 @@ def test_doctor_all_pass_exits_zero(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "pufferblow.core.bootstrap", bootstrap)
 
-    result = CliRunner().invoke(cli, ["doctor"])
+    result = _run(["doctor"])
     assert result.exit_code == 0
     assert "All checks passed" in result.stdout
 
@@ -147,7 +166,6 @@ def test_doctor_failure_exits_non_zero(monkeypatch):
     Warnings alone should not fail the command, but here we mix in one
     fail and expect a non-zero exit.
     """
-    from pufferblow.cli.cli import cli
     from pufferblow.cli.commands import doctor as doctor_module
 
     _silence_loguru(monkeypatch)
@@ -164,7 +182,7 @@ def test_doctor_failure_exits_non_zero(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "pufferblow.core.bootstrap", bootstrap)
 
-    result = CliRunner().invoke(cli, ["doctor"])
+    result = _run(["doctor"])
     assert result.exit_code == 1
     assert "FAIL" in result.stdout
     assert "drift" in result.stdout
@@ -176,7 +194,6 @@ def test_doctor_warn_only_still_passes(monkeypatch):
     `media-sfu not configured` is a warning, not an error — an
     instance that doesn't run voice should still be 'healthy'.
     """
-    from pufferblow.cli.cli import cli
     from pufferblow.cli.commands import doctor as doctor_module
 
     _silence_loguru(monkeypatch)
@@ -193,7 +210,7 @@ def test_doctor_warn_only_still_passes(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "pufferblow.core.bootstrap", bootstrap)
 
-    result = CliRunner().invoke(cli, ["doctor"])
+    result = _run(["doctor"])
     assert result.exit_code == 0
     assert "WARN" in result.stdout
 
@@ -224,8 +241,6 @@ def _async_runner(monkeypatch):
 
 def test_backup_now_invokes_create_database_backup(monkeypatch, _async_runner):
     """`backup now` triggers the manager's pg_dump method."""
-    from pufferblow.cli.cli import cli
-
     _silence_loguru(monkeypatch)
     manager = _stub_runtime(monkeypatch, with_manager=True)
 
@@ -234,7 +249,7 @@ def test_backup_now_invokes_create_database_backup(monkeypatch, _async_runner):
 
     manager.create_database_backup = fake_backup
 
-    result = CliRunner().invoke(cli, ["backup", "now"])
+    result = _run(["backup", "now"])
     assert result.exit_code == 0, result.stdout
     assert "Backup written" in result.stdout
     assert "fake_backup" in _async_runner
@@ -246,8 +261,6 @@ def test_backup_now_translates_missing_pg_dump(monkeypatch):
     The stubbed asyncio.run consumes the coroutine before raising so
     pytest doesn't emit a 'coroutine was never awaited' warning.
     """
-    from pufferblow.cli.cli import cli
-
     _silence_loguru(monkeypatch)
     manager = _stub_runtime(monkeypatch, with_manager=True)
 
@@ -262,7 +275,7 @@ def test_backup_now_translates_missing_pg_dump(monkeypatch):
 
     monkeypatch.setattr("pufferblow.cli.commands.backup.asyncio.run", raising_run)
 
-    result = CliRunner().invoke(cli, ["backup", "now"])
+    result = _run(["backup", "now"])
     assert result.exit_code == 1
     assert "pg_dump" in result.stdout
     assert "postgresql-client" in result.stdout
@@ -270,8 +283,6 @@ def test_backup_now_translates_missing_pg_dump(monkeypatch):
 
 def test_backup_mirror_errors_when_dsn_missing(monkeypatch, _async_runner):
     """No BACKUP_MIRROR_DSN configured → fail with a setup hint."""
-    from pufferblow.cli.cli import cli
-
     _silence_loguru(monkeypatch)
     manager = _stub_runtime(monkeypatch, with_manager=True)
     # Leave BACKUP_MIRROR_DSN as None on the stub config.
@@ -281,7 +292,7 @@ def test_backup_mirror_errors_when_dsn_missing(monkeypatch, _async_runner):
 
     manager.mirror_database = fake_mirror
 
-    result = CliRunner().invoke(cli, ["backup", "mirror"])
+    result = _run(["backup", "mirror"])
     assert result.exit_code == 1
     assert "No mirror DSN configured" in result.stdout
     # mirror_database should NOT have been invoked because we bailed

@@ -1,15 +1,81 @@
-"""Interactive prompt-based setup wizard using typer.
+"""Interactive prompt-based setup wizard.
 
-Type-hint driven CLI with simple prompt-based navigation.
+Uses stdlib `input()` and `getpass.getpass()` to drive the wizard
+instead of dragging in the typer/click prompt stack. Behavior matches
+what we used before: default values are shown in `[brackets]`,
+password fields hide their input, and a small `type=int` mode parses
+into an integer with a clear error message instead of crashing.
 """
 
 from __future__ import annotations
 
+import getpass
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Callable, TypeVar
 
-import typer
 from loguru import logger
+
+
+T = TypeVar("T")
+
+
+def _prompt(
+    message: str,
+    *,
+    default: Any = None,
+    hide_input: bool = False,
+    type: Callable[[str], T] = str,  # noqa: A002 — mirrors typer.prompt's kwarg name
+) -> T:
+    """Stdlib-backed equivalent of `_prompt(...)`.
+
+    Loops until the user produces a value the `type` converter
+    accepts. Default behaviour:
+
+      - If `default` is given, an empty answer becomes the default.
+      - If `default` is None, an empty answer re-prompts.
+      - `hide_input=True` routes through `getpass.getpass` so the
+        user's keystrokes don't echo to the terminal (used for
+        passwords).
+      - `type` is the converter applied to the raw string. Defaults
+        to `str` (identity). Pass `int`, `float`, etc. for typed
+        prompts; conversion errors loop with a friendly message
+        instead of bubbling up.
+    """
+    suffix = f" [{default}]" if default is not None else ""
+    full = f"{message}{suffix}: "
+    while True:
+        raw = (getpass.getpass(full) if hide_input else input(full)).strip()
+        if not raw:
+            if default is None:
+                logger.error("This value is required.")
+                continue
+            raw = str(default)
+        try:
+            return type(raw)
+        except (ValueError, TypeError) as exc:
+            logger.error("Invalid value: {err}", err=str(exc))
+
+
+def _confirm(message: str, *, default: bool = False) -> bool:
+    """Stdlib-backed equivalent of `_confirm(...)`.
+
+    Shows a `[Y/n]` or `[y/N]` cue depending on the default; accepts
+    the usual y/yes/n/no spellings (case-insensitive). Empty answer
+    takes the default. Anything else loops with a friendly error
+    rather than crashing.
+    """
+    cue = "[Y/n]" if default else "[y/N]"
+    full = f"{message} {cue}: "
+    while True:
+        raw = input(full).strip().lower()
+        if not raw:
+            return default
+        if raw in ("y", "yes"):
+            return True
+        if raw in ("n", "no"):
+            return False
+        logger.error("Please answer y or n.")
 
 
 class SetupMode(str, Enum):
@@ -52,7 +118,7 @@ def _get_setup_mode(has_existing_config: bool) -> str | None:
         logger.info("4. Shared Pufferblow config only ([media-sfu] section)")
 
     while True:
-        choice = typer.prompt(
+        choice = _prompt(
             "Select option",
             type=int,
         )
@@ -75,27 +141,27 @@ def _get_database_config() -> dict[str, str] | None:
     logger.info("─── Database configuration ───")
 
     try:
-        database_name = typer.prompt(
+        database_name = _prompt(
             "PostgreSQL database name",
             default="pufferblow",
         )
 
-        username = typer.prompt(
+        username = _prompt(
             "PostgreSQL username",
             default="pufferblow",
         )
 
-        password = typer.prompt(
+        password = _prompt(
             "PostgreSQL password",
             hide_input=True,
         )
 
-        host = typer.prompt(
+        host = _prompt(
             "PostgreSQL host",
             default="localhost",
         )
 
-        port = typer.prompt(
+        port = _prompt(
             "PostgreSQL port",
             default="5432",
         )
@@ -115,7 +181,7 @@ def _get_server_config() -> dict[str, str] | None:
     logger.info("─── Server configuration ───")
 
     try:
-        server_name = typer.prompt(
+        server_name = _prompt(
             "Server name",
         )
 
@@ -123,7 +189,7 @@ def _get_server_config() -> dict[str, str] | None:
             logger.error("Please enter a server name.")
             return None
 
-        description = typer.prompt(
+        description = _prompt(
             "Server description",
         )
 
@@ -131,7 +197,7 @@ def _get_server_config() -> dict[str, str] | None:
             logger.error("Please enter a description.")
             return None
 
-        welcome_message = typer.prompt(
+        welcome_message = _prompt(
             "Server welcome message",
         )
 
@@ -153,7 +219,7 @@ def _get_owner_config() -> dict[str, str] | None:
     logger.info("─── Owner account ───")
 
     try:
-        username = typer.prompt(
+        username = _prompt(
             "Owner username",
         )
 
@@ -162,7 +228,7 @@ def _get_owner_config() -> dict[str, str] | None:
             return None
 
         while True:
-            password = typer.prompt(
+            password = _prompt(
                 "Owner password",
                 hide_input=True,
             )
@@ -171,7 +237,7 @@ def _get_owner_config() -> dict[str, str] | None:
                 logger.error("Please enter a password.")
                 continue
 
-            confirm = typer.prompt(
+            confirm = _prompt(
                 "Confirm password",
                 hide_input=True,
             )
@@ -197,7 +263,7 @@ def _get_security_config() -> dict[str, object] | None:
 
     try:
         while True:
-            choice = typer.prompt("Select option", type=int)
+            choice = _prompt("Select option", type=int)
             if choice == 1:
                 return {
                     "cors_origin_regex": ".*",
@@ -208,7 +274,7 @@ def _get_security_config() -> dict[str, object] | None:
                 }
 
             if choice == 2:
-                client_origin = typer.prompt(
+                client_origin = _prompt(
                     "Client origin (include scheme and port when needed)",
                     default="http://localhost:5173",
                 ).strip()
@@ -232,7 +298,7 @@ def _get_security_config() -> dict[str, object] | None:
 def _confirm_test_database(host: str, port: str, username: str, password: str, database: str) -> bool:
     """Prompt to test database connection."""
     try:
-        confirm = typer.confirm(
+        confirm = _confirm(
             "Test database connection before continuing?",
             default=True,
         )
@@ -246,7 +312,7 @@ def _get_media_sfu_config() -> dict[str, str | int] | None:
     logger.info("─── Shared Pufferblow config: [media-sfu] ───")
 
     try:
-        bootstrap_secret = typer.prompt(
+        bootstrap_secret = _prompt(
             "Bootstrap secret",
             hide_input=True,
         )
@@ -255,7 +321,7 @@ def _get_media_sfu_config() -> dict[str, str | int] | None:
             logger.error("Please enter a bootstrap secret.")
             return None
 
-        bootstrap_config_url = typer.prompt(
+        bootstrap_config_url = _prompt(
             "Bootstrap config URL",
             default="http://localhost:7575/api/internal/v1/voice/bootstrap-config",
         )
@@ -265,24 +331,24 @@ def _get_media_sfu_config() -> dict[str, str | int] | None:
         # client (which dials 127.0.0.1:8787) can't reach. 0.0.0.0 also keeps
         # the Docker production setup working since the published port maps
         # through to the container's IPv4 listener.
-        bind_addr = typer.prompt(
+        bind_addr = _prompt(
             "WebSocket bind address",
             default="0.0.0.0:8787",
         )
 
-        max_total_peers = typer.prompt(
+        max_total_peers = _prompt(
             "Max total peers across all rooms",
             type=int,
             default=1000,
         )
 
-        max_room_peers = typer.prompt(
+        max_room_peers = _prompt(
             "Max peers per room",
             type=int,
             default=100,
         )
 
-        event_workers = typer.prompt(
+        event_workers = _prompt(
             "Event workers",
             type=int,
             default=4,
@@ -332,7 +398,7 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
             )
             logger.info("  max_room_peers={n}", n=media_sfu_config["max_room_peers"])
 
-            if not typer.confirm(
+            if not _confirm(
                 "Proceed with updating the shared Pufferblow config [media-sfu] section?",
                 default=True,
             ):
@@ -411,7 +477,7 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
                 logger.warning("psycopg2 not available, skipping connection test.")
             except Exception as e:
                 logger.error("Database connection failed: {err}", err=e)
-                if not typer.confirm("Continue anyway?", default=False):
+                if not _confirm("Continue anyway?", default=False):
                     return None
 
         # Step 4: Owner account (full setup only)
@@ -436,7 +502,7 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
         )
         logger.info("  client_origins={c}", c=cors_summary)
 
-        if not typer.confirm("Proceed with setup?", default=True):
+        if not _confirm("Proceed with setup?", default=True):
             logger.info("Setup cancelled.")
             return None
 

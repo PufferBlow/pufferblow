@@ -25,7 +25,6 @@ otherwise — useful as a deploy gate.
 
 from __future__ import annotations
 
-import typer
 from loguru import logger
 
 
@@ -70,13 +69,7 @@ def _detect_schema_drift() -> tuple[list[str], list[tuple[str, str]]]:
     return missing_tables, missing_columns
 
 
-def migrate_command(
-    check: bool = typer.Option(
-        False,
-        "--check",
-        help="Report schema drift without applying it. Exits non-zero if drift exists.",
-    ),
-) -> None:
+def migrate_command(check: bool = False) -> None:
     """Apply database schema (idempotent) or report drift in --check mode."""
     from pufferblow.cli.common import (
         configure_cli_logging,
@@ -95,7 +88,7 @@ def migrate_command(
         database_uri = ConfigHandler().resolve_database_uri()
     if not database_uri:
         _ui_error("No bootstrap database URI found. Run `pufferblow setup` first.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     ensure_database_exists(database_uri)
     # `setup_tables=False` because we don't want load_runtime to
@@ -108,7 +101,7 @@ def migrate_command(
     if check:
         if not missing_tables and not missing_columns:
             logger.success("Schema is up to date. No drift detected.")
-            raise typer.Exit(code=0)
+            raise SystemExit(0)
 
         logger.warning(
             "Schema drift detected: {tables} missing table(s), {cols} missing column(s).",
@@ -122,7 +115,7 @@ def migrate_command(
                 "  missing column  {table}.{col}", table=table_name, col=column_name
             )
         logger.info("Run `pufferblow migrate` (no --check) to apply.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     # Non-check path: apply. Reuses the same setup_tables() that runs
     # on `pufferblow serve` boot, so behavior is byte-for-byte the
@@ -134,7 +127,7 @@ def migrate_command(
         api_initializer.database_handler.setup_tables(Base)
     except Exception as exc:
         _ui_error(f"Migration failed: {exc}")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     if missing_tables:
         logger.success(

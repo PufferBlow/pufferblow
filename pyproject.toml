@@ -10,41 +10,52 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+# Bumped from 3.10 → 3.11 so we can drop the `tomli` dep (tomllib
+# became stdlib in 3.11). This is the only deliberate floor bump
+# during the dep-trim pass; everything else is still installable on
+# 3.10 if needed.
+python = "^3.11"
 fastapi = "^0.115.12"
-typer = "^0.20.0"
+# `typer` removed — the CLI now uses argparse from the stdlib. Saved
+# the typer + click runtimes plus their transitive deps.
+# `textual` removed — the textual_setup wizard was never wired up.
+# `sqlalchemy-utils` removed — the only used helper, `database_exists`,
+# is now implemented inline against the SQLAlchemy engine in
+# `pufferblow/api/database/database.py`.
+# `tomli` removed — replaced by stdlib `tomllib`.
 rich = "^14.2.0"
-textual = "^2.1.2"
 pycryptodome = "^3.23.0"
 loguru = "^0.7.3"
 pytz = "^2025.2"
 psycopg2-binary = "^2.9.10"
-pytest = ">=8.4.2,<10.0.0"
 sqlalchemy = "^2.0.44"
 websockets = "^15.0"
 httpx = "^0.28.1"
-sqlalchemy-utils = "^0.42.0"
 orjson = "^3.11.3"
-basedpyright = "^1.31.7"
 pymemcache = "^4.0.0"
 cryptography = "^46.0.2"
 bcrypt = "^5.0.0"
 watchdog = "^6.0.0"
 python-magic = "^0.4.27"
 pillow = "^12.0.0"
-pytest-asyncio = "^1.2.0"
 python-multipart = ">=0.0.22,<0.0.28"
 psutil = "^7.1.0"
 boto3 = "^1.34.0"
 gunicorn = "^23.0.0"
-tomli = "^2.0.1"
 
 [tool.poetry.group.dev.dependencies]
+# pytest / pytest-asyncio moved here from the main dependencies group
+# — they're test-only and pulling them at runtime added wheels every
+# `poetry install` had to fetch. `basedpyright` moved here too: it's
+# a type-checker, not a runtime import.
 loguru = "^0.7.3"
 black = "^26.3.1"
 isort = "^5.13.2"
 ruff = "^0.8.0"
 pre-commit = "^4.0.1"
+pytest = ">=8.4.2,<10.0.0"
+pytest-asyncio = "^1.2.0"
+basedpyright = "^1.31.7"
 
 # Optional docs group. Install with `poetry install --with docs` when you
 # want to build the MkDocs site locally or via the docs.yml CI workflow.
@@ -80,7 +91,7 @@ typeCheckingMode = "standard"
 
 [tool.black]
 line-length = 88
-target-version = ['py310']
+target-version = ['py311']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -108,7 +119,7 @@ use_parentheses = true
 ensure_newline_before_comments = true
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 88
 select = [
     "E",  # pycodestyle errors
@@ -130,7 +141,7 @@ ignore = [
 "tests/**/*" = ["B011"] # assert false
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

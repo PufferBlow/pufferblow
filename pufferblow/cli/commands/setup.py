@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
 from loguru import logger
 from rich.prompt import Confirm, Prompt
 
@@ -69,7 +68,7 @@ def _prompt_database_credentials() -> DatabaseCredentials:
 
     if not port_raw.isdigit():
         _ui_error("Database port must be numeric.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     return DatabaseCredentials(
         database_name=database_name,
@@ -88,7 +87,7 @@ def _prompt_server_details() -> ServerDetails:
 
     if not name or not description or not welcome_message:
         _ui_error("Server name, description, and welcome message are required.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     return ServerDetails(
         name=name,
@@ -104,7 +103,7 @@ def _prompt_owner_details() -> OwnerDetails:
 
     if not username or not password:
         _ui_error("Owner username and password are required.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     return OwnerDetails(username=username, password=password)
 
@@ -130,7 +129,7 @@ def _prompt_media_sfu_config() -> dict[str, str | int]:
 
     if not bootstrap_secret:
         _ui_error("Bootstrap secret is required.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     return {
         "bootstrap_secret": bootstrap_secret,
@@ -187,7 +186,7 @@ def _run_full_setup(
         _ui_error(
             "Server already exists for this database. Use --update-server for changes."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     api_initializer.database_handler.initialize_default_data()
     security_settings = _ensure_runtime_security_settings(config_handler=config_handler)
@@ -308,14 +307,14 @@ def _run_server_only_setup(
         _ui_error(
             "No bootstrap database URI found. Run `pufferblow setup` first."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri)
 
     if not is_update and api_initializer.server_manager.check_server_exists():
         _ui_error("Server already exists. Use --update-server to modify it.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     _apply_server_configuration(server=server, is_update=is_update)
     if security_config is not None:
@@ -333,7 +332,7 @@ def _run_media_sfu_only_setup(
         _ui_error(
             "No bootstrap database URI found. Run `pufferblow setup` first."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     # Update only the shared Pufferblow config [media-sfu] section.
     config_handler.write_config_toml(
@@ -354,7 +353,7 @@ def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
     if payload.mode == "media_sfu_only":
         if payload.media_sfu_config is None:
             _ui_error("No shared Pufferblow config values were provided for the [media-sfu] section.")
-            raise typer.Exit(code=1)
+            raise SystemExit(1)
         _run_media_sfu_only_setup(
             config_handler=config_handler,
             media_sfu_config=payload.media_sfu_config,
@@ -407,7 +406,7 @@ def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
         schedule_hours = int(schedule_hours_raw)
     except ValueError:
         _ui_error("Schedule hours must be a number.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     backup_config: dict[str, object] = {
         "enabled": True,
@@ -429,7 +428,7 @@ def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
         mirror_dsn = Prompt.ask("Mirror database DSN (postgresql://user:pass@host/db)").strip()
         if not mirror_dsn:
             _ui_error("Mirror DSN is required for mirror mode.")
-            raise typer.Exit(code=1)
+            raise SystemExit(1)
         backup_config["mirror_dsn"] = mirror_dsn
 
     config_handler.write_config_toml(backup_config=backup_config)
@@ -441,24 +440,10 @@ def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
 
 
 def setup_command(
-    is_setup_server: bool = typer.Option(
-        False, "--setup-server", help="Only create initial server metadata."
-    ),
-    is_update_server: bool = typer.Option(
-        False,
-        "--update-server",
-        help="Update existing server metadata (name, description, welcome message).",
-    ),
-    is_setup_media_sfu: bool = typer.Option(
-        False,
-        "--setup-media-sfu",
-        help="Only update the shared Pufferblow config [media-sfu] section.",
-    ),
-    is_setup_backup: bool = typer.Option(
-        False,
-        "--setup-backup",
-        help="Configure database backup settings (file dump or mirror).",
-    ),
+    is_setup_server: bool = False,
+    is_update_server: bool = False,
+    is_setup_media_sfu: bool = False,
+    is_setup_backup: bool = False,
 ) -> None:
     """Configure database, server metadata, and owner account."""
     from pufferblow.api.config.config_handler import ConfigHandler
@@ -476,14 +461,14 @@ def setup_command(
     flags_used = sum([is_setup_server, is_update_server, is_setup_media_sfu, is_setup_backup])
     if flags_used > 1:
         _ui_error("Choose only one of --setup-server, --update-server, or --setup-media-sfu.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     if is_setup_media_sfu:
         if not has_bootstrap_config:
             _ui_error(
                 "No bootstrap database URI found. Run `pufferblow setup` first."
             )
-            raise typer.Exit(code=1)
+            raise SystemExit(1)
         media_sfu_config = _prompt_media_sfu_config()
         _run_media_sfu_only_setup(
             config_handler=config_handler,
@@ -507,6 +492,6 @@ def setup_command(
     payload = _launch_setup_wizard(has_existing_config=has_bootstrap_config)
     if payload is None:
         logger.info("Setup cancelled.")
-        raise typer.Exit(code=0)
+        raise SystemExit(0)
 
     _run_setup_payload(payload, config_handler=config_handler)

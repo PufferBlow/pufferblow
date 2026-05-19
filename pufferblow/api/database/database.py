@@ -1,7 +1,12 @@
+from pathlib import Path
 from urllib.parse import quote
 
 import sqlalchemy
-from sqlalchemy_utils import database_exists
+# `sqlalchemy_utils.database_exists` was the only thing this module
+# pulled from sqlalchemy_utils. The library brought a long tail of
+# helpers we never used; we now do the check inline with the
+# database-shaped fragment of the URL plus a fast connect probe (see
+# `Database.check_database_existense` below).
 
 # Models
 from pufferblow.api.models.config_model import Config
@@ -86,13 +91,57 @@ class Database:
         """
         Checks if the database exists or not.
 
-        Args:
-            None.
+        Inline replacement for the single `sqlalchemy_utils.database_exists`
+        call this codebase used to depend on. The implementation here is
+        deliberately narrow:
+
+          - SQLite: any URI maps to a file path on disk (or `:memory:`).
+            `:memory:` always counts as existing because SQLAlchemy will
+            materialize it on connect. A file URI exists iff the path
+            does. Importantly we DO NOT touch the connect path for
+            SQLite — opening a non-existent file would create it,
+            which is the opposite of what an `exists` check should do.
+          - Postgres / other servers: try a connect with a 5-second
+            timeout. If it succeeds the database is reachable AND
+            present. If the server is up but the DB is missing
+            (Postgres `3D000`), the connect raises `OperationalError`
+            with a recognisable SQLSTATE, which we map to False.
+            Other connection failures (server down, bad credentials)
+            re-raise — they aren't "doesn't exist", they're operator
+            errors.
 
         Returns:
-            bool: True if it exists, otherwise False.
+            bool: True if the database exists, False if the server is
+            reachable but the named database is not.
         """
-        return database_exists(database_uri)
+        from sqlalchemy import create_engine
+        from sqlalchemy.exc import OperationalError
+
+        if database_uri.startswith("sqlite"):
+            # `sqlite:///` then path. `:memory:` is special — SQLAlchemy
+            # will create the in-memory store on first connect, so we
+            # treat it as existing.
+            tail = database_uri.split(":///", 1)[-1]
+            if tail in ("", ":memory:"):
+                return True
+            return Path(tail).is_file()
+
+        # Server-backed engines: short-lived engine, no pooling. The
+        # connect probe is the truth — SQLAlchemy raises with a
+        # SQLSTATE we can read.
+        engine = create_engine(database_uri, connect_args={"connect_timeout": 5})
+        try:
+            with engine.connect():
+                return True
+        except OperationalError as exc:
+            pg_sqlstate = getattr(getattr(exc, "orig", None), "pgcode", None)
+            if pg_sqlstate == "3D000":
+                # invalid_catalog_name: the server is up but this
+                # database is not present.
+                return False
+            raise
+        finally:
+            engine.dispose()
 
     @classmethod
     def _create_database_uri(

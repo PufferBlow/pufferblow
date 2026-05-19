@@ -8,7 +8,6 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import typer
 from loguru import logger
 
 LOG_LEVEL_MAP = {
@@ -163,7 +162,7 @@ def ensure_database_exists(database_uri: str) -> None:
             "The specified database does not exist or is unreachable. "
             "Verify database name, host, port, and credentials."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
 
 def load_config_or_exit(config_handler: ConfigHandler | None = None) -> Config:
@@ -175,7 +174,7 @@ def load_config_or_exit(config_handler: ConfigHandler | None = None) -> Config:
         logger.error(
             "No bootstrap database URI found. Run `pufferblow setup` first."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
     return handler.build_bootstrap_config()
 
 
@@ -256,7 +255,7 @@ def configure_server_logging(
     """
     if log_level not in LOG_LEVEL_MAP:
         logger.error("Invalid log level: {level}. Allowed: 0..3.", level=log_level)
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     log_level_name = LOG_LEVEL_MAP[log_level]
     logger.configure(patcher=enrich_log_record)

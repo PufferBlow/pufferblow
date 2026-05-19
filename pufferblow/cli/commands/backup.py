@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-import typer
 from loguru import logger
 
 
@@ -43,7 +42,7 @@ def _load_manager():
     database_uri = ConfigHandler().resolve_database_uri()
     if not database_uri:
         _ui_error("No bootstrap database URI found. Run `pufferblow setup` first.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri, setup_tables=False)
 
@@ -51,7 +50,7 @@ def _load_manager():
 
     if api_initializer.background_tasks_manager is None:
         _ui_error("Background task manager is unavailable.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
     return api_initializer.background_tasks_manager
 
 
@@ -71,10 +70,10 @@ def backup_now_command() -> None:
         _ui_error(
             f"pg_dump is not available on PATH ({exc}). Install the postgresql-client package."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
     except Exception as exc:
         _ui_error(f"Backup failed: {exc}")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     logger.success("Backup written.")
     logger.info("  location={path}", path=str(backup_path))
@@ -94,7 +93,7 @@ def backup_mirror_command() -> None:
         _ui_error(
             "No mirror DSN configured. Run `pufferblow setup --backup` and choose 'mirror' mode."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     try:
         asyncio.run(manager.mirror_database())
@@ -102,9 +101,9 @@ def backup_mirror_command() -> None:
         _ui_error(
             f"pg_dump / psql missing on PATH ({exc}). Install the postgresql-client package."
         )
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
     except Exception as exc:
         _ui_error(f"Mirror failed: {exc}")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     logger.success("Database mirrored to secondary.")

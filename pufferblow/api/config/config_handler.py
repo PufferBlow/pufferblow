@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import os
-import sys
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pufferblow.core.constants as constants
 from pufferblow.api.models.config_model import Config
 
-# Use tomllib (Python 3.11+) or tomli (fallback)
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
+# `tomllib` is stdlib since Python 3.11; the project's minimum Python
+# is now 3.11 (see pyproject) so we drop the tomli fallback that lived
+# here for the brief 3.10 support window.
 
 if TYPE_CHECKING:
     from pufferblow.api.database.database_handler import DatabaseHandler

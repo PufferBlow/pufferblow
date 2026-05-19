@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Literal
 
-import typer
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -182,7 +181,7 @@ def doctor_command() -> None:
     database_uri = ConfigHandler().resolve_database_uri()
     if not database_uri:
         logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri, setup_tables=False)
@@ -218,6 +217,6 @@ def doctor_command() -> None:
 
     if failed:
         logger.error("One or more checks failed.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     logger.success("All checks passed.")

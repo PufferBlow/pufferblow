@@ -6,7 +6,6 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
 from loguru import logger
 from rich.prompt import Confirm, Prompt
 
@@ -34,7 +33,7 @@ def _load_runtime_config_or_exit() -> Config:
     database_uri = config_handler.resolve_database_uri()
     if not database_uri:
         _ui_error("No bootstrap database URI found. Run `pufferblow setup` first.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     ensure_database_exists(database_uri)
     load_runtime(database_uri=database_uri)
@@ -63,7 +62,7 @@ def _prompt_local_config() -> dict:
             raise ValueError
     except ValueError:
         _ui_error("Allocated storage must be a positive number.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     return {
         "provider": "local",
@@ -85,7 +84,7 @@ def _prompt_s3_config(*, is_aws: bool) -> dict:
 
     if not bucket_name or not access_key or not secret_key:
         _ui_error("Bucket name, access key, and secret key are required for S3.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     return {
         "provider": "s3",
@@ -231,22 +230,14 @@ def test_storage_command() -> None:
         return
 
     logger.error("Storage test failed: {msg}", msg=message)
-    raise typer.Exit(code=1)
+    raise SystemExit(1)
 
 
 def migrate_storage_command(
-    source_provider: str = typer.Option(
-        ..., "--source-provider", help="Source provider ('local' or 's3')."
-    ),
-    target_provider: str = typer.Option(
-        ..., "--target-provider", help="Target provider ('local' or 's3')."
-    ),
-    batch_size: int = typer.Option(
-        10, "--batch-size", help="How many files to migrate per batch."
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Analyze only, do not migrate files."
-    ),
+    source_provider: str,
+    target_provider: str,
+    batch_size: int = 10,
+    dry_run: bool = False,
 ) -> None:
     """Migrate files between configured storage backends."""
     from pufferblow.cli.common import configure_cli_logging
@@ -255,7 +246,7 @@ def migrate_storage_command(
 
     if source_provider not in {"local", "s3"} or target_provider not in {"local", "s3"}:
         _ui_error("source/target provider must be either 'local' or 's3'.")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     config = _load_runtime_config_or_exit()
 
@@ -263,7 +254,7 @@ def migrate_storage_command(
         from scripts.migrate_storage import StorageMigrator
     except ImportError as exc:
         _ui_error(f"Storage migrator script is unavailable: {exc}")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)
 
     source_config = _config_to_storage_dict(config)
     source_config["provider"] = source_provider
