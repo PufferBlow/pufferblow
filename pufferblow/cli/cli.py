@@ -24,11 +24,13 @@ cli.add_typer(backup_cli, name="backup")
 @cli.command("version")
 def version_command() -> None:
     """Display the installed PufferBlow version."""
-    from rich import print
+    from loguru import logger
 
     import pufferblow.core.constants as constants
+    from pufferblow.cli.common import configure_cli_logging
 
-    print(f"[bold cyan]pufferblow [reset]{constants.VERSION}")
+    configure_cli_logging()
+    logger.info("pufferblow {version}", version=constants.VERSION)
 
 
 @cli.command("setup")

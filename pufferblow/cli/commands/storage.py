@@ -7,26 +7,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
+from loguru import logger
 from rich.prompt import Confirm, Prompt
 
 if TYPE_CHECKING:
     from pufferblow.api.models.config_model import Config
 
 
-def _console():
-    from pufferblow.cli.common import console
-
-    return console
-
-
 def _ui_error(message: str) -> None:
-    """Print a red wizard-style error.
-
-    Mirrors `setup._ui_error`: validation feedback and aborts go
-    through Rich so storage commands look like the same product as
-    `pufferblow setup`, not like a stack-trace prelude.
-    """
-    _console().print(f"[bold red]{message}[/bold red]")
+    """Emit a validation failure through the shared CLI log sink."""
+    logger.error(message)
 
 
 def _api_initializer():
@@ -53,12 +43,7 @@ def _load_runtime_config_or_exit() -> Config:
 
 def _prompt_provider() -> str:
     """Prompt for selected storage provider."""
-    console = _console()
-    console.print("[bold]Storage provider[/bold]")
-    console.print("1. Local")
-    console.print("2. AWS S3")
-    console.print("3. S3 Compatible")
-    console.print("4. Cancel")
+    logger.info("Storage provider:  1) Local   2) AWS S3   3) S3 Compatible   4) Cancel")
     return Prompt.ask(
         "Select provider",
         choices=["1", "2", "3", "4"],
@@ -199,10 +184,9 @@ def setup_storage_command() -> None:
     from pufferblow.cli.common import configure_cli_logging
 
     configure_cli_logging()
-    console = _console()
     provider_choice = _prompt_provider()
     if provider_choice == "4":
-        console.print("[dim]Storage setup cancelled.[/dim]")
+        logger.info("Storage setup cancelled.")
         return
 
     if provider_choice == "1":
@@ -223,10 +207,10 @@ def setup_storage_command() -> None:
         ):
             return
         if ok:
-            console.print(f"[green]{message}[/green]")
+            logger.success(message)
 
     _save_storage_config(storage_config)
-    console.print("[green]Storage configuration saved.[/green]")
+    logger.success("Storage configuration saved.")
 
 
 def test_storage_command() -> None:
@@ -234,7 +218,6 @@ def test_storage_command() -> None:
     from pufferblow.cli.common import configure_cli_logging
 
     configure_cli_logging()
-    console = _console()
     config = _load_runtime_config_or_exit()
     storage_config = _config_to_storage_dict(config)
 
@@ -244,10 +227,10 @@ def test_storage_command() -> None:
         ok, message = False, str(exc)
 
     if ok:
-        console.print(f"[green]{message}[/green]")
+        logger.success(message)
         return
 
-    console.print(f"[red]Storage test failed: {message}[/red]")
+    logger.error("Storage test failed: {msg}", msg=message)
     raise typer.Exit(code=1)
 
 
@@ -275,7 +258,6 @@ def migrate_storage_command(
         raise typer.Exit(code=1)
 
     config = _load_runtime_config_or_exit()
-    console = _console()
 
     try:
         from scripts.migrate_storage import StorageMigrator
@@ -295,9 +277,12 @@ def migrate_storage_command(
     )
     stats = asyncio.run(migrator.migrate_all_files(batch_size=batch_size, dry_run=dry_run))
 
-    console.print("[bold]Migration results[/bold]")
-    console.print(f"total_files={stats['total_files']}")
-    console.print(f"migrated_files={stats['migrated_files']}")
-    console.print(f"failed_files={stats['failed_files']}")
-    console.print(f"skipped_files={stats['skipped_files']}")
-    console.print(f"migrated_size_gb={stats['migrated_size'] / (1024**3):.2f}")
+    logger.success("Migration results:")
+    logger.info("  total_files={n}", n=stats["total_files"])
+    logger.info("  migrated_files={n}", n=stats["migrated_files"])
+    logger.info("  failed_files={n}", n=stats["failed_files"])
+    logger.info("  skipped_files={n}", n=stats["skipped_files"])
+    logger.info(
+        "  migrated_size_gb={size:.2f}",
+        size=stats["migrated_size"] / (1024**3),
+    )

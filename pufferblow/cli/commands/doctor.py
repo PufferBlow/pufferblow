@@ -26,8 +26,7 @@ import asyncio
 from typing import TYPE_CHECKING, Literal
 
 import typer
-from rich.panel import Panel
-from rich.table import Table
+from loguru import logger
 
 if TYPE_CHECKING:
     from pufferblow.api.models.config_model import Config
@@ -35,10 +34,21 @@ if TYPE_CHECKING:
 CheckLevel = Literal["pass", "warn", "fail"]
 
 
-def _console():
-    from pufferblow.cli.common import console
-
-    return console
+# Map our three CheckLevel values onto loguru levels so each check
+# emission renders with the same color cue as elsewhere in the CLI:
+# SUCCESS → green, WARNING → yellow, ERROR → red. Keeping the
+# CheckLevel enum lets the helper signatures stay literal and small;
+# only the emission layer cares about the loguru mapping.
+_LOGURU_LEVEL: dict[CheckLevel, str] = {
+    "pass": "SUCCESS",
+    "warn": "WARNING",
+    "fail": "ERROR",
+}
+_STATUS_TAG: dict[CheckLevel, str] = {
+    "pass": "PASS",
+    "warn": "WARN",
+    "fail": "FAIL",
+}
 
 
 def _check_database(database_uri: str) -> tuple[CheckLevel, str]:
@@ -156,13 +166,6 @@ def _check_media_sfu(config: Config) -> tuple[CheckLevel, str]:
     return ("pass", "media-sfu bootstrap fields look populated.")
 
 
-_STYLE: dict[CheckLevel, tuple[str, str]] = {
-    "pass": ("[green]PASS[/green]", "green"),
-    "warn": ("[yellow]WARN[/yellow]", "yellow"),
-    "fail": ("[red]FAIL[/red]", "red"),
-}
-
-
 def doctor_command() -> None:
     """Run a read-only health check across the instance."""
     from pufferblow.api.config.config_handler import ConfigHandler
@@ -174,12 +177,11 @@ def doctor_command() -> None:
     )
 
     configure_cli_logging()
-    console = _console()
     config = load_config_or_exit()
 
     database_uri = ConfigHandler().resolve_database_uri()
     if not database_uri:
-        console.print(f"[bold red]No bootstrap database URI found. Run `pufferblow setup` first.[/bold red]")
+        logger.error("No bootstrap database URI found. Run `pufferblow setup` first.")
         raise typer.Exit(code=1)
 
     ensure_database_exists(database_uri)
@@ -199,30 +201,23 @@ def doctor_command() -> None:
         ("Media SFU", _check_media_sfu(runtime_config)),
     ]
 
-    table = Table(title="Pufferblow doctor", show_header=True, header_style="bold")
-    table.add_column("Check", style="cyan", no_wrap=True)
-    table.add_column("Status", no_wrap=True)
-    table.add_column("Detail", overflow="fold")
     failed = False
     for name, (level, message) in checks:
         if level == "fail":
             failed = True
-        status_tag, _ = _STYLE[level]
-        table.add_row(name, status_tag, message)
-    console.print(table)
+        # Pad the check name so the four-character status tag lines
+        # up across rows ("Database  PASS  …" reads cleanly even
+        # under the longer "Media SFU" label).
+        logger.log(
+            _LOGURU_LEVEL[level],
+            "{name:<10} {status}  {detail}",
+            name=name,
+            status=_STATUS_TAG[level],
+            detail=message,
+        )
 
     if failed:
-        console.print(
-            Panel.fit(
-                "[bold red]One or more checks failed.[/bold red]",
-                border_style="red",
-            )
-        )
+        logger.error("One or more checks failed.")
         raise typer.Exit(code=1)
 
-    console.print(
-        Panel.fit(
-            "[bold green]All checks passed.[/bold green]",
-            border_style="green",
-        )
-    )
+    logger.success("All checks passed.")

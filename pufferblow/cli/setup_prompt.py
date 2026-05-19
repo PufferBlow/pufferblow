@@ -10,9 +10,6 @@ from enum import Enum
 
 import typer
 from loguru import logger
-from rich.console import Console
-
-console = Console()
 
 
 class SetupMode(str, Enum):
@@ -46,15 +43,13 @@ class SetupWizardResult:
 
 def _get_setup_mode(has_existing_config: bool) -> str | None:
     """Prompt for setup mode."""
-    console.print("\n[bold cyan]Setup Mode[/bold cyan]")
-    console.print("1. Full setup (database + server + owner account)")
+    logger.info("─── Setup mode ───")
+    logger.info("1. Full setup (database + server + owner account)")
 
-    menu_offset = 2
     if has_existing_config:
-        console.print("2. Server configuration only (update existing database)")
-        console.print("3. Update existing server information")
-        console.print("4. Shared Pufferblow config only ([media-sfu] section)")
-        menu_offset = 5
+        logger.info("2. Server configuration only (update existing database)")
+        logger.info("3. Update existing server information")
+        logger.info("4. Shared Pufferblow config only ([media-sfu] section)")
 
     while True:
         choice = typer.prompt(
@@ -71,13 +66,13 @@ def _get_setup_mode(has_existing_config: bool) -> str | None:
         elif has_existing_config and choice == 4:
             return SetupMode.MEDIA_SFU_ONLY.value
         else:
-            console.print("[red]Invalid choice. Please try again.[/red]")
+            logger.error("Invalid choice. Please try again.")
 
 
 
 def _get_database_config() -> dict[str, str] | None:
     """Prompt for database credentials."""
-    console.print("\n[bold cyan]Database Configuration[/bold cyan]")
+    logger.info("─── Database configuration ───")
 
     try:
         database_name = typer.prompt(
@@ -117,7 +112,7 @@ def _get_database_config() -> dict[str, str] | None:
 
 def _get_server_config() -> dict[str, str] | None:
     """Prompt for server metadata."""
-    console.print("\n[bold cyan]Server Configuration[/bold cyan]")
+    logger.info("─── Server configuration ───")
 
     try:
         server_name = typer.prompt(
@@ -125,7 +120,7 @@ def _get_server_config() -> dict[str, str] | None:
         )
 
         if not server_name:
-            console.print("[red]Please enter a server name[/red]")
+            logger.error("Please enter a server name.")
             return None
 
         description = typer.prompt(
@@ -133,7 +128,7 @@ def _get_server_config() -> dict[str, str] | None:
         )
 
         if not description:
-            console.print("[red]Please enter a description[/red]")
+            logger.error("Please enter a description.")
             return None
 
         welcome_message = typer.prompt(
@@ -141,7 +136,7 @@ def _get_server_config() -> dict[str, str] | None:
         )
 
         if not welcome_message:
-            console.print("[red]Please enter a welcome message[/red]")
+            logger.error("Please enter a welcome message.")
             return None
 
         return {
@@ -155,7 +150,7 @@ def _get_server_config() -> dict[str, str] | None:
 
 def _get_owner_config() -> dict[str, str] | None:
     """Prompt for owner account credentials."""
-    console.print("\n[bold cyan]Owner Account[/bold cyan]")
+    logger.info("─── Owner account ───")
 
     try:
         username = typer.prompt(
@@ -163,7 +158,7 @@ def _get_owner_config() -> dict[str, str] | None:
         )
 
         if not username:
-            console.print("[red]Please enter a username[/red]")
+            logger.error("Please enter a username.")
             return None
 
         while True:
@@ -173,7 +168,7 @@ def _get_owner_config() -> dict[str, str] | None:
             )
 
             if not password:
-                console.print("[red]Please enter a password[/red]")
+                logger.error("Please enter a password.")
                 continue
 
             confirm = typer.prompt(
@@ -184,7 +179,7 @@ def _get_owner_config() -> dict[str, str] | None:
             if confirm == password:
                 break
             else:
-                console.print("[red]Passwords do not match. Try again.[/red]")
+                logger.error("Passwords do not match. Try again.")
 
         return {
             "owner_username": username,
@@ -196,9 +191,9 @@ def _get_owner_config() -> dict[str, str] | None:
 
 def _get_security_config() -> dict[str, object] | None:
     """Prompt for CORS settings stored in the shared config.toml."""
-    console.print("\n[bold cyan]Client Access (CORS)[/bold cyan]")
-    console.print("1. Allow any web client origin")
-    console.print("2. Allow one client origin")
+    logger.info("─── Client access (CORS) ───")
+    logger.info("1. Allow any web client origin")
+    logger.info("2. Allow one client origin")
 
     try:
         while True:
@@ -218,7 +213,7 @@ def _get_security_config() -> dict[str, object] | None:
                     default="http://localhost:5173",
                 ).strip()
                 if not client_origin:
-                    console.print("[red]Please enter a client origin[/red]")
+                    logger.error("Please enter a client origin.")
                     continue
 
                 return {
@@ -229,7 +224,7 @@ def _get_security_config() -> dict[str, object] | None:
                     "cors_allow_headers": ["*"],
                 }
 
-            console.print("[red]Invalid choice. Please try again.[/red]")
+            logger.error("Invalid choice. Please try again.")
     except (EOFError, KeyboardInterrupt):
         return None
 
@@ -248,7 +243,7 @@ def _confirm_test_database(host: str, port: str, username: str, password: str, d
 
 def _get_media_sfu_config() -> dict[str, str | int] | None:
     """Prompt for the shared Pufferblow config [media-sfu] section."""
-    console.print("\n[bold cyan]Shared Pufferblow Config: [media-sfu][/bold cyan]")
+    logger.info("─── Shared Pufferblow config: [media-sfu] ───")
 
     try:
         bootstrap_secret = typer.prompt(
@@ -257,7 +252,7 @@ def _get_media_sfu_config() -> dict[str, str | int] | None:
         )
 
         if not bootstrap_secret:
-            console.print("[red]Please enter a bootstrap secret[/red]")
+            logger.error("Please enter a bootstrap secret.")
             return None
 
         bootstrap_config_url = typer.prompt(
@@ -311,13 +306,13 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
     Returns:
         SetupWizardResult with all collected values, or None if cancelled.
     """
-    console.print("\n[bold green]PufferBlow Server Setup Wizard[/bold green]\n")
+    logger.info("Pufferblow setup wizard.")
 
     try:
         # Step 1: Mode selection
         mode = _get_setup_mode(has_existing_config)
         if mode is None:
-            console.print("[dim]Setup cancelled.[/dim]")
+            logger.info("Setup cancelled.")
             return None
 
         # Handle media-sfu only mode separately
@@ -326,15 +321,22 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
             if media_sfu_config is None:
                 return None
 
-            # Summary
-            console.print("\n[bold cyan]Shared Pufferblow Config Summary: [media-sfu][/bold cyan]")
-            console.print(f"  Bootstrap URL: {media_sfu_config['bootstrap_config_url']}")
-            console.print(f"  Bind Address: {media_sfu_config['bind_addr']}")
-            console.print(f"  Max Total Peers: {media_sfu_config['max_total_peers']}")
-            console.print(f"  Max Room Peers: {media_sfu_config['max_room_peers']}")
+            logger.info("─── Summary: [media-sfu] ───")
+            logger.info(
+                "  bootstrap_url={url}",
+                url=media_sfu_config["bootstrap_config_url"],
+            )
+            logger.info("  bind_addr={addr}", addr=media_sfu_config["bind_addr"])
+            logger.info(
+                "  max_total_peers={n}", n=media_sfu_config["max_total_peers"]
+            )
+            logger.info("  max_room_peers={n}", n=media_sfu_config["max_room_peers"])
 
-            if not typer.confirm("\nProceed with updating the shared Pufferblow config [media-sfu] section?", default=True):
-                console.print("[dim]Setup cancelled.[/dim]")
+            if not typer.confirm(
+                "Proceed with updating the shared Pufferblow config [media-sfu] section?",
+                default=True,
+            ):
+                logger.info("Setup cancelled.")
                 return None
 
             return SetupWizardResult(
@@ -404,11 +406,11 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
                     connect_timeout=5,
                 )
                 conn.close()
-                console.print("[green]✓ Database connection successful![/green]")
+                logger.success("Database connection successful.")
             except ImportError:
-                console.print("[yellow]Note: psycopg2 not available, skipping test.[/yellow]")
+                logger.warning("psycopg2 not available, skipping connection test.")
             except Exception as e:
-                console.print(f"[red]✗ Connection failed: {e}[/red]")
+                logger.error("Database connection failed: {err}", err=e)
                 if not typer.confirm("Continue anyway?", default=False):
                     return None
 
@@ -417,20 +419,25 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
         if owner_config is None:
             return None
 
-        # Summary
-        console.print("\n[bold cyan]Summary[/bold cyan]")
-        console.print(f"  Server name: {server_config['server_name']}")
-        console.print(f"  Database: {db_config['username']}@{db_config['host']}:{db_config['port']}/{db_config['database_name']}")
-        console.print(f"  Owner user: {owner_config['owner_username']}")
+        logger.info("─── Summary ───")
+        logger.info("  server_name={n}", n=server_config["server_name"])
+        logger.info(
+            "  database={user}@{host}:{port}/{name}",
+            user=db_config["username"],
+            host=db_config["host"],
+            port=db_config["port"],
+            name=db_config["database_name"],
+        )
+        logger.info("  owner_user={n}", n=owner_config["owner_username"])
         cors_summary = (
             "Any web client origin"
             if security_config.get("cors_origin_regex")
             else ", ".join(str(value) for value in security_config.get("cors_origins", []))
         )
-        console.print(f"  Allowed client origin(s): {cors_summary}")
+        logger.info("  client_origins={c}", c=cors_summary)
 
-        if not typer.confirm("\nProceed with setup?", default=True):
-            console.print("[dim]Setup cancelled.[/dim]")
+        if not typer.confirm("Proceed with setup?", default=True):
+            logger.info("Setup cancelled.")
             return None
 
         return SetupWizardResult(
@@ -448,5 +455,5 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
             security_config=security_config,
         )
     except (EOFError, KeyboardInterrupt):
-        console.print("\n[dim]Setup cancelled.[/dim]")
+        logger.info("Setup cancelled.")
         return None

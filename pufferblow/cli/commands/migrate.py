@@ -26,18 +26,11 @@ otherwise — useful as a deploy gate.
 from __future__ import annotations
 
 import typer
-from rich.panel import Panel
-from rich.table import Table
-
-
-def _console():
-    from pufferblow.cli.common import console
-
-    return console
+from loguru import logger
 
 
 def _ui_error(message: str) -> None:
-    _console().print(f"[bold red]{message}[/bold red]")
+    logger.error(message)
 
 
 def _detect_schema_drift() -> tuple[list[str], list[tuple[str, str]]]:
@@ -93,7 +86,6 @@ def migrate_command(
     )
 
     configure_cli_logging()
-    console = _console()
 
     config = load_config_or_exit()
     database_uri = config.DATABASE_URI if hasattr(config, "DATABASE_URI") else None
@@ -115,20 +107,21 @@ def migrate_command(
 
     if check:
         if not missing_tables and not missing_columns:
-            console.print("[green]Schema is up to date.[/green] No drift detected.")
+            logger.success("Schema is up to date. No drift detected.")
             raise typer.Exit(code=0)
 
-        table = Table(title="Schema drift", show_header=True, header_style="bold")
-        table.add_column("Kind", style="cyan")
-        table.add_column("Target")
-        for name in missing_tables:
-            table.add_row("missing table", name)
-        for table_name, column_name in missing_columns:
-            table.add_row("missing column", f"{table_name}.{column_name}")
-        console.print(table)
-        console.print(
-            "\n[yellow]Run `pufferblow migrate` (no --check) to apply.[/yellow]"
+        logger.warning(
+            "Schema drift detected: {tables} missing table(s), {cols} missing column(s).",
+            tables=len(missing_tables),
+            cols=len(missing_columns),
         )
+        for name in missing_tables:
+            logger.info("  missing table   {name}", name=name)
+        for table_name, column_name in missing_columns:
+            logger.info(
+                "  missing column  {table}.{col}", table=table_name, col=column_name
+            )
+        logger.info("Run `pufferblow migrate` (no --check) to apply.")
         raise typer.Exit(code=1)
 
     # Non-check path: apply. Reuses the same setup_tables() that runs
@@ -143,20 +136,15 @@ def migrate_command(
         _ui_error(f"Migration failed: {exc}")
         raise typer.Exit(code=1)
 
-    summary_lines: list[str] = []
     if missing_tables:
-        summary_lines.append(f"[green]Created tables:[/green] {', '.join(missing_tables)}")
+        logger.success(
+            "Created tables: {names}", names=", ".join(missing_tables)
+        )
     if missing_columns:
         joined = ", ".join(f"{t}.{c}" for t, c in missing_columns)
-        summary_lines.append(f"[green]Added columns:[/green] {joined}")
-    if not summary_lines:
-        summary_lines.append("[green]Schema already up to date.[/green]")
-        summary_lines.append("[dim]Idempotent post-migrations (appearance, blocked IP counters, backfills) ran successfully.[/dim]")
-
-    console.print(
-        Panel.fit(
-            "\n".join(summary_lines),
-            title="[bold green]Migration Complete[/bold green]",
-            border_style="green",
+        logger.success("Added columns: {names}", names=joined)
+    if not missing_tables and not missing_columns:
+        logger.success("Schema already up to date.")
+        logger.info(
+            "Idempotent post-migrations (appearance, blocked IP counters, backfills) ran successfully."
         )
-    )

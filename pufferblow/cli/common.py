@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 import typer
 from loguru import logger
-from rich.console import Console
 
 LOG_LEVEL_MAP = {
     0: "INFO",
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
     from pufferblow.api.config.config_handler import ConfigHandler
     from pufferblow.api.models.config_model import Config
 
-console = Console()
 
 def _has_request_context(extra: dict) -> bool:
     """True when the record was emitted inside an HTTP request scope."""
@@ -191,25 +189,55 @@ def load_runtime(*, database_uri: str | None = None, setup_tables: bool = False)
         api_initializer.database_handler.setup_tables(Base)
 
 
-def configure_cli_logging(*, level: str = "WARNING") -> None:
+def cli_log_format(record: dict) -> str:
+    """Compact log format for CLI commands.
+
+    Uses the same `HH:mm:ss + level` prefix as the server's console
+    sink (see `console_log_format`) so a single Pufferblow session
+    looks coherent whether you're tailing the server or running a
+    setup wizard — same timestamp shape, same level column width,
+    same color semantics for ERROR / SUCCESS / WARNING.
+
+    Drops the `name:line` source attribution the server format
+    carries. Wizard output isn't debugging server code; the module
+    path would be noise.
+    """
+    return (
+        "<dim>{time:HH:mm:ss}</dim>  "
+        "<level>{level: <8}</level>  "
+        "{message}\n{exception}"
+    )
+
+
+def configure_cli_logging(*, level: str = "INFO") -> None:
     """Configure loguru for interactive CLI commands.
 
-    Setup / storage / migration commands present their primary output
-    via `rich.console.Console.print` so the experience reads like a
-    wizard, not a server log tail. Loguru is still active because
-    library modules (database, config, bootstrap) emit through it, but
-    we keep it quiet (WARNING+) and use a one-line compact format so
-    those library messages don't compete with the wizard surface.
+    Every emission from a `pufferblow` subcommand — validation
+    failure, progress note, success summary — goes through loguru
+    using `cli_log_format`. That makes the CLI output share its
+    visual language with the server's console sink: same timestamp,
+    same level column, same color cues. Operators don't have to
+    context-switch between "looks like a Rich wizard" and "looks
+    like a server log."
 
-    Validation feedback ("Owner password required", etc.) should go
-    through `console.print("[red]…[/red]")` rather than `logger.error`
-    — that's user-facing UI, not a log event.
+    Validation feedback ("Owner password required") goes through
+    `logger.error`; success summaries through `logger.success`;
+    progress / informational through `logger.info`. INFO is the
+    default level because the wizard *is* the output — silencing
+    info-level messages would hide the migration / setup progress
+    the user is here to see.
     """
     logger.remove()
+    logger.configure(patcher=enrich_log_record)
+    # stdout, matching `console_log_format`'s sink in
+    # `configure_server_logging`. Routing CLI emissions through stdout
+    # means a `pufferblow setup | tee log` captures the wizard
+    # transcript the same way it captures server logs — same stream,
+    # same shape.
     logger.add(
-        sys.stderr,
+        sys.stdout,
         level=level,
-        format="<level>{level: <8}</level>  {message}",
+        format=cli_log_format,
         colorize=True,
         backtrace=False,
         diagnose=False,

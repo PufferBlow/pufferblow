@@ -9,13 +9,21 @@ AUTHOR = "ramsy0dev"
 ORG_GITHUB = "https://github.com/pufferblow"
 REPO_GITHUB = "https://github.com/pufferblow/pufferblow"
 
+# ASCII rendering of the Pufferblow brand mark: 8 spokes radiating from a
+# centered ring with a dot. Mirrors the SVG used by the web and desktop
+# clients (8 spokes + ring + dot) so the CLI's first impression matches
+# the rest of the surface. Replaces the previous block-letter
+# `PufferBlow` art, which had no relationship to any other logo we ship.
 BANNER = f"""[bold cyan]
-  ____         __  __          ____  _
- |  _ \\ _   _ / _|/ _| ___ _ _| __ )| | _____      __
- | |_) || | | |  _|  _|/ _ \\ '__| _ \\| |/ _ \\ \\ /\\ / /
- |  __/ | |_| | | | | |  __/ |  | |_) | | (_) \\ V  V /
- |_|     \\__,_|_| |_|  \\___|_|  |____/|_|\\___/  \\_/\\_/
-[/bold cyan][dim]  v{VERSION}  ·  {AUTHOR}  ·  Escape surveillance, gain anonymity.[/dim]
+              \\   |   /
+               \\  |  /
+                \\ | /
+       --------( * )--------
+                / | \\
+               /  |  \\
+              /   |   \\
+[/bold cyan][bold]                Pufferblow[/bold]  [dim]v{VERSION}[/dim]
+[dim]              Escape surveillance, gain anonymity.[/dim]
 """
 
 

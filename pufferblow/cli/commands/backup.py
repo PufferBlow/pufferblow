@@ -21,17 +21,11 @@ import asyncio
 from pathlib import Path
 
 import typer
-from rich.panel import Panel
-
-
-def _console():
-    from pufferblow.cli.common import console
-
-    return console
+from loguru import logger
 
 
 def _ui_error(message: str) -> None:
-    _console().print(f"[bold red]{message}[/bold red]")
+    logger.error(message)
 
 
 def _load_manager():
@@ -64,7 +58,6 @@ def _load_manager():
 def backup_now_command() -> None:
     """Run pg_dump against the configured database immediately."""
     manager = _load_manager()
-    console = _console()
     config = manager.config
 
     backup_path = Path(getattr(config, "BACKUP_PATH", "~/.pufferblow/backups")).expanduser()
@@ -83,21 +76,17 @@ def backup_now_command() -> None:
         _ui_error(f"Backup failed: {exc}")
         raise typer.Exit(code=1)
 
-    console.print(
-        Panel.fit(
-            f"[bold green]Backup written.[/bold green]\n\n"
-            f"[bold cyan]Location:[/bold cyan] {backup_path}\n"
-            f"[dim]Rotation policy: keep last {getattr(config, 'BACKUP_MAX_FILES', 7)} file(s)[/dim]",
-            title="[bold yellow]Backup Complete[/bold yellow]",
-            border_style="green",
-        )
+    logger.success("Backup written.")
+    logger.info("  location={path}", path=str(backup_path))
+    logger.info(
+        "  rotation_keep_last={n}",
+        n=getattr(config, "BACKUP_MAX_FILES", 7),
     )
 
 
 def backup_mirror_command() -> None:
     """Mirror the database to the configured BACKUP_MIRROR_DSN target."""
     manager = _load_manager()
-    console = _console()
     config = manager.config
 
     mirror_dsn = getattr(config, "BACKUP_MIRROR_DSN", None)
@@ -118,10 +107,4 @@ def backup_mirror_command() -> None:
         _ui_error(f"Mirror failed: {exc}")
         raise typer.Exit(code=1)
 
-    console.print(
-        Panel.fit(
-            "[bold green]Database mirrored to secondary.[/bold green]",
-            title="[bold yellow]Mirror Complete[/bold yellow]",
-            border_style="green",
-        )
-    )
+    logger.success("Database mirrored to secondary.")

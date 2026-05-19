@@ -8,18 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
-from rich.panel import Panel
+from loguru import logger
 from rich.prompt import Confirm, Prompt
 
 if TYPE_CHECKING:
     from pufferblow.api.config.config_handler import ConfigHandler
     from pufferblow.cli.common import DatabaseCredentials
-
-
-def _console():
-    from pufferblow.cli.common import console
-
-    return console
 
 
 def _api_initializer():
@@ -53,15 +47,14 @@ def _launch_setup_wizard(has_existing_config: bool):
 
 
 def _ui_error(message: str) -> None:
-    """Print a red one-liner for wizard validation failures.
+    """Emit a wizard validation failure through the shared log sink.
 
-    Validation feedback ("X is required") is UI, not a log event. Using
-    `logger.error` here was producing loguru's full timestamp +
-    module:line stamp in the middle of a Rich-styled wizard, which read
-    like a crash. This keeps the output style coherent with the green
-    success Panels the same flow emits.
+    Validation feedback rides the same `HH:mm:ss  ERROR  …` line shape
+    as every other CLI emission, so a setup-run transcript reads like
+    one continuous log instead of switching between Rich-styled
+    wizard chrome and loguru's library lines.
     """
-    _console().print(f"[bold red]{message}[/bold red]")
+    logger.error(message)
 
 
 def _prompt_database_credentials() -> DatabaseCredentials:
@@ -247,16 +240,13 @@ def _run_full_setup(
         is_owner=True,
     ).raw_auth_token
 
-    _console().print(
-        Panel.fit(
-            f"[bold green]{auth_token}[/bold green]\n\n"
-            "[bold red]Store this owner auth token safely.[/bold red]\n\n"
-            f"[bold cyan]RTC Bootstrap Secret:[/bold cyan] [bold green]{bootstrap_secret}[/bold green]\n"
-            f"(saved to ~/.pufferblow/config.toml)",
-            title="[bold yellow]Setup Complete[/bold yellow]",
-            border_style="green",
-        )
+    logger.success("Setup complete.")
+    logger.warning("Store this owner auth token safely — it will not be shown again:")
+    logger.info("  auth_token={token}", token=auth_token)
+    logger.info(
+        "RTC bootstrap secret (saved to ~/.pufferblow/config.toml):",
     )
+    logger.info("  bootstrap_secret={secret}", secret=bootstrap_secret)
 
 
 def _is_default_secret(value: str | None) -> bool:
@@ -331,7 +321,7 @@ def _run_server_only_setup(
     if security_config is not None:
         config_handler.write_config_toml(security_config=security_config)
     action = "updated" if is_update else "created"
-    _console().print(f"[green]Server information {action} successfully.[/green]")
+    logger.success("Server information {action} successfully.", action=action)
 
 
 def _run_media_sfu_only_setup(
@@ -350,16 +340,9 @@ def _run_media_sfu_only_setup(
         media_sfu_config=media_sfu_config,
     )
 
-    _console().print(
-        Panel.fit(
-            "[bold green]Shared Pufferblow config updated successfully for [media-sfu].[/bold green]\n\n"
-            f"[bold cyan]Bootstrap URL:[/bold cyan] {media_sfu_config['bootstrap_config_url']}\n"
-            f"[bold cyan]Bind Address:[/bold cyan] {media_sfu_config['bind_addr']}\n"
-            f"(Saved to the shared Pufferblow config at ~/.pufferblow/config.toml)",
-            title="[bold yellow]Shared Config Update Complete[/bold yellow]",
-            border_style="green",
-        )
-    )
+    logger.success("Updated [media-sfu] section in ~/.pufferblow/config.toml.")
+    logger.info("  bootstrap_url={url}", url=media_sfu_config["bootstrap_config_url"])
+    logger.info("  bind_addr={addr}", addr=media_sfu_config["bind_addr"])
 
 
 
@@ -415,8 +398,7 @@ def _run_setup_payload(payload, *, config_handler: ConfigHandler) -> None:
 
 def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
     """Interactive backup configuration wizard."""
-    _console().print("\n[bold cyan]Database Backup Setup[/bold cyan]")
-    _console().print("Configure how PufferBlow backs up your PostgreSQL database.\n")
+    logger.info("Database backup setup — configure scheduled pg_dump / mirror jobs.")
 
     mode_raw = Prompt.ask("Backup mode", choices=["file", "mirror"], default="file")
     schedule_hours_raw = Prompt.ask("Backup interval (hours)", default="24").strip()
@@ -452,17 +434,10 @@ def _run_backup_setup(*, config_handler: ConfigHandler) -> None:
 
     config_handler.write_config_toml(backup_config=backup_config)
 
-    _console().print(
-        Panel.fit(
-            f"[bold green]Backup configured in file mode.[/bold green]\n\n"
-            f"[bold cyan]Mode:[/bold cyan] {mode_raw}\n"
-            f"[bold cyan]Schedule:[/bold cyan] Every {schedule_hours} hour(s)\n"
-            f"(Saved to ~/.pufferblow/config.toml)\n\n"
-            "[dim]Restart the server for the backup task to activate.[/dim]",
-            title="[bold yellow]Backup Setup Complete[/bold yellow]",
-            border_style="green",
-        )
-    )
+    logger.success("Backup configuration saved to ~/.pufferblow/config.toml.")
+    logger.info("  mode={mode}", mode=mode_raw)
+    logger.info("  schedule_hours={hours}", hours=schedule_hours)
+    logger.info("Restart the server for the backup task to activate.")
 
 
 def setup_command(
@@ -531,7 +506,7 @@ def setup_command(
 
     payload = _launch_setup_wizard(has_existing_config=has_bootstrap_config)
     if payload is None:
-        _console().print("[dim]Setup cancelled.[/dim]")
+        logger.info("Setup cancelled.")
         raise typer.Exit(code=0)
 
     _run_setup_payload(payload, config_handler=config_handler)

@@ -25,16 +25,15 @@ from typer.testing import CliRunner
 
 
 def _silence_loguru(monkeypatch):
-    """Replace the CLI logging configurator with a no-op for the test.
+    """Keep the call signature stable; the helper is now a no-op.
 
-    The real configurator attaches a stderr sink, which makes typer's
-    CliRunner output capture noisier. Stubbing it doesn't change
-    behavior under test.
+    Earlier revisions of these tests stubbed `configure_cli_logging`
+    to keep loguru quiet. With the unified log-style CLI output the
+    configurator IS what installs the stdout sink that CliRunner
+    captures, so we let it run. The helper stays so individual tests
+    can still take a `monkeypatch` arg via the existing call sites.
     """
-    monkeypatch.setattr(
-        "pufferblow.cli.common.configure_cli_logging",
-        lambda *args, **kwargs: None,
-    )
+    return None
 
 
 def _stub_runtime(monkeypatch, *, with_manager: bool = False):
