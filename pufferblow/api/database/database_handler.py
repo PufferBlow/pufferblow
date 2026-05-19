@@ -1904,6 +1904,65 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.execute(stmt)
             session.commit()
 
+        self._invalidate_user_cache(user_id)
+
+    def add_joined_server(self, user_id: str, server_id: str) -> list[str]:
+        """Append ``server_id`` to the user's joined-servers list.
+
+        Idempotent — calling twice with the same id is a no-op. The
+        ``server_id`` value is whatever the federation primitive is
+        (since v1.0, the remote instance's ``host:port``). Returns
+        the new list so the route can echo it back to the client
+        without a second round trip.
+
+        Implementation note: ``joined_servers_ids`` is a JSON list
+        column. SQLAlchemy can't atomically append-if-absent on a
+        JSON list with a single statement portably, so we read the
+        row, mutate the list in Python, and write it back. The risk
+        of a lost update under concurrent joins from the same user
+        is tiny (a user joining two servers from two devices at once
+        is rare), and worst case the second write wins — the user
+        re-joins from one device and converges.
+        """
+        with self.database_session() as session:
+            stmt = select(Users).where(Users.user_id == uuid.UUID(str(user_id)))
+            row = session.execute(stmt).fetchone()
+            if row is None:
+                return []
+            user = row[0]
+            current = list(user.joined_servers_ids or [])
+            if server_id not in current:
+                current.append(server_id)
+                user.joined_servers_ids = current
+                session.commit()
+
+        self._invalidate_user_cache(user_id)
+        return current
+
+    def remove_joined_server(self, user_id: str, server_id: str) -> list[str]:
+        """Drop ``server_id`` from the user's joined-servers list.
+
+        Idempotent. The user's home instance can NOT be removed via
+        this path — the route layer enforces that (we don't know
+        which entry is the home server at the database layer; the
+        caller carries that context).
+        """
+        with self.database_session() as session:
+            stmt = select(Users).where(Users.user_id == uuid.UUID(str(user_id)))
+            row = session.execute(stmt).fetchone()
+            if row is None:
+                return []
+            user = row[0]
+            current = [
+                sid for sid in (user.joined_servers_ids or []) if sid != server_id
+            ]
+            if current != (user.joined_servers_ids or []):
+                user.joined_servers_ids = current
+                session.commit()
+
+        self._invalidate_user_cache(user_id)
+        return current
+
     def list_roles(self) -> list[Roles]:
         """Return all instance roles ordered by creation time."""
         with self.database_session() as session:

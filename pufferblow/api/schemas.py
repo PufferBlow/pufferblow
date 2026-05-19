@@ -38,6 +38,19 @@ class AuthTokenQuery(BaseModel):
     auth_token: str = Field(min_length=1)
 
 
+class JoinServerRequest(BaseModel):
+    """Body shape for `POST /api/v1/users/joined-servers`.
+
+    `target` is the remote instance's host:port (since v1.0 that's
+    the canonical server identifier — it doubles as the addressable
+    location). Accepts forms with or without an http(s):// prefix;
+    the route normalizes before persisting.
+    """
+
+    auth_token: str = Field(min_length=1)
+    target: str = Field(min_length=1, max_length=255)
+
+
 class RefreshTokenRequest(BaseModel):
     """RefreshTokenRequest class."""
     refresh_token: str = Field(min_length=1)

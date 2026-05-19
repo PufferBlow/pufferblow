@@ -10,6 +10,7 @@ from pufferblow.api.logger.msgs import info
 from pufferblow.api.schemas import (
     AuthTokenQuery,
     EditProfileRequest,
+    JoinServerRequest,
     ResetTokenRequest,
     SigninQuery,
     SignupRequest,
@@ -363,3 +364,141 @@ async def list_users_route(query: AuthTokenQuery = Depends()):
         viewer_user_id=viewer_user_id, auth_token=query.auth_token
     )
     return {"status_code": 200, "users": users}
+
+
+# ── Joined-servers (federation) ──────────────────────────────────────
+#
+# Each user carries a list of remote-instance host:port identifiers in
+# Users.joined_servers_ids. Since the v1.0 server_id rewrite the
+# server_id IS the addressable host:port, so "joining" a server now
+# means appending its domain to that list — the client can talk to it
+# directly via the same protocol the home instance speaks.
+#
+# What this endpoint pair does NOT do:
+#   - Federate the user's identity to the remote server. The remote
+#     doesn't yet know the user exists.
+#   - Subscribe to channel-list updates. The client polls /channel/list
+#     against the remote on demand.
+#
+# Both are roadmap items; today the server "join" is local bookkeeping
+# so the client knows which remote APIs to also query. That's enough
+# to make the rail render extra avatars and let the user navigate to
+# their public channels.
+
+
+@router.get("/joined-servers", status_code=200)
+async def list_joined_servers_route(query: AuthTokenQuery = Depends()):
+    """Return the caller's joined-server identifiers.
+
+    Returns the raw list of host:port strings; the client resolves
+    each to a server_info payload on its own (the home instance can
+    only speak for itself).
+    """
+    user_id = get_current_user(query.auth_token)
+    user = api_initializer.database_handler.get_user(user_id=user_id)
+    if user is None:
+        raise exceptions.HTTPException(status_code=404, detail="User not found")
+    return {
+        "status_code": 200,
+        "joined_servers": list(user.joined_servers_ids or []),
+        "origin_server": user.origin_server,
+    }
+
+
+@router.post("/joined-servers", status_code=201)
+async def join_server_route(request: JoinServerRequest):
+    """Join a remote Pufferblow instance.
+
+    Validates that ``target`` is reachable and identifies itself as
+    a Pufferblow server before persisting. The probe uses the
+    target's public ``/api/v1/system/server-info`` endpoint — no
+    secret exchange, no actor handshake. That's deliberate for v1.0:
+    join semantics are "follow this server's public surface", not
+    "create an account there".
+    """
+    user_id = get_current_user(request.auth_token)
+    ok, error_code, server_info = api_initializer.user_manager.join_server(
+        user_id=user_id, target=request.target
+    )
+    if not ok:
+        status = {
+            "unreachable": 502,
+            "not_pufferblow": 502,
+            "self_join": 409,
+            "invalid_target": 400,
+        }.get(error_code or "", 400)
+        raise exceptions.HTTPException(
+            status_code=status,
+            detail={
+                "code": error_code,
+                "message": _join_error_message(error_code),
+            },
+        )
+
+    return {
+        "status_code": 201,
+        "server_info": server_info,
+    }
+
+
+@router.post("/joined-servers/leave", status_code=200)
+async def leave_server_route(request: JoinServerRequest):
+    """Drop a remote instance from the caller's joined-servers list.
+
+    Same payload shape as the join endpoint. ``target`` is the
+    server_id (host:port) to drop. The home instance can't be
+    dropped via this path — see UserManager.leave_server.
+
+    Modeled as POST rather than DELETE because the body carries
+    auth_token + target, and HTTP DELETE with a body is poorly
+    supported across some intermediate proxies / fetch clients
+    (notably the renderer's apiClient.delete which routes params
+    as a query string instead of a body).
+    """
+    user_id = get_current_user(request.auth_token)
+    ok, error_code = api_initializer.user_manager.leave_server(
+        user_id=user_id, target=request.target
+    )
+    if not ok:
+        status = {
+            "cannot_leave_home": 409,
+            "user_not_found": 404,
+            "invalid_target": 400,
+        }.get(error_code or "", 400)
+        raise exceptions.HTTPException(
+            status_code=status,
+            detail={
+                "code": error_code,
+                "message": _leave_error_message(error_code),
+            },
+        )
+    return {"status_code": 200}
+
+
+def _join_error_message(code: str | None) -> str:
+    """Human-readable mapping for join failures.
+
+    Kept inline (not a util) because no other route surfaces these
+    codes and the messages are tightly coupled to the route copy.
+    """
+    return {
+        "unreachable": (
+            "Could not reach that instance. Check the address and try again."
+        ),
+        "not_pufferblow": (
+            "That host answered but doesn't look like a Pufferblow instance."
+        ),
+        "self_join": "You're already on this instance — you can't join your own home.",
+        "invalid_target": "The instance address looks malformed.",
+    }.get(code or "", "Could not join that instance.")
+
+
+def _leave_error_message(code: str | None) -> str:
+    return {
+        "cannot_leave_home": (
+            "You can't leave your home instance — that's the account "
+            "you signed up on."
+        ),
+        "user_not_found": "That account no longer exists.",
+        "invalid_target": "The instance address looks malformed.",
+    }.get(code or "", "Could not leave that instance.")

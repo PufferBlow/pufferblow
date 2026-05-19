@@ -166,6 +166,124 @@ class UserManager:
 
         return (None, False, "invalid_password")
 
+    @staticmethod
+    def _normalize_target_domain(target: str) -> str:
+        """Strip scheme + trailing slash so server_id stays canonical.
+
+        The federation primitive is `host:port` (since the v1.0
+        rewrite). Users typing `https://chat.example/` should land
+        the same row as users typing `chat.example`.
+        """
+        cleaned = target.strip().rstrip("/")
+        for prefix in ("https://", "http://"):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):]
+                break
+        return cleaned
+
+    def join_server(
+        self, user_id: str, target: str
+    ) -> tuple[bool, str | None, dict | None]:
+        """Add a remote instance to the user's joined-servers list.
+
+        Validation runs in three layers:
+
+        1. Normalize the target to canonical `host:port` form so the
+           same physical instance reached by two URL spellings
+           dedupes.
+        2. Verify the target is actually a Pufferblow instance by
+           hitting `/api/v1/system/server-info`. The response shape
+           is enough to surface a server name + avatar to the
+           client without a second round trip. If the target is
+           unreachable or returns garbage, the join is refused.
+        3. Persist to `Users.joined_servers_ids` via the database
+           handler. Idempotent.
+
+        Returns `(ok, error_code, server_info)`. Error codes are
+        machine-readable strings (`unreachable`, `not_pufferblow`,
+        `self_join`) so the route layer can pick its own HTTP
+        status; `server_info` carries the remote's
+        `/api/v1/system/server-info` payload on success so the
+        client doesn't have to re-fetch.
+        """
+        import httpx
+
+        canonical = self._normalize_target_domain(target)
+        if not canonical:
+            return False, "invalid_target", None
+
+        own_host_port = f"{self.config.API_HOST}:{self.config.API_PORT}"
+        if canonical == own_host_port:
+            return False, "self_join", None
+
+        # Probe the target. Prefer https for the validation call but
+        # fall back to http for localhost / RFC1918 addresses since
+        # operators commonly run those without TLS. A 2s connect
+        # cap + 4s overall keeps a dead target from blocking the
+        # join request for the user.
+        url_candidates = (
+            [f"http://{canonical}/api/v1/system/server-info"]
+            if (
+                canonical.startswith(("127.", "localhost", "10.", "192.168."))
+            )
+            else [
+                f"https://{canonical}/api/v1/system/server-info",
+                f"http://{canonical}/api/v1/system/server-info",
+            ]
+        )
+
+        server_info: dict | None = None
+        for url in url_candidates:
+            try:
+                response = httpx.get(url, timeout=httpx.Timeout(connect=2.0, read=4.0, write=2.0, pool=2.0))
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
+                continue
+            if response.status_code != 200:
+                continue
+            try:
+                payload = response.json()
+            except ValueError:
+                continue
+            server_info = payload.get("server_info") if isinstance(payload, dict) else None
+            if server_info:
+                break
+
+        if server_info is None:
+            return False, "unreachable", None
+        if not isinstance(server_info, dict) or "server_id" not in server_info:
+            return False, "not_pufferblow", None
+
+        # Use the remote's self-declared server_id (since v1.0 that
+        # IS its host:port, but we trust the remote's spelling over
+        # ours in case it returns a longer FQDN or different port
+        # mapping than the URL we probed).
+        joined_id = str(server_info["server_id"])
+        self.database_handler.add_joined_server(user_id=user_id, server_id=joined_id)
+        return True, None, server_info
+
+    def leave_server(self, user_id: str, target: str) -> tuple[bool, str | None]:
+        """Drop a remote instance from the user's joined-servers list.
+
+        Refuses to leave the user's home instance — the home server
+        carries the user's account and presence data, and leaving
+        is meaningless there. The home instance is the user's
+        `origin_server` field.
+        """
+        canonical = self._normalize_target_domain(target)
+        if not canonical:
+            return False, "invalid_target"
+
+        user = self.database_handler.get_user(user_id=user_id)
+        if user is None:
+            return False, "user_not_found"
+        if str(user.origin_server) == canonical:
+            return False, "cannot_leave_home"
+
+        self.database_handler.remove_joined_server(
+            user_id=user_id, server_id=canonical
+        )
+        return True, None
+
     def list_users(self, viewer_user_id: str, auth_token: str) -> list[dict]:
         """
         Fetch a list of metadata about all the existing
