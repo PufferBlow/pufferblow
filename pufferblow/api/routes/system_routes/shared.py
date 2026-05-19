@@ -42,7 +42,13 @@ class RecentActivityRequest(BaseModel):
     """Request body for recent activity endpoint."""
 
     auth_token: str = Field(min_length=1)
-    limit: int = Field(default=10, ge=1, le=100)
+    # The control panel's Activity tab fetches a wide window (200
+    # entries) and paginates client-side, so the upper bound has to
+    # be at least that. Previously capped at 100, which caused the
+    # tab to silently 422 on every load because the client's
+    # FETCH_LIMIT exceeded the validator — and the tab rendered as
+    # the generic "Failed to load recent activity" error state.
+    limit: int = Field(default=10, ge=1, le=200)
 
 
 class ServerLogsRequest(BaseModel):
