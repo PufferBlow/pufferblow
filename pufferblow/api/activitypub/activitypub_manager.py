@@ -23,6 +23,12 @@ OUTBOUND_POST_BACKOFF_BASE_SECONDS = 1.0
 
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.messages.messages_manager import MessagesManager
+from pufferblow.core.constants import VERSION
+
+# Identifies this software to remote ActivityPub peers. The version
+# tail tracks the canonical `VERSION` constant so a User-Agent grep on
+# a federated peer's logs matches the release tag of this server.
+_ACTIVITYPUB_USER_AGENT = f"PufferBlow-ActivityPub/{VERSION}"
 from pufferblow.api.user.user_manager import UserManager
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
@@ -242,7 +248,7 @@ class ActivityPubManager:
         """Http get json."""
         headers = {
             "Accept": "application/activity+json, application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\", application/json",
-            "User-Agent": "PufferBlow-ActivityPub/0.0.1-beta",
+            "User-Agent": _ACTIVITYPUB_USER_AGENT,
         }
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             response = await client.get(url, headers=headers)
@@ -262,7 +268,7 @@ class ActivityPubManager:
         headers = {
             "Content-Type": "application/activity+json",
             "Accept": "application/activity+json, application/json",
-            "User-Agent": "PufferBlow-ActivityPub/0.0.1-beta",
+            "User-Agent": _ACTIVITYPUB_USER_AGENT,
         }
         body = json.dumps(payload)
         last_error: Exception | None = None
