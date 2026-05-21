@@ -912,3 +912,27 @@ class DatabaseMetricsFilesMixin:
             stmt = select(FileObjects).where(FileObjects.file_hash == file_hash)
             result = session.execute(stmt).fetchone()
             return result[0] if result else None
+
+    def set_file_object_lqip_path(self, file_hash: str, lqip_path: str | None) -> None:
+        """Record (or clear) the LQIP path for a file object.
+
+        Called by the storage manager once a low-quality image
+        placeholder has been generated and persisted. Passing
+        ``None`` clears the column — used by the AVIF optimization
+        pass when the original hash is replaced, so the stale
+        pointer doesn't linger.
+
+        No-op on SQLite (file_objects isn't materialized there).
+        """
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return
+
+        with self.database_session() as session:
+            stmt = (
+                update(FileObjects)
+                .values(lqip_path=lqip_path)
+                .where(FileObjects.file_hash == file_hash)
+            )
+            session.execute(stmt)
+            session.commit()

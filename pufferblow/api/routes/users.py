@@ -218,9 +218,17 @@ async def upload_user_avatar_route(
     file: UploadFile = Form(..., description="Avatar image file"),
 ):
     """Upload user avatar route."""
+    from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
+
     user_id = get_current_user(auth_token)
     avatar_url, is_duplicate = await api_initializer.user_manager.update_user_avatar(
         user_id=user_id, avatar_file=file
+    )
+    # Return the LQIP URL alongside the full URL so the client can
+    # immediately swap to a placeholder-with-blur render of the
+    # just-uploaded avatar without a second profile fetch.
+    lqip_url = _resolve_storage_lqip_url(
+        avatar_url, api_initializer.database_handler
     )
     return {
         "status_code": 201,
@@ -230,6 +238,7 @@ async def upload_user_avatar_route(
             else "Avatar uploaded successfully"
         ),
         "avatar_url": avatar_url,
+        "avatar_lqip_url": lqip_url,
         "duplicate_status": "existing" if is_duplicate else "new",
     }
 
@@ -240,9 +249,14 @@ async def upload_user_banner_route(
     file: UploadFile = Form(..., description="Banner image file"),
 ):
     """Upload user banner route."""
+    from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
+
     user_id = get_current_user(auth_token)
     banner_url, is_duplicate = await api_initializer.user_manager.update_user_banner(
         user_id=user_id, banner_file=file
+    )
+    lqip_url = _resolve_storage_lqip_url(
+        banner_url, api_initializer.database_handler
     )
     return {
         "status_code": 201,
@@ -252,6 +266,7 @@ async def upload_user_banner_route(
             else "Banner uploaded successfully"
         ),
         "banner_url": banner_url,
+        "banner_lqip_url": lqip_url,
         "duplicate_status": "existing" if is_duplicate else "new",
     }
 

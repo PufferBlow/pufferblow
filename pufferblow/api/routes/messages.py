@@ -327,8 +327,23 @@ async def channel_send_message(
                             check_duplicates=True,
                         )
                     )
+                    # Resolve LQIP URL for image attachments so the
+                    # client can paint a placeholder while the full
+                    # asset streams in. Non-image attachments
+                    # (videos, audio, PDFs, etc.) just get None
+                    # here — the AttachmentBubble renders its
+                    # type-specific placeholder for those.
+                    lqip_url = None
+                    if mime_type.startswith("image/") and mime_type != "image/gif":
+                        from pufferblow.api.user.user_manager import (
+                            _resolve_storage_lqip_url,
+                        )
+                        lqip_url = _resolve_storage_lqip_url(
+                            storage_url, api_initializer.database_handler
+                        )
                     attachment_objects.append({
                         "url": storage_url,
+                        "lqip_url": lqip_url,
                         "filename": filename,
                         "type": mime_type,
                         "size": file_size,

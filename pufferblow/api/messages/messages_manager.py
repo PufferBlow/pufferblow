@@ -498,6 +498,23 @@ class MessagesManager:
                 json_metadata_format["sender_username"] = user_data.username
                 json_metadata_format["sender_avatar_url"] = user_data.avatar_url
                 json_metadata_format["sender_banner_url"] = user_data.banner_url
+                # LQIP variants of the avatar / banner so each
+                # message row can crossfade its avatar from a
+                # placeholder. We resolve here on the read path
+                # rather than mirroring the column on the messages
+                # table so we don't have to keep the LQIP pointer
+                # in sync per-message — a single source of truth
+                # (file_objects.lqip_path) is consulted at read
+                # time.
+                from pufferblow.api.user.user_manager import (
+                    _resolve_storage_lqip_url,
+                )
+                json_metadata_format["sender_avatar_lqip_url"] = _resolve_storage_lqip_url(
+                    user_data.avatar_url, self.database_handler
+                )
+                json_metadata_format["sender_banner_lqip_url"] = _resolve_storage_lqip_url(
+                    user_data.banner_url, self.database_handler
+                )
                 json_metadata_format["sender_status"] = user_data.status or "offline"
                 json_metadata_format["sender_roles"] = user_data.roles_ids or []
                 json_metadata_format["sender_about"] = user_data.about
@@ -511,6 +528,8 @@ class MessagesManager:
                 json_metadata_format["sender_username"] = "Unknown User"
                 json_metadata_format["sender_avatar_url"] = None
                 json_metadata_format["sender_banner_url"] = None
+                json_metadata_format["sender_avatar_lqip_url"] = None
+                json_metadata_format["sender_banner_lqip_url"] = None
                 json_metadata_format["sender_status"] = "offline"
                 json_metadata_format["sender_roles"] = []
                 json_metadata_format["sender_about"] = None
@@ -518,8 +537,33 @@ class MessagesManager:
                 json_metadata_format["sender_created_at"] = None
 
             if message_data.attachments and len(message_data.attachments) > 0:
-                # Attachments are stored as structured dicts {url, filename, type, size}
-                json_metadata_format["attachments"] = message_data.attachments
+                # Attachments are stored as structured dicts
+                # {url, filename, type, size, [lqip_url]}.
+                # `lqip_url` was added to the schema later, so old
+                # rows don't have it. Backfill on read for image
+                # attachments by resolving against file_objects.
+                # Non-image and non-/storage URLs stay None. This
+                # is best-effort — a failed lookup just leaves the
+                # client to render skeleton until the full image
+                # finishes.
+                from pufferblow.api.user.user_manager import (
+                    _resolve_storage_lqip_url,
+                )
+                hydrated: list[dict] = []
+                for attachment in message_data.attachments:
+                    if not isinstance(attachment, dict):
+                        hydrated.append(attachment)
+                        continue
+                    if "lqip_url" not in attachment:
+                        mime = attachment.get("type") or ""
+                        if mime.startswith("image/") and mime != "image/gif":
+                            attachment["lqip_url"] = _resolve_storage_lqip_url(
+                                attachment.get("url"), self.database_handler
+                            )
+                        else:
+                            attachment["lqip_url"] = None
+                    hydrated.append(attachment)
+                json_metadata_format["attachments"] = hydrated
             else:
                 json_metadata_format["attachments"] = []
 

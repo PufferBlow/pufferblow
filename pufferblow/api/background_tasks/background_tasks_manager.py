@@ -236,6 +236,40 @@ class BackgroundTasksManager(BackgroundTaskSchedulerMixin, BackgroundTaskAnalyti
                                 old_file_hash=file_hash,
                                 new_file_hash=new_file_hash,
                             )
+                            # Re-key the LQIP to the new hash. The
+                            # LQIP file's name on disk is
+                            # `lqip/{hash}.webp`, so an AVIF pass
+                            # that rewrites the hash would orphan
+                            # the placeholder otherwise. We rename
+                            # the disk file and update the DB row
+                            # to keep `?variant=lqip` working under
+                            # the new hash. Best-effort — if
+                            # anything here fails we just clear
+                            # lqip_path so the client falls back to
+                            # skeleton without a placeholder for
+                            # this one file.
+                            try:
+                                old_lqip_relative = f"{self.storage_manager.LQIP_DIRECTORY}/{file_hash}.webp"
+                                new_lqip_relative = f"{self.storage_manager.LQIP_DIRECTORY}/{new_file_hash}.webp"
+                                old_lqip_full = Path(self.storage_manager.backend.storage_path) / old_lqip_relative
+                                new_lqip_full = Path(self.storage_manager.backend.storage_path) / new_lqip_relative
+                                if old_lqip_full.exists():
+                                    new_lqip_full.parent.mkdir(parents=True, exist_ok=True)
+                                    old_lqip_full.rename(new_lqip_full)
+                                    self.database_handler.set_file_object_lqip_path(
+                                        file_hash=new_file_hash,
+                                        lqip_path=new_lqip_relative,
+                                    )
+                            except Exception as lqip_exc:
+                                logger.warning(
+                                    f"Failed to re-key LQIP for {new_file_hash}: {lqip_exc}"
+                                )
+                                try:
+                                    self.database_handler.set_file_object_lqip_path(
+                                        file_hash=new_file_hash, lqip_path=None
+                                    )
+                                except Exception:
+                                    pass
                             logger.info(
                                 f"Successfully optimized image: {file_path} -> {new_relative_path}"
                             )

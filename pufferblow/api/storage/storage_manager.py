@@ -277,6 +277,95 @@ class StorageManager:
         except Exception:
             pass  # Use defaults
 
+    # ── LQIP generation ─────────────────────────────────────────────
+    # Low-quality image placeholder: a tiny (~32px on the long edge)
+    # WebP-encoded version of an uploaded image, generated at upload
+    # time and stored next to the original under `lqip/{hash}.webp`.
+    # The client requests this URL first via `?variant=lqip` on the
+    # storage route, paints it blurred over the avatar / banner /
+    # attachment slot, and crossfades to the full image once it's
+    # finished downloading.
+    #
+    # Sized for "make something visible in 1 RTT" not for quality —
+    # the placeholder is intentionally so small (a few hundred bytes
+    # per file) that it fits in the same TCP window as the JSON
+    # response that referenced it, so the perceived first paint is
+    # bounded by the API request, not the storage CDN.
+    LQIP_MAX_DIMENSION = 32
+    LQIP_QUALITY = 60
+    LQIP_DIRECTORY = "lqip"
+
+    def _generate_lqip_bytes(self, source_bytes: bytes) -> bytes | None:
+        """Produce a tiny WebP placeholder for an image, or None on failure.
+
+        Best-effort: any decode / encode failure returns None so the
+        outer upload still succeeds — the client just falls back to
+        rendering the full image directly (skeleton until done).
+        """
+        try:
+            with Image.open(io.BytesIO(source_bytes)) as img:
+                # Flatten transparency onto white so the WebP encoder
+                # doesn't burn cycles on an alpha channel that will
+                # look indistinguishable at 32 px anyway.
+                if img.mode in ("RGBA", "LA"):
+                    background = Image.new("RGB", img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1])
+                    img = background
+                elif img.mode == "P":
+                    img = img.convert("RGB")
+                elif img.mode != "RGB":
+                    img = img.convert("RGB")
+
+                # Resize keeping aspect ratio. Banners are wide,
+                # avatars are square — `thumbnail` handles both.
+                img.thumbnail(
+                    (self.LQIP_MAX_DIMENSION, self.LQIP_MAX_DIMENSION),
+                    Image.Resampling.LANCZOS,
+                )
+
+                buf = io.BytesIO()
+                img.save(
+                    buf,
+                    format="WEBP",
+                    quality=self.LQIP_QUALITY,
+                    method=6,  # max compression effort (still <2ms at 32px)
+                )
+                return buf.getvalue()
+        except Exception as exc:
+            logger.warning(f"LQIP generation failed: {exc}")
+            return None
+
+    async def _generate_and_store_lqip(
+        self, file_hash: str, source_bytes: bytes
+    ) -> str | None:
+        """Generate, store, and register the LQIP for an uploaded image.
+
+        Returns the relative storage path of the LQIP file (suitable
+        for stashing on FileObjects.lqip_path) or None when generation
+        was skipped or failed.
+        """
+        lqip_bytes = self._generate_lqip_bytes(source_bytes)
+        if lqip_bytes is None:
+            return None
+
+        # Path is keyed by the ORIGINAL file's content hash, not a
+        # fresh UUID, so the LQIP can be located deterministically
+        # from the parent's hash without an extra DB read.
+        lqip_path = normalize_storage_relative_path(
+            f"{self.LQIP_DIRECTORY}/{file_hash}.webp"
+        )
+
+        # Note: we deliberately do NOT encrypt the LQIP. Encrypted
+        # storage exists to keep originals confidential at rest;
+        # placeholders are public-by-design and the encryption layer
+        # would just add latency without protecting anything new.
+        try:
+            await self.backend.upload_file(lqip_bytes, lqip_path)
+        except Exception as exc:
+            logger.warning(f"Failed to write LQIP for {file_hash}: {exc}")
+            return None
+        return lqip_path
+
     async def upload_file(
         self,
         file: UploadFile,
@@ -379,6 +468,29 @@ class StorageManager:
             reference_type=reference_type,
             reference_entity_id=user_id,
         )
+
+        # Generate the LQIP synchronously for any image upload. It's
+        # small + fast (~5-15ms even on slow boxes), so doing it
+        # inline guarantees the LQIP exists by the time the upload
+        # response returns — the client can render a placeholder on
+        # the very first paint after upload, without a follow-up
+        # poll. We DO NOT block on the AVIF optimization (still
+        # async below); only the placeholder is inlined.
+        if mime_type.startswith("image/") and mime_type != "image/gif":
+            lqip_path = await self._generate_and_store_lqip(file_hash, content)
+            if lqip_path:
+                try:
+                    self.database_handler.set_file_object_lqip_path(
+                        file_hash=file_hash, lqip_path=lqip_path
+                    )
+                except Exception as exc:
+                    # If the DB write fails the file is still on
+                    # disk; the next upload of the same hash will
+                    # retry. Don't crash the upload over a missing
+                    # placeholder pointer.
+                    logger.warning(
+                        f"Failed to record LQIP path for {file_hash}: {exc}"
+                    )
 
         # Trigger async image optimization for avatars, banners, and images
         if category in ("avatars", "banners", "images") and mime_type.startswith("image/"):

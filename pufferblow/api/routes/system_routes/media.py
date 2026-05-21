@@ -51,6 +51,14 @@ async def _upload_server_media(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # Resolve the LQIP URL for the just-uploaded asset so the
+    # client can paint the placeholder immediately without a
+    # follow-up `/system/info` fetch. Falls through to None for
+    # any failure — client treats it as "no LQIP available".
+    from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
+
+    lqip_url = _resolve_storage_lqip_url(storage_url, database_handler)
+
     if field_name == "avatar_url":
         database_handler.update_server_avatar_url(storage_url)
         log_activity(
@@ -64,6 +72,7 @@ async def _upload_server_media(
             "status_code": 201,
             "message": "Server avatar uploaded successfully",
             "avatar_url": storage_url,
+            "avatar_lqip_url": lqip_url,
         }
 
     database_handler.update_server_banner_url(storage_url)
@@ -78,6 +87,7 @@ async def _upload_server_media(
         "status_code": 201,
         "message": "Server banner uploaded successfully",
         "banner_url": storage_url,
+        "banner_lqip_url": lqip_url,
     }
 
 

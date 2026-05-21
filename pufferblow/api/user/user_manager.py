@@ -30,6 +30,49 @@ from pufferblow.api.user.status import normalize_user_status
 from pufferblow.api.utils.appearance import derive_accent_color
 
 
+# ── LQIP URL resolution ───────────────────────────────────────────────
+# Stored avatar / banner URLs look like `/storage/{file_hash}` (see
+# `storage_manager.upload_file`). To check whether a low-quality
+# placeholder exists for one of them we extract the hash, look up
+# `FileObjects.lqip_path`, and only emit a `?variant=lqip` URL when
+# the placeholder was actually generated and stored. Returning None
+# for "no LQIP" is intentional — the client treats a missing field
+# as "skeleton until full image loads".
+def _resolve_storage_lqip_url(
+    storage_url: str | None, database_handler: DatabaseHandler
+) -> str | None:
+    if not storage_url:
+        return None
+    # Only `/storage/{hash}`-form URLs can have an LQIP. External
+    # avatars (e.g. dicebear identicons baked into avatar_url) just
+    # pass through with no LQIP.
+    marker = "/storage/"
+    idx = storage_url.find(marker)
+    if idx == -1:
+        return None
+    # Hash is everything after `/storage/` up to a `?` or `#` if present.
+    tail = storage_url[idx + len(marker):]
+    for terminator in ("?", "#"):
+        cut = tail.find(terminator)
+        if cut != -1:
+            tail = tail[:cut]
+    file_hash = tail.strip("/").strip()
+    if not file_hash or len(file_hash) != 64:
+        return None
+    try:
+        file_obj = database_handler.get_file_object_by_hash(file_hash)
+    except Exception:
+        return None
+    if not file_obj or not getattr(file_obj, "lqip_path", None):
+        return None
+    # Keep the same base URL the client built `storage_url` from so
+    # we don't accidentally cross instance boundaries — just append
+    # the variant query string. Strip an existing query if there is
+    # one (won't happen with the current write path, but defensive).
+    base = storage_url.split("?", 1)[0]
+    return f"{base}?variant=lqip"
+
+
 class UserManager:
     """User manager class"""
 
@@ -343,6 +386,20 @@ class UserManager:
             logger.debug(f"Avatar URL for user {user_id}: {user_data['avatar_url']}")
         if user_data.get("banner_url"):
             logger.debug(f"Banner URL for user {user_id}: {user_data['banner_url']}")
+
+        # Resolve LQIP URLs for the stored avatar / banner so the
+        # client can paint a low-quality placeholder on the very
+        # first render. Stored URLs are `/storage/{hash}`; the LQIP
+        # variant is the same URL with `?variant=lqip` IFF the
+        # backend actually generated one. We never invent a LQIP URL
+        # for files that don't have one — the client treats a
+        # missing field as "skeleton + load full".
+        user_data["avatar_lqip_url"] = _resolve_storage_lqip_url(
+            user_data.get("avatar_url"), self.database_handler
+        )
+        user_data["banner_lqip_url"] = _resolve_storage_lqip_url(
+            user_data.get("banner_url"), self.database_handler
+        )
 
         # Cleaning up the dict - remove empty strings but keep None/full URLs
         element_to_pop = [data for data in user_data if user_data[data] == ""]

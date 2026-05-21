@@ -650,7 +650,14 @@ async def cleanup_orphaned_storage_files_route(
 
 @router.get("/storage/{file_hash}", status_code=200)
 async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Response:
-    """Serve a file by its SHA-256 content hash with proper caching headers."""
+    """Serve a file by its SHA-256 content hash with proper caching headers.
+
+    Honors a ``?variant=lqip`` query parameter: when present (and the
+    file has a generated low-quality image placeholder), serves that
+    tiny WebP derivative instead of the original. Used by the client's
+    ProgressiveImage component to paint something on the very first
+    render before the full file finishes downloading.
+    """
     if not is_sha256_hash(file_hash):
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
@@ -658,7 +665,14 @@ async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Resp
     if not file_object:
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
-    etag = f'"{file_hash}"'
+    # LQIP branch: serve the small placeholder when the caller asked
+    # for it and one exists for this hash. The placeholder gets a
+    # DIFFERENT ETag (suffix `-lqip`) so an intermediate cache can't
+    # confuse a full response for a placeholder of the same URL.
+    variant = request.query_params.get("variant", "").lower()
+    serving_lqip = variant == "lqip" and bool(getattr(file_object, "lqip_path", None))
+
+    etag = f'"{file_hash}-lqip"' if serving_lqip else f'"{file_hash}"'
 
     # Conditional request — return 304 if client already has this version
     if_none_match = request.headers.get("if-none-match", "").strip()
@@ -671,21 +685,38 @@ async def serve_file_by_hash(file_hash: str, request: Request) -> responses.Resp
             },
         )
 
+    target_relative = (
+        file_object.lqip_path if serving_lqip else file_object.file_path
+    )
     try:
-        normalized_path = normalize_storage_relative_path(file_object.file_path)
+        normalized_path = normalize_storage_relative_path(target_relative)
     except ValueError:
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
     try:
-        content = await api_initializer.storage_manager.read_file_content(normalized_path)
+        if serving_lqip:
+            # LQIPs are written unencrypted (see the LQIP generator
+            # in storage_manager), so we hit the backend directly
+            # rather than going through the SSE-aware read helper.
+            content = await api_initializer.storage_manager.backend.download_file(
+                normalized_path
+            )
+        else:
+            content = await api_initializer.storage_manager.read_file_content(
+                normalized_path
+            )
     except exceptions.HTTPException:
         raise
     except Exception as exc:
         logger.error(f"Failed to read hash-addressed file {file_hash}: {exc}")
         raise exceptions.HTTPException(status_code=404, detail="File not found")
 
-    # Use magic-detected MIME type stored at upload time, not guessed from filename
-    content_type = file_object.mime_type or "application/octet-stream"
+    # Use magic-detected MIME type stored at upload time for the
+    # original; LQIPs are always WebP regardless of the source type.
+    content_type = (
+        "image/webp" if serving_lqip
+        else (file_object.mime_type or "application/octet-stream")
+    )
     filename = Path(normalized_path).name
 
     cache_headers: dict[str, str] = {

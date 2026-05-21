@@ -19,6 +19,7 @@ from pufferblow.api.utils.appearance import (
     generate_shuffle_seed,
     is_valid_hex_color,
 )
+from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.core.bootstrap import api_initializer
 
@@ -189,6 +190,18 @@ def _build_server_info_payload(state: ServerState) -> dict:
         "creation_date": created_at.isoformat() if created_at else None,
         "avatar_url": getattr(server, "avatar_url", None),
         "banner_url": getattr(server, "banner_url", None),
+        # LQIP variants of the same URLs, populated only when the
+        # storage layer actually generated a placeholder (see
+        # `_resolve_storage_lqip_url` in user_manager). The client
+        # falls back to skeleton + full when these are absent.
+        "avatar_lqip_url": _resolve_storage_lqip_url(
+            getattr(server, "avatar_url", None),
+            api_initializer.database_handler,
+        ),
+        "banner_lqip_url": _resolve_storage_lqip_url(
+            getattr(server, "banner_url", None),
+            api_initializer.database_handler,
+        ),
         "welcome_message": getattr(server, "welcome_message", None),
         "members_count": members_count,
         "online_members": online_members,

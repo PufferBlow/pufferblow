@@ -51,6 +51,13 @@ class FileObjects(Base):
     )
     verification_status: Mapped[str] = mapped_column(String(50), default="unverified")
     integrity_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Low-quality image placeholder. Relative path to a tiny (~32px,
+    # WebP-encoded) derivative of the original used by the client to
+    # paint something on screen instantly, before the full image has
+    # finished downloading. NULL means either "no LQIP for this file"
+    # (non-image, or not yet generated) or "the derivative was
+    # cleaned up". Served via `/storage/{file_hash}?variant=lqip`.
+    lqip_path: Mapped[str | None] = mapped_column(String, nullable=True)
 
     def __repr__(self) -> str:
         """Repr special method."""
@@ -61,6 +68,7 @@ class FileObjects(Base):
             f"file_size={self.file_size!r}, "
             f"mime_type={self.mime_type!r}, "
             f"verification_status={self.verification_status!r}, "
+            f"lqip_path={self.lqip_path!r}, "
             f"created_at={self.created_at!r})"
         )
 

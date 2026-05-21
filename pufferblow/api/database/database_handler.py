@@ -245,6 +245,23 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             )
             raise
 
+        # Add lqip_path to file_objects for the LQIP (low-quality
+        # image placeholder) pipeline. SQLite test path skips the
+        # file_objects table entirely (see postgresql_only_tables
+        # above), so this is a Postgres-only no-op there. On
+        # production Postgres an existing fleet upgrading to LQIP
+        # gets the column added in place; freshly-set-up instances
+        # already have it via create_all.
+        try:
+            self._apply_lqip_column_migration()
+        except Exception as exc:
+            # Best-effort: a missing lqip_path column just means
+            # clients won't get a placeholder URL until the next
+            # upload regenerates the row. Don't block boot.
+            logger.warning(
+                "LQIP column migration skipped due to error: {err}", err=str(exc)
+            )
+
         # Backfill appearance defaults for any rows that pre-date the
         # appearance feature. Idempotent — only touches rows where the
         # derived columns are still NULL. Runs on both SQLite (tests /
@@ -425,6 +442,53 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 "Blocked IP counter columns added to live schema: {cols}",
                 cols=", ".join(added),
             )
+
+    def _apply_lqip_column_migration(self) -> None:
+        """Add ``lqip_path`` to file_objects if missing.
+
+        New column on the file-objects table that records the
+        relative path to a low-quality image placeholder (LQIP)
+        derivative produced at upload time. NULL is fine — it just
+        means the file either isn't an image, or LQIP generation
+        was skipped. A fleet upgrading mid-flight without this
+        column would have every JSON profile response missing the
+        ``avatar_lqip_url`` / ``banner_lqip_url`` fields, but
+        nothing would crash; this migration fixes it in place.
+
+        SQLite tests don't materialize ``file_objects`` at all (see
+        ``postgresql_only_tables``), so on the test path we silently
+        skip when the table doesn't exist.
+
+        Idempotent: a column that already exists is skipped, so
+        this is safe to run on every boot. Works on both Postgres
+        and SQLite — both dialects accept ``ALTER TABLE ADD COLUMN``.
+        """
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.database_engine)
+        try:
+            existing = {col["name"] for col in inspector.get_columns("file_objects")}
+        except Exception as exc:
+            # Table not present (test path) — nothing to migrate.
+            logger.debug(
+                "file_objects not present, skipping LQIP migration: {err}",
+                err=str(exc),
+            )
+            return
+
+        if "lqip_path" in existing:
+            return
+
+        ddl = "ALTER TABLE file_objects ADD COLUMN lqip_path VARCHAR"
+        try:
+            with self.database_engine.begin() as conn:
+                conn.execute(text(ddl))
+        except Exception as exc:
+            logger.error(
+                "Failed to add column file_objects.lqip_path: {err}", err=str(exc)
+            )
+            raise
+        logger.info("LQIP column added to file_objects.")
 
     def _apply_server_id_domain_migration(self) -> None:
         """Rewrite the legacy random-UUID ``server_id`` to the host:port.
