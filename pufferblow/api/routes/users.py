@@ -36,7 +36,22 @@ async def users_route():
 
 @router.post("/signup", status_code=201)
 async def signup_new_user(request: SignupRequest):
-    """Signup new user."""
+    """Create a new account on this instance.
+
+    Pufferblow accounts are LOCAL to the instance they're created
+    on — there's no central directory. The username is unique
+    within this instance and case-insensitive at the comparison
+    layer. Password rules are enforced by the home server's
+    configuration.
+
+    On success returns the full session-token pair
+    (`auth_token` + `refresh_token`) so the caller can sign in
+    immediately without a second round-trip — the same shape
+    `/signin` returns.
+
+    Returns 409 if the username already exists, 503 if the
+    administrator hasn't run `pufferblow setup` yet.
+    """
     if api_initializer.database_handler.get_server() is None:
         raise exceptions.HTTPException(
             status_code=503,
@@ -93,7 +108,21 @@ async def signup_new_user(request: SignupRequest):
 
 @router.get("/signin", status_code=200)
 async def signin_user(query: SigninQuery = Depends()):
-    """Signin user."""
+    """Sign in to this instance with a username + password.
+
+    Accepts the credentials as query parameters — historical
+    shape that predates the body convention. Clients should treat
+    the password as sensitive (do not log the full URL).
+
+    Returns the same session-token pair as `/signup`. Failure
+    modes:
+
+      - 401 — wrong password.
+      - 403 — account is banned, OR the account exists but
+        belongs to a different instance and this instance refuses
+        to issue tokens for it.
+      - 404 — username doesn't exist on this instance.
+    """
     if not api_initializer.user_manager.check_username(username=query.username):
         raise exceptions.HTTPException(
             status_code=404,
@@ -217,7 +246,20 @@ async def upload_user_avatar_route(
     auth_token: str = Form(..., description="User's authentication token"),
     file: UploadFile = Form(..., description="Avatar image file"),
 ):
-    """Upload user avatar route."""
+    """Upload a new avatar for the authenticated user.
+
+    Multipart form upload. The image is deduped by content hash
+    (so re-uploading the same avatar doesn't double-store), a
+    32 px WebP LQIP is generated synchronously, and AVIF
+    optimization is queued for the background. The response
+    carries both `avatar_url` (full image) and `avatar_lqip_url`
+    (low-quality placeholder) so the client can render the
+    LQIP-blur preview on the next paint without a follow-up
+    profile fetch.
+
+    Size + extension limits come from the instance's
+    `max_image_size_mb` / `allowed_images_extensions` settings.
+    """
     from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 
     user_id = get_current_user(auth_token)

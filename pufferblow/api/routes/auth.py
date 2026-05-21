@@ -14,7 +14,19 @@ router = APIRouter(prefix="/api/v1/auth/decentralized")
 
 @router.post("/challenge", status_code=200)
 async def issue_decentralized_challenge_route(request: DecentralizedChallengeRequest):
-    """Issue decentralized challenge route."""
+    """Issue a node-auth challenge.
+
+    First step of the decentralized handshake used by SDK bots and
+    server-to-server integrations that don't carry a human password.
+    The instance returns an opaque challenge + nonce; the node signs
+    the nonce with its registered public key and returns it via
+    `/verify`. See `docs/developer/api-reference.md#decentralized-node-to-node-auth`
+    for the full flow.
+
+    Requires an existing `auth_token` (the human-flavored access
+    token) so the node can prove identity before being granted a
+    node session.
+    """
     user_id = get_current_user(request.auth_token)
     result = api_initializer.decentralized_auth_manager.issue_challenge(
         user_id=user_id,
@@ -25,7 +37,15 @@ async def issue_decentralized_challenge_route(request: DecentralizedChallengeReq
 
 @router.post("/verify", status_code=200)
 async def verify_decentralized_challenge_route(request: DecentralizedVerifyRequest):
-    """Verify decentralized challenge route."""
+    """Verify a signed challenge and issue a node session token.
+
+    Second step of the decentralized handshake. The node signs the
+    nonce from `/challenge` with the private key matching its
+    registered `node_public_key`; the instance verifies the
+    signature and returns a `session_token` the node can use in
+    place of an `auth_token`. Returns 401 if the signature doesn't
+    verify, 410 if the challenge expired before the node responded.
+    """
     result = api_initializer.decentralized_auth_manager.verify_challenge_and_issue_session(
         challenge_id=request.challenge_id,
         node_public_key=request.node_public_key,
