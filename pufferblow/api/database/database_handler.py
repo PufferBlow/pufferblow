@@ -3441,10 +3441,21 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.add(message)
             session.commit()
 
-            # Populate the ranked-search tsvector from the plaintext
-            # the caller stashed on `raw_message`. Postgres-only.
-            search_text = getattr(message, "raw_message", None)
-            if not is_sqlite and search_text:
+            # Populate the ranked-search tsvector from the searchable
+            # text (plaintext body + attachment filenames; built by
+            # `MessagesManager.build_search_index_text`). Postgres-only.
+            #
+            # For rows with NO indexable text (no body AND no named
+            # attachments — e.g. an empty body with a single unnamed
+            # voice clip) we still write an EMPTY tsvector instead of
+            # leaving the column NULL. That distinguishes "indexed
+            # and produced nothing" from "never indexed", so the
+            # `migrate --backfill-search` SELECT
+            # (`WHERE search_tokens IS NULL`) doesn't keep re-picking
+            # the same un-indexable row forever — that was the cause
+            # of the backfill hang on attachment-only messages.
+            if not is_sqlite:
+                search_text = getattr(message, "raw_message", None) or ""
                 try:
                     session.execute(
                         text(

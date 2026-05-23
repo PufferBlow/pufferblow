@@ -163,10 +163,19 @@ def _backfill_search_tokens(batch_size: int) -> None:
     """Walk historic messages and populate their `search_tokens` tsvector.
 
     Streams `messages.message_id` in batches, decrypts each plaintext via
-    `MessagesManager.decrypt_message`, and issues a single transactional
+    `MessagesManager.decrypt_message`, builds the searchable text via
+    `MessagesManager.build_search_index_text` (so attachment-only rows
+    are indexed by filename, matching the live-write path), and issues
+    a single transactional batched
     `UPDATE … SET search_tokens = to_tsvector('simple', :t) WHERE
-    message_id = :id` per row. Rows whose tokens are already populated
-    are skipped at SQL filter time so the command is cheap to re-run.
+    message_id = :id`. Rows whose tokens are already populated are
+    skipped at SQL filter time so the command is cheap to re-run.
+
+    Even rows that produce NO searchable text get a write — an empty
+    tsvector via `to_tsvector('simple', '')`. That's the indexed-but-
+    empty sentinel; without it the next backfill SELECT would keep
+    returning the same un-indexable row forever (which is the hang
+    you'll see on attachment-only messages before this fix).
 
     No-op on SQLite (the column type degrades to plain String and the
     GIN index isn't present anyway — search on SQLite uses the
@@ -176,6 +185,7 @@ def _backfill_search_tokens(batch_size: int) -> None:
 
     from sqlalchemy import text
 
+    from pufferblow.api.messages.messages_manager import build_search_index_text
     from pufferblow.core.bootstrap import api_initializer
 
     handler = api_initializer.database_handler
@@ -226,11 +236,20 @@ def _backfill_search_tokens(batch_size: int) -> None:
             b=batch_size,
         )
 
+        # Watchdog state. The SELECT predicate is
+        # `WHERE search_tokens IS NULL`, so a batch that fails to
+        # transition any row off NULL guarantees the next SELECT will
+        # return the same rows. Detect that with a per-iteration "did
+        # `total_done + total_failed + sentinel_writes` increase?" check
+        # and bail loudly — better one log line than a tail-spinning
+        # progress logger that fills the disk.
+        sentinel_writes = 0  # rows with no indexable text → empty tsvector
+
         while True:
             try:
                 rows = connection.execute(
                     text(
-                        "SELECT message_id, sender_id, hashed_message "
+                        "SELECT message_id, sender_id, hashed_message, attachments "
                         "FROM messages "
                         "WHERE search_tokens IS NULL "
                         "  AND hashed_message IS NOT NULL "
@@ -247,9 +266,19 @@ def _backfill_search_tokens(batch_size: int) -> None:
             if not rows:
                 break
 
+            progress_at_iteration_start = total_done + total_failed + sentinel_writes
+
+            # Two update lists per batch — rows with content get their
+            # actual tokens, rows with neither text nor named attachments
+            # get the indexed-but-empty sentinel so they leave the
+            # NULL set. Two separate executemany calls is simpler than
+            # parameterizing both into a single statement, and the
+            # second list is usually small.
             updates: list[dict] = []
+            sentinels: list[dict] = []
+
             for row in rows:
-                message_id, sender_id, hashed_message = row
+                message_id, sender_id, hashed_message, attachments = row
                 try:
                     plaintext = messages_manager.decrypt_message(
                         user_id=str(sender_id),
@@ -259,10 +288,11 @@ def _backfill_search_tokens(batch_size: int) -> None:
                 except Exception as exc:
                     # An undecryptable row is rare but not catastrophic
                     # — usually it means the sender's key rotation
-                    # raced a federated rewrite. Leave the token NULL
-                    # so the next backfill skips it cleanly, and move
-                    # on.
+                    # raced a federated rewrite. Mark it as a sentinel
+                    # write (not a real index entry) so the row exits
+                    # the NULL set and the next backfill skips it.
                     total_failed += 1
+                    sentinels.append({"id": message_id})
                     logger.warning(
                         "Backfill skipped message_id={mid}: {err}",
                         mid=message_id,
@@ -270,13 +300,23 @@ def _backfill_search_tokens(batch_size: int) -> None:
                     )
                     continue
 
-                normalized = (plaintext or "").strip()
-                if not normalized:
-                    continue
-                updates.append({"t": normalized, "id": message_id})
+                # Re-use the same builder the write path uses so a row
+                # that originally had only an attachment still gets its
+                # filename indexed at backfill time — without this,
+                # attachment-only messages produce an empty plaintext,
+                # never get a search_tokens write, and the SELECT keeps
+                # re-returning them forever. That was the hang.
+                indexed_text = build_search_index_text(
+                    message=plaintext,
+                    attachments=attachments if isinstance(attachments, list) else None,
+                )
+                if indexed_text:
+                    updates.append({"t": indexed_text, "id": message_id})
+                else:
+                    sentinels.append({"id": message_id})
 
-            if updates:
-                try:
+            try:
+                if updates:
                     connection.execute(
                         text(
                             "UPDATE messages "
@@ -285,42 +325,62 @@ def _backfill_search_tokens(batch_size: int) -> None:
                         ),
                         updates,
                     )
+                if sentinels:
+                    # Empty tsvector — distinguishes "indexed and
+                    # produced nothing" from "never indexed". Cheap to
+                    # store; key to the SELECT exiting these rows.
+                    connection.execute(
+                        text(
+                            "UPDATE messages "
+                            "SET search_tokens = to_tsvector('simple', '') "
+                            "WHERE message_id = :id"
+                        ),
+                        sentinels,
+                    )
+                if updates or sentinels:
                     connection.commit()
-                except Exception as exc:
-                    # Roll back the autobegun transaction so the
-                    # connection is reusable; bail loudly so the
-                    # operator notices.
-                    try:
-                        connection.rollback()
-                    except Exception:
-                        pass
-                    _ui_error(f"Backfill UPDATE failed mid-batch: {exc}")
-                    raise SystemExit(1)
+            except Exception as exc:
+                # Roll back the autobegun transaction so the
+                # connection is reusable; bail loudly so the
+                # operator notices.
+                try:
+                    connection.rollback()
+                except Exception:
+                    pass
+                _ui_error(f"Backfill UPDATE failed mid-batch: {exc}")
+                raise SystemExit(1)
 
             total_done += len(updates)
+            sentinel_writes += len(sentinels)
             logger.info(
-                "Search backfill progress: {done}/{total} ({failed} skipped)",
+                "Search backfill progress: {done}/{total} "
+                "(+{empties} indexed-empty, {failed} undecryptable)",
                 done=total_done,
                 total=pending,
+                empties=sentinel_writes,
                 failed=total_failed,
             )
 
-            # Safety: if every row in this batch failed to decrypt or
-            # produced no tokens AND the SELECT keeps returning the
-            # same rows (because their `search_tokens` is still NULL),
-            # we'd loop forever. Break out when we made no forward
-            # progress AND the batch was full.
-            if not updates and len(rows) == batch_size:
-                logger.warning(
-                    "Backfill stalled: a full batch of {n} rows produced no "
-                    "updates (all decrypt-fails or empty plaintexts). "
+            progress_at_iteration_end = total_done + total_failed + sentinel_writes
+            if progress_at_iteration_end == progress_at_iteration_start:
+                # Pathological: the batch fetched rows but produced
+                # zero forward progress (no updates, no sentinels, no
+                # decryption failures). This shouldn't be reachable
+                # any more — every row in `rows` lands in exactly one
+                # of those three categories — but bail loudly rather
+                # than spin if a future code change reintroduces a
+                # skip path.
+                logger.error(
+                    "Backfill stalled: {n} rows fetched but no progress made. "
                     "Stopping to avoid an infinite loop.",
                     n=len(rows),
                 )
                 break
 
     logger.success(
-        "Search backfill complete: {done} indexed, {failed} skipped.",
+        "Search backfill complete: {done} indexed, {empties} indexed-empty "
+        "(attachment-only / blank), {failed} undecryptable.",
         done=total_done,
+        empties=sentinel_writes,
         failed=total_failed,
     )

@@ -15,6 +15,48 @@ from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.user.user_manager import UserManager
 
 
+def build_search_index_text(
+    message: str | None,
+    attachments: list[dict] | None,
+) -> str:
+    """Compose the searchable text for a message row.
+
+    Pure function — same input always yields the same output, no
+    state. Used by both the live write path
+    (`MessagesManager._build_message_record`) and the
+    `migrate --backfill-search` command so the two never drift.
+
+    Rules:
+      * Plaintext message body comes first when present.
+      * Attachment filenames are appended (space-separated). This is
+        why "find that PDF I sent" works for attachment-only messages
+        — the filename itself is indexed even when the text is empty.
+      * Whitespace is collapsed and trimmed; the function returns
+        an empty string for a message with neither text nor named
+        attachments. The save path treats an empty result as
+        "indexed but empty" (sentinel empty `tsvector`) — see the
+        comment in `DatabaseHandler.save_message`.
+
+    Filenames are taken verbatim — `to_tsvector('simple', ...)` does
+    the lexeme split on Postgres side and handles things like
+    ``"design-spec_v3.pdf"`` as four tokens (design, spec, v3, pdf).
+    """
+    parts: list[str] = []
+    if message:
+        text = message.strip()
+        if text:
+            parts.append(text)
+    for attachment in attachments or []:
+        if not isinstance(attachment, dict):
+            continue
+        filename = attachment.get("filename")
+        if isinstance(filename, str) and filename.strip():
+            parts.append(filename.strip())
+    # Single space collapse — multiple filenames join cleanly and a
+    # trailing-only space message doesn't leak into the index.
+    return " ".join(parts).strip()
+
+
 def _summarize_reactions(
     reactions: list, viewer_user_id: str | None
 ) -> list[dict]:
@@ -529,15 +571,25 @@ class MessagesManager:
             user_id=user_id,
             message_id=message_metadata.message_id,
         )
-        # Stash the plaintext as a transient (non-persisted) attribute so
-        # `DatabaseHandler.save_message` can apply Postgres' `to_tsvector`
-        # in the INSERT path. We cannot assign a raw string to the
-        # `search_tokens` TSVECTOR column via the ORM — the wire format
-        # for a tsvector literal isn't just plain text, it's
-        # `'token':position` — so the cast has to happen server-side via
-        # `to_tsvector('simple', ?)`. SQLAlchemy keeps `__allow_unmapped__
-        # = True` (see tables/messages.py) which permits stashing this.
-        message_metadata.raw_message = (message or "").strip() or None
+        # Stash the searchable text as a transient (non-persisted)
+        # attribute so `DatabaseHandler.save_message` can apply Postgres'
+        # `to_tsvector` in the INSERT path. We cannot assign a raw
+        # string to the `search_tokens` TSVECTOR column via the ORM —
+        # the wire format for a tsvector literal isn't just plain text
+        # (it's `'token':position`) — so the cast has to happen
+        # server-side via `to_tsvector('simple', ?)`. SQLAlchemy keeps
+        # `__allow_unmapped__ = True` (see tables/messages.py) which
+        # permits stashing this.
+        #
+        # `build_search_index_text` includes attachment filenames in
+        # the indexed text so attachment-only messages are still
+        # findable ("find that PDF I sent"). It returns "" when the
+        # message has neither text nor named attachments, and the
+        # save path writes an empty tsvector sentinel for that case
+        # so the backfill never re-picks the row.
+        message_metadata.raw_message = build_search_index_text(
+            message=message, attachments=attachments
+        )
 
         return message_metadata, encryption_key
 
