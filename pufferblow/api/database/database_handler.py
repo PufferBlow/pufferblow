@@ -33,6 +33,7 @@ from pufferblow.api.database.tables.decentralized_sessions import (
 )
 from pufferblow.api.database.tables.declarative_base import Base
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
+from pufferblow.api.database.tables.friendships import Friendships
 from pufferblow.api.database.tables.instance_runtime_config import InstanceRuntimeConfig
 from pufferblow.api.database.tables.keys import Keys
 from pufferblow.api.database.tables.message_reactions import MessageReactions

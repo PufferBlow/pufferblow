@@ -8,6 +8,7 @@ from pufferblow.api.routes.admin import (
 from pufferblow.api.routes.auth import router as decentralized_auth_router
 from pufferblow.api.routes.channels import router as channels_router
 from pufferblow.api.routes.core import router as core_router
+from pufferblow.api.routes.friends import router as friends_router
 from pufferblow.api.routes.internal_voice import router as internal_voice_router
 from pufferblow.api.routes.messages import router as messages_router
 from pufferblow.api.routes.moderation import router as moderation_router
@@ -37,6 +38,7 @@ def register_routers(api: FastAPI) -> None:
     api.include_router(messages_router, tags=["messages"])
     api.include_router(moderation_router, tags=["moderation"])
     api.include_router(notifications_router, tags=["notifications"])
+    api.include_router(friends_router, tags=["friends"])
     api.include_router(storage_router, tags=["storage"])
     api.include_router(admin_router, tags=["admin"])
     api.include_router(system_router, tags=["system"])
