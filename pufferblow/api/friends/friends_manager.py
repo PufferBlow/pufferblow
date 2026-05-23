@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy import and_, or_, select
 
+from pufferblow.api.database.tables.friend_request_blocks import FriendRequestBlocks
 from pufferblow.api.database.tables.friendships import Friendships
 
 if TYPE_CHECKING:
@@ -121,12 +122,36 @@ class FriendsManager:
         unchanged — the operation is idempotent and the caller can
         check `.status` to know whether anything actually happened.
 
-        Raises `FriendsError(400)` on self-friend or invalid id.
+        Raises:
+          * `FriendsError(400)` on self-friend or invalid id.
+          * `FriendsError(403)` when the addressee has blocked
+            incoming requests from the requester. We do NOT reveal
+            "you are blocked" to keep the failure indistinguishable
+            from other server-side rejections; the wire message
+            simply says the request was rejected by the recipient.
         """
         if str(requester_id) == str(addressee_id):
             raise FriendsError("You can't friend yourself.", status_code=400)
 
         with self.database_handler.database_session() as session:
+            # Block check — the addressee may have blocked incoming
+            # requests from this requester. Single point lookup on
+            # the composite PK; cheap on the hot path.
+            blocked_row = session.execute(
+                select(FriendRequestBlocks).where(
+                    FriendRequestBlocks.blocker_id
+                    == self._normalize_user_id(addressee_id),
+                    FriendRequestBlocks.blocked_id
+                    == self._normalize_user_id(requester_id),
+                )
+            ).scalar_one_or_none()
+            if blocked_row is not None:
+                # Deliberately vague — see docstring above.
+                raise FriendsError(
+                    "This user is not accepting friend requests.",
+                    status_code=403,
+                )
+
             existing = self._find_pair(session, requester_id, addressee_id)
             if existing is not None:
                 # Already on the graph in some form. Return as-is —
@@ -325,3 +350,106 @@ class FriendsManager:
                 for row in outgoing
             ],
         }
+
+    # ── Block list ───────────────────────────────────────────────
+
+    def block_user(
+        self, *, blocker_id: str, blocked_id: str
+    ) -> FriendRequestBlocks:
+        """Block incoming friend requests from `blocked_id` toward `blocker_id`.
+
+        Side effects on existing graph state:
+          * Any pending friend request from `blocked_id` → `blocker_id`
+            is DELETED in the same transaction so the blocker isn't
+            left with a stale inbox row.
+          * An ACCEPTED friendship is left intact — see the rationale
+            in the table docstring. To end the friendship the user
+            calls `unfriend` separately.
+
+        Idempotent — re-blocking returns the existing row unchanged.
+        """
+        if str(blocker_id) == str(blocked_id):
+            raise FriendsError(
+                "You can't block yourself.", status_code=400
+            )
+
+        blocker = self._normalize_user_id(blocker_id)
+        blocked = self._normalize_user_id(blocked_id)
+        with self.database_handler.database_session() as session:
+            existing = session.execute(
+                select(FriendRequestBlocks).where(
+                    FriendRequestBlocks.blocker_id == blocker,
+                    FriendRequestBlocks.blocked_id == blocked,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return existing
+
+            row = FriendRequestBlocks(
+                blocker_id=blocker,
+                blocked_id=blocked,
+            )
+            session.add(row)
+
+            # Delete any pending request from blocked → blocker so the
+            # blocker's inbox reflects the block immediately. Pending
+            # requests in the OTHER direction (blocker → blocked) are
+            # the blocker's own outgoing — left alone; they can
+            # cancel via the normal delete path if they want to.
+            pending = session.execute(
+                select(Friendships).where(
+                    Friendships.requester_id == blocked,
+                    Friendships.addressee_id == blocker,
+                    Friendships.status == STATUS_PENDING,
+                )
+            ).scalar_one_or_none()
+            if pending is not None:
+                session.delete(pending)
+
+            session.commit()
+            session.refresh(row)
+            logger.info(
+                "Friend-request block: blocker={a} blocked={b}",
+                a=blocker_id,
+                b=blocked_id,
+            )
+            return row
+
+    def unblock_user(
+        self, *, blocker_id: str, blocked_id: str
+    ) -> bool:
+        """Remove a friend-request block.
+
+        Returns True iff a row was deleted; False if there was no
+        block to remove (idempotent).
+        """
+        with self.database_handler.database_session() as session:
+            row = session.execute(
+                select(FriendRequestBlocks).where(
+                    FriendRequestBlocks.blocker_id
+                    == self._normalize_user_id(blocker_id),
+                    FriendRequestBlocks.blocked_id
+                    == self._normalize_user_id(blocked_id),
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            logger.info(
+                "Friend-request unblock: blocker={a} blocked={b}",
+                a=blocker_id,
+                b=blocked_id,
+            )
+            return True
+
+    def list_blocks(self, *, blocker_id: str) -> list[dict]:
+        """Return every user the actor has blocked from sending requests."""
+        normalized = self._normalize_user_id(blocker_id)
+        with self.database_handler.database_session() as session:
+            rows = session.execute(
+                select(FriendRequestBlocks).where(
+                    FriendRequestBlocks.blocker_id == normalized
+                )
+            ).scalars().all()
+        return [row.to_dict() for row in rows]

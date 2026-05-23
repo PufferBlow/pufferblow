@@ -164,3 +164,69 @@ async def unfriend_route(other_user_id: str, auth_token: str):
         "status_code": 200,
         "removed": bool(removed),
     }
+
+
+# ─────────────────────────────────────────────
+# Friend-request blocks
+# ─────────────────────────────────────────────
+
+
+@router.post("/blocks", status_code=201)
+async def block_friend_requests_route(
+    auth_token: str,
+    target_user_id: str = Body(..., embed=True),
+):
+    """Block incoming friend requests from `target_user_id`.
+
+    Side effects: any pending request from `target_user_id` →
+    actor is deleted in the same transaction so the actor's inbox
+    reflects the block immediately. Accepted friendships are left
+    intact — the user can call `DELETE /friends/{id}` separately
+    if they want to also end the friendship.
+    """
+    actor_user_id = get_current_user(auth_token)
+    if not api_initializer.user_manager.check_user(user_id=target_user_id):
+        raise exceptions.HTTPException(
+            status_code=404, detail="Target user not found."
+        )
+    try:
+        row = api_initializer.friends_manager.block_user(
+            blocker_id=actor_user_id, blocked_id=target_user_id
+        )
+    except FriendsError as exc:
+        _raise_from_friends_error(exc)
+    return {
+        "status_code": 201,
+        "block": row.to_dict(),
+    }
+
+
+@router.delete("/blocks/{blocked_user_id}", status_code=200)
+async def unblock_friend_requests_route(
+    blocked_user_id: str, auth_token: str
+):
+    """Lift a friend-request block. Idempotent."""
+    actor_user_id = get_current_user(auth_token)
+    removed = api_initializer.friends_manager.unblock_user(
+        blocker_id=actor_user_id, blocked_id=blocked_user_id
+    )
+    return {
+        "status_code": 200,
+        "removed": bool(removed),
+    }
+
+
+@router.get("/blocks", status_code=200)
+async def list_friend_request_blocks_route(auth_token: str):
+    """Return every user the actor has blocked from sending requests.
+
+    Used by the client's Blocked tab to render the unblock list.
+    """
+    actor_user_id = get_current_user(auth_token)
+    blocks = api_initializer.friends_manager.list_blocks(
+        blocker_id=actor_user_id
+    )
+    return {
+        "status_code": 200,
+        "blocks": blocks,
+    }
