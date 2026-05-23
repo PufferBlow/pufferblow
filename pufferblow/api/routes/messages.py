@@ -98,20 +98,34 @@ async def channel_load_messages(
     channel_id: str,
     page: int | None = 1,
     messages_per_page: int | None = 20,
+    before_cursor: str | None = None,
 ):
-    """
-    Load messages from a channel with pagination.
+    """Load messages from a channel.
+
+    Two modes share this endpoint:
+
+    * `before_cursor=<token>` — keyset pagination, O(log N + limit)
+      regardless of channel size. Clients should prefer this for
+      anything new. The response carries `next_cursor` which you pass
+      back as `before_cursor` to fetch the next page (older messages).
+      `next_cursor=None` means you reached the start of history.
+
+    * `page=N` (legacy) — translated internally into a keyset walk so
+      Postgres never sees a real `OFFSET N`. Capped depth — past
+      `DatabaseHandler.MAX_OFFSET_PAGINATION_ROWS` we return 400 and
+      ask the client to migrate to cursor pagination.
 
     Args:
-        auth_token: User's authentication token
-        channel_id: Channel ID
-        page: Page number (default: 1)
-        messages_per_page: Messages per page (default: 20, max: 50)
+        auth_token: User's authentication token.
+        channel_id: Channel ID.
+        page: Page number (default: 1). Ignored when `before_cursor` is set.
+        messages_per_page: Page / cursor batch size (default: 20, max: 50).
+        before_cursor: Opaque keyset cursor from a previous response.
 
     Returns:
-        200 OK: List of messages
-        400 BAD REQUEST: Invalid parameters
-        404 NOT FOUND: Channel not found or no access
+        200 OK: List of messages (+ `next_cursor` when cursor mode).
+        400 BAD REQUEST: Invalid parameters or offset depth exceeded.
+        404 NOT FOUND: Channel not found or no access.
     """
     # Check max messages per page limit
     if messages_per_page > api_initializer.config.MAX_MESSAGES_PER_PAGE:
@@ -125,13 +139,24 @@ async def channel_load_messages(
     # Check channel access (handles private channels)
     check_channel_access(user_id, channel_id)
 
-    # Load messages
-    messages = api_initializer.messages_manager.load_messages(
-        channel_id=channel_id,
-        messages_per_page=messages_per_page,
-        page=page,
-        viewer_user_id=user_id,
-    )
+    next_cursor: str | None = None
+    try:
+        result = api_initializer.messages_manager.load_messages(
+            channel_id=channel_id,
+            messages_per_page=messages_per_page,
+            page=page,
+            viewer_user_id=user_id,
+            before_cursor=before_cursor,
+        )
+    except ValueError as exc:
+        # Raised by DatabaseHandler.fetch_channel_messages when the
+        # caller pushes legacy offset pagination past its safe depth.
+        raise exceptions.HTTPException(status_code=400, detail=str(exc))
+
+    if isinstance(result, tuple):
+        messages, next_cursor = result
+    else:
+        messages = result
 
     # Convert raw messages to Pydantic MessageData models
     message_data_list = []
@@ -159,7 +184,11 @@ async def channel_load_messages(
             )
         )
 
-    return LoadMessagesResponse(status_code=200, messages=message_data_list)
+    return LoadMessagesResponse(
+        status_code=200,
+        messages=message_data_list,
+        next_cursor=next_cursor,
+    )
 
 
 @router.get("/search", status_code=200, response_model=SearchMessagesResponse)

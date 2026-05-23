@@ -323,10 +323,18 @@ class LoadMessagesQuery(BaseModel):
 
 
 class LoadMessagesResponse(BaseModel):
-    """Pydantic model for load messages API response"""
+    """Pydantic model for load messages API response.
+
+    `next_cursor` is populated when the request used the keyset
+    pagination path (`before_cursor` query param). It is the opaque
+    handle the client should send back as `before_cursor` to fetch
+    the next page of older messages. `None` means "this is the last
+    page" or "this request didn't use cursor pagination".
+    """
 
     status_code: int
     messages: list[MessageData]
+    next_cursor: str | None = None
 
 
 class SearchMessagesResponse(BaseModel):

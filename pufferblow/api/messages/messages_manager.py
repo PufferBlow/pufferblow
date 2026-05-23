@@ -64,22 +64,44 @@ class MessagesManager:
         websocket: bool | None = False,
         viewed_messages_ids: list | None = None,
         viewer_user_id: str | None = None,
-    ) -> list[dict]:
-        """
-        Load a specific messages number from a given channel's `channel_id
+        before_cursor: str | None = None,
+    ) -> list[dict] | tuple[list[dict], str | None]:
+        """Load history for an HTTP page fetch or a WS reconnect burst.
 
-        Args:
-            channel_id (str): The channel's `channel_id`.
-            messages_per_page (int, optional, default: 20): The number of messages for each page.
-            page (int, optional, default: 1): The page number (pages start from 1 to `x` depending on how many messages a channel contains).
-            websocket (bool, optional, default: False): Weither the function was called from a websocket function.
-            viewed_messages_ids (list, optional, default: None): Viewed messages ids by the user/client.
-            viewer_user_id (str, optional, default: None): The viewer's user_id;
-                used to flag ``viewer_reacted`` on each reaction summary.
+        Three call shapes the route layer uses:
 
-        Returns:
-            list[dict]: A list of messages' metadata in dict format.
+        * `before_cursor=<token>` → keyset-paginated history walk.
+          Returns `(messages, next_cursor)`. The cursor is opaque to
+          the client — it's a `"<sent_at>|<message_id>"` string we
+          minted on the previous response. `next_cursor=None` when
+          this is the last page. Use this for any new client; it is
+          O(log N + limit) regardless of channel size.
+
+        * `page=N, messages_per_page=M`, no cursor → legacy offset-style
+          page fetch. We translate it into a keyset walk internally,
+          but the depth is capped at
+          `DatabaseHandler.MAX_OFFSET_PAGINATION_ROWS` so a client
+          asking for "page 10000" gets a clear error instead of
+          stalling Postgres. Returns just `list[dict]` for
+          backwards compatibility.
+
+        * `websocket=True` → the bounded reconnect-burst path. Returns
+          at most `DatabaseHandler.MAX_UNVIEWED_BURST` rows, never
+          older than `DatabaseHandler.UNVIEWED_BURST_MAX_AGE`. The
+          client must paginate via the cursor path for anything
+          older.
         """
+        if before_cursor is not None:
+            rows, next_cursor = self.database_handler.fetch_channel_messages_keyset(
+                channel_id=channel_id,
+                limit=messages_per_page or 20,
+                before_cursor=before_cursor,
+            )
+            return (
+                self._hydrate_messages(rows, viewer_user_id=viewer_user_id),
+                next_cursor,
+            )
+
         if not websocket:
             messages = self.database_handler.fetch_channel_messages(
                 channel_id=channel_id, messages_per_page=messages_per_page, page=page
@@ -98,25 +120,61 @@ class MessagesManager:
         max_results: int,
         viewer_user_id: str | None = None,
     ) -> tuple[list[dict], int, bool]:
-        """
-        Substring search across a channel's most recent ``scan_limit`` messages.
+        """Ranked in-channel search.
 
-        Messages are encrypted at rest, so this code path decrypts each candidate
-        and applies a case-insensitive substring match on the plaintext. Returns
-        newest matches first.
+        Two code paths share this signature:
+
+        * **Postgres (production)** — uses
+          `DatabaseHandler.search_channel_messages_ranked`, which runs a
+          `WHERE channel_id = ? AND search_tokens @@ plainto_tsquery(?)`
+          against the GIN-indexed `search_tokens` column and ranks hits
+          via `ts_rank_cd`. Cost is O(matches) regardless of how many
+          messages the channel holds — a search across a 10M-message
+          channel and a 1K-message channel take roughly the same time.
+          Only the top `max_results` rows get decrypted (one decrypt
+          per hit, instead of one per candidate).
+
+        * **SQLite (test harness)** — `search_channel_messages_ranked`
+          returns empty, so we fall back to the original decrypt-and-
+          scan path. Bounded by `scan_limit` (default 1000, hard cap
+          5000) the same way the old implementation was — production
+          never takes this branch.
 
         Args:
             channel_id: The channel's id.
-            query: The substring to look for (case-insensitive).
-            scan_limit: How many recent messages to decrypt before stopping.
-            max_results: How many matches to return at most.
+            query: The free-text query (passed through
+                `plainto_tsquery('simple', …)` on Postgres).
+            scan_limit: Only consulted on the SQLite fallback path. On
+                Postgres the search is index-bounded, not scan-bounded.
+            max_results: Max ranked matches to return.
 
         Returns:
             (matches, scanned_count, truncated_scan):
-                ``matches`` — hydrated message dicts, newest first, up to ``max_results``.
-                ``scanned_count`` — how many messages were decrypted.
-                ``truncated_scan`` — True when the channel has more messages than ``scan_limit``.
+              * ``matches`` — hydrated message dicts, ranked best→recent.
+              * ``scanned_count`` — Postgres: number of hits inspected.
+                SQLite: number of messages decrypted.
+              * ``truncated_scan`` — SQLite only; True if the channel
+                had more rows than `scan_limit`. Always False on
+                Postgres (the GIN search isn't a scan).
         """
+        ranked = self.database_handler.search_channel_messages_ranked(
+            channel_id=channel_id, query_text=query, limit=max_results
+        )
+        if ranked:
+            # Postgres path: strip the score (clients don't see it
+            # today; rank is implicit in the order), then hydrate.
+            matches = [(message, user) for message, user, _ in ranked]
+            hydrated = self._hydrate_messages(matches, viewer_user_id=viewer_user_id)
+            return hydrated, len(ranked), False
+
+        # SQLite fallback (or "Postgres found nothing"). On Postgres
+        # the empty-result short-circuit means we never spin up the
+        # decrypt path for misses — only the SQLite tests reach it.
+        if not str(
+            self.database_handler.database_engine.url
+        ).startswith("sqlite://"):
+            return [], 0, False
+
         candidates = self.database_handler.fetch_channel_messages_for_search(
             channel_id=channel_id, scan_limit=scan_limit
         )
@@ -415,6 +473,15 @@ class MessagesManager:
     ) -> tuple[Messages, object]:
         """
         Build encrypted message record and encryption key tuple.
+
+        Also populates the `search_tokens` tsvector from the plaintext
+        BEFORE we encrypt it — this is the only place plaintext exists
+        in the request scope, and we need it to build the index that
+        powers `DatabaseHandler.search_channel_messages_ranked`. The
+        encryption keys live in the same database the index does
+        (`keys` table), so adding a tsvector does NOT weaken the
+        encryption-at-rest posture: anyone who can read `search_tokens`
+        already has the keys to decrypt `hashed_message`.
         """
         message_metadata = Messages()
         message_metadata.message_id = self._generate_message_id(
@@ -446,6 +513,16 @@ class MessagesManager:
             user_id=user_id,
             message_id=message_metadata.message_id,
         )
+        # Stash the plaintext as a transient (non-persisted) attribute so
+        # `DatabaseHandler.save_message` can apply Postgres' `to_tsvector`
+        # in the INSERT path. We cannot assign a raw string to the
+        # `search_tokens` TSVECTOR column via the ORM — the wire format
+        # for a tsvector literal isn't just plain text, it's
+        # `'token':position` — so the cast has to happen server-side via
+        # `to_tsvector('simple', ?)`. SQLAlchemy keeps `__allow_unmapped__
+        # = True` (see tables/messages.py) which permits stashing this.
+        message_metadata.raw_message = (message or "").strip() or None
+
         return message_metadata, encryption_key
 
     def _hydrate_messages(

@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID as SA_UUID
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import TSVECTOR, UUID as SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
@@ -15,6 +15,28 @@ class Messages(Base):
 
     __tablename__ = "messages"
     __allow_unmapped__ = True
+
+    # Composite + tsvector indexes for the scale-out work — declared at the
+    # bottom of this class via __table_args__. They make:
+    #   1. keyset pagination (`WHERE channel_id = ? AND sent_at < ?`) hit a
+    #      btree index instead of a seq scan on huge channels, and
+    #   2. ranked search (`WHERE search_tokens @@ ?`) hit a GIN index.
+    # Both are Postgres-only; the SQLite test harness uses array containment
+    # against a JSON column and an in-Python substring search instead.
+    __table_args__ = (
+        Index(
+            "ix_messages_channel_sent_at_msg",
+            "channel_id",
+            "sent_at",
+            "message_id",
+        ),
+        Index(
+            "ix_messages_search_tokens",
+            "search_tokens",
+            postgresql_using="gin",
+            postgresql_where="search_tokens IS NOT NULL",
+        ),
+    )
 
     message_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
     hashed_message: Mapped[str] = mapped_column(String, nullable=False)
@@ -41,6 +63,20 @@ class Messages(Base):
     )
 
     attachments: Mapped[list | None] = mapped_column(JSON(), nullable=True)
+
+    # Server-side ranked-search column. Populated from plaintext at write
+    # time (see `MessagesManager._build_message_record`), kept NULL on
+    # SQLite (the test harness uses the in-Python fallback). The GIN index
+    # in __table_args__ is filtered on `IS NOT NULL` so it stays small on
+    # instances that haven't yet backfilled historic rows.
+    #
+    # `TSVECTOR` is Postgres-only; we declare a `String` fallback for
+    # SQLite so the column exists in both dialects (the SQLite path never
+    # writes to it).
+    search_tokens: Mapped[str | None] = mapped_column(
+        TSVECTOR().with_variant(String, "sqlite"),
+        nullable=True,
+    )
 
     def to_dict(self) -> dict:
         """Convert message object to dictionary format"""

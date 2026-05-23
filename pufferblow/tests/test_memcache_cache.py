@@ -418,3 +418,104 @@ def test_jittered_ttl_stays_in_band():
 
     assert jittered_ttl(1) == 1  # short TTLs aren't jittered
     assert jittered_ttl(60, jitter_fraction=0) == 60  # explicit no-jitter
+
+
+# ── Public-host safety warning ────────────────────────────────────────
+
+
+def test_publicly_reachable_classifier_recognises_safe_hosts():
+    """Localhost, RFC1918 ranges, and bare docker service names are safe."""
+    from pufferblow.api.cache.memcache import _looks_publicly_reachable
+
+    for host in [
+        "127.0.0.1", "localhost", "::1",
+        "10.0.0.5", "192.168.1.10", "172.18.0.3",
+        "memcached", "pufferblow-memcached",
+        "",
+    ]:
+        assert _looks_publicly_reachable(host) is False, host
+
+
+def test_publicly_reachable_classifier_flags_red_flags():
+    """Wildcard binds and dotted public-looking names should warn."""
+    from pufferblow.api.cache.memcache import _looks_publicly_reachable
+
+    for host in ["0.0.0.0", "::", "*", "cache.example.com", "8.8.8.8"]:
+        assert _looks_publicly_reachable(host) is True, host
+
+
+def test_get_cache_emits_warning_when_host_looks_public(monkeypatch, caplog):
+    """If an operator points at a public address, we must warn loudly.
+
+    The cache wrapper pickle-roundtrips Python objects; exposing
+    memcached on a public address is a remote-code-execution sink.
+    Bootstrapping with a flagged host needs to leave a breadcrumb.
+    """
+    import logging
+
+    from pufferblow.api.cache import memcache as memcache_module
+    from pufferblow.api.cache.memcache import get_cache
+
+    memcache_module._singleton = None
+    captured: list[str] = []
+
+    # loguru routes through stderr by default; capture via a custom sink.
+    sink_id = memcache_module.logger.add(
+        lambda message: captured.append(str(message)), level="WARNING"
+    )
+    try:
+        cfg = types.SimpleNamespace(
+            MEMCACHE_HOST="public-memcache.example.com",
+            MEMCACHE_PORT=11211,
+            MEMCACHE_DEFAULT_TTL=60,
+        )
+        get_cache(cfg)
+        assert any("publicly reachable" in line for line in captured), captured
+    finally:
+        memcache_module.logger.remove(sink_id)
+
+
+# ── Keyset cursor encode/decode (history pagination) ──────────────────
+
+
+def test_message_cursor_round_trip():
+    """The opaque cursor is `<sent_at_iso>|<message_id>` and round-trips."""
+    import datetime as _dt
+    from types import SimpleNamespace
+
+    from pufferblow.api.database.database_handler import DatabaseHandler
+
+    msg = SimpleNamespace(
+        sent_at=_dt.datetime(2026, 5, 23, 15, 4, 5, tzinfo=_dt.timezone.utc),
+        message_id="abc-123",
+    )
+    encoded = DatabaseHandler._encode_message_cursor(msg)
+    decoded = DatabaseHandler._decode_message_cursor(encoded)
+    assert decoded is not None
+    assert decoded[0] == msg.sent_at
+    assert decoded[1] == msg.message_id
+
+
+def test_message_cursor_decode_returns_none_for_garbage():
+    """Malformed / missing cursors look like 'start from the newest'."""
+    from pufferblow.api.database.database_handler import DatabaseHandler
+
+    assert DatabaseHandler._decode_message_cursor(None) is None
+    assert DatabaseHandler._decode_message_cursor("") is None
+    assert DatabaseHandler._decode_message_cursor("nope") is None
+    assert DatabaseHandler._decode_message_cursor("not-an-iso|id") is None
+
+
+def test_messages_table_has_scaleout_indexes():
+    """Pin the index names so a rename would be caught immediately.
+
+    The schema migration in `_apply_messages_scaleout_migration` issues
+    `CREATE INDEX IF NOT EXISTS <name>` against these specific names —
+    a drift between the declarative metadata and the migration script
+    would silently shadow itself.
+    """
+    from pufferblow.api.database.tables.messages import Messages
+
+    index_names = {ix.name for ix in Messages.__table__.indexes}
+    assert "ix_messages_channel_sent_at_msg" in index_names
+    assert "ix_messages_search_tokens" in index_names

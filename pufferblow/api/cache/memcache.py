@@ -287,6 +287,48 @@ def jittered_ttl(base_seconds: int, jitter_fraction: float = 0.1) -> int:
 _singleton: MemcacheCache | None = None
 
 
+# Address shapes that should NEVER be the resolved memcache target. The
+# daemon has no auth and pickle round-trips arbitrary Python objects, so
+# a memcache reachable from anywhere except a private network is a
+# remote-code-execution sink. We let `0.0.0.0` and `::` produce loud
+# warnings rather than hard failures because some test rigs deliberately
+# bind everything; the operator should see it.
+_PUBLIC_BIND_PATTERNS = ("0.0.0.0", "::", "*")
+
+
+def _looks_publicly_reachable(host: str) -> bool:
+    """Heuristic: would a wrong `MEMCACHE_HOST` setting expose us?
+
+    Returns True for the explicit wildcard binds and for any address
+    that obviously names a public-routable target. We intentionally do
+    NOT try to be exhaustive — a curated set of red flags that catches
+    the easy mistakes (host bound to all interfaces, host pointed at a
+    public DNS name) is more useful than a brittle "is RFC1918"
+    classifier that would block legitimate VPN topologies.
+    """
+    h = (host or "").strip().lower()
+    if not h:
+        return False
+    if h in _PUBLIC_BIND_PATTERNS:
+        return True
+    # Public-looking DNS names: anything not localhost, not an explicit
+    # private IP, and not a single bare label (likely a docker service
+    # name like "memcached" or "pufferblow-memcached").
+    if h in ("localhost", "127.0.0.1", "::1"):
+        return False
+    if h.startswith(("10.", "192.168.", "172.16.", "172.17.", "172.18.",
+                     "172.19.", "172.20.", "172.21.", "172.22.", "172.23.",
+                     "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
+                     "172.29.", "172.30.", "172.31.")):
+        return False
+    if "." not in h:
+        # Bare hostname — almost always a docker service name on the
+        # internal bridge, not a public target.
+        return False
+    # Has a dot, isn't private, isn't loopback. Treat as suspicious.
+    return True
+
+
 def get_cache(config) -> MemcacheCache:
     """Return the process-wide cache instance.
 
@@ -296,6 +338,11 @@ def get_cache(config) -> MemcacheCache:
     the worker restarts — which is consistent with how the rest of
     the server treats `config.toml` (re-read on boot, not at
     runtime).
+
+    Emits a security warning on first construction if `MEMCACHE_HOST`
+    looks publicly reachable — memcached has no auth and the wrapper
+    round-trips Python pickles, so a daemon on a public address is a
+    remote-code-execution sink for anyone who can hit port 11211.
     """
     global _singleton
     if _singleton is not None:
@@ -305,6 +352,17 @@ def get_cache(config) -> MemcacheCache:
     port = int(getattr(config, "MEMCACHE_PORT", 11211))
     ttl = int(getattr(config, "MEMCACHE_DEFAULT_TTL", 60))
     _singleton = MemcacheCache(host=host, port=port, default_ttl=ttl)
+
+    if _looks_publicly_reachable(host):
+        logger.warning(
+            "MEMCACHE_HOST={host!r} looks publicly reachable. memcached "
+            "has no auth and the cache wrapper round-trips pickled "
+            "Python — exposing it on a public network is an RCE sink. "
+            "Bind to a private interface or place it behind a private "
+            "Docker / VPC network.",
+            host=host,
+        )
+
     logger.info(
         "Memcache wired at {host}:{port} (default TTL {ttl}s)",
         host=host,

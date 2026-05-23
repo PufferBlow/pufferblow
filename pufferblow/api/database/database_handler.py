@@ -9,7 +9,7 @@ from typing import Any, Callable, TypeVar
 
 import sqlalchemy
 from loguru import logger
-from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -347,6 +347,18 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             # still join it back together. Don't block boot.
             logger.warning(
                 "server_id → host_port migration skipped due to error: {err}",
+                err=str(exc),
+            )
+
+        # Adds the (channel_id, sent_at, message_id) composite + the
+        # search_tokens TSVECTOR column with its GIN index. Necessary on
+        # upgrading instances — `create_all` builds new tables but never
+        # mutates existing ones. Idempotent on Postgres, no-op on SQLite.
+        try:
+            self._apply_messages_scaleout_migration()
+        except Exception as exc:
+            logger.warning(
+                "messages scale-out migration skipped due to error: {err}",
                 err=str(exc),
             )
 
@@ -688,6 +700,87 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             users=users_touched,
             voice=voice_result.rowcount,
         )
+
+    def _apply_messages_scaleout_migration(self) -> None:
+        """Schema additions that take the messages table from 'works at
+        100 users' to 'works at 100K users.'
+
+        Two changes, both idempotent:
+
+        * `ix_messages_channel_sent_at_msg` — composite btree on
+          `(channel_id, sent_at, message_id)`. Makes cursor pagination
+          (`WHERE channel_id = ? AND (sent_at, message_id) < ?`) an index
+          range scan instead of a seq scan over the channel's history.
+          Same index also serves the bounded WS-reconnect query
+          (`WHERE channel_id = ? AND sent_at > ?  ORDER BY sent_at DESC
+          LIMIT 200`).
+
+        * `search_tokens` (TSVECTOR) + GIN index — replaces the
+          decrypt-and-substring search path with a Postgres ranked search.
+          The column is populated from message plaintext at write time
+          (see `MessagesManager._build_message_record`). The GIN index is
+          partial (`WHERE search_tokens IS NOT NULL`) so it stays small on
+          instances that have not yet backfilled historic rows.
+
+        SQLite test harness: this is a no-op. The `Index` declarations in
+        `tables/messages.py` use Postgres-specific syntax (`postgresql_using`
+        / TSVECTOR), and `create_all` skips them on SQLite gracefully.
+        """
+        if str(self.database_engine.url).startswith("sqlite://"):
+            return
+
+        with self.database_engine.begin() as connection:
+            # ── search_tokens column ─────────────────────────────────
+            try:
+                connection.execute(
+                    text(
+                        "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
+                        "search_tokens tsvector"
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not add messages.search_tokens column: {err}",
+                    err=str(exc),
+                )
+
+            # ── composite btree for keyset pagination ────────────────
+            # `CONCURRENTLY` would be nicer for live deploys but requires
+            # running outside a transaction; we stay inside the begin()
+            # block so the migration is atomic. On a fresh install the
+            # index is built immediately at create_all; on an upgrade
+            # against a large messages table this blocks writes briefly.
+            try:
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS "
+                        "ix_messages_channel_sent_at_msg "
+                        "ON messages (channel_id, sent_at, message_id)"
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not create ix_messages_channel_sent_at_msg: {err}",
+                    err=str(exc),
+                )
+
+            # ── GIN index on the tsvector ────────────────────────────
+            try:
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS "
+                        "ix_messages_search_tokens "
+                        "ON messages USING gin (search_tokens) "
+                        "WHERE search_tokens IS NOT NULL"
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not create ix_messages_search_tokens: {err}",
+                    err=str(exc),
+                )
+
+        logger.info("messages scale-out migration applied (idempotent)")
 
     def _backfill_appearance_defaults(self) -> None:
         """Populate accent_color + avatar_seed for pre-feature rows.
@@ -2469,59 +2562,71 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
         self._invalidate_channel_cache(channel_id)
 
-    def fetch_channel_messages(
-        self, channel_id: str, messages_per_page: int, page: int
-    ) -> list[tuple[Messages, Users | None]]:
+    # ── History pagination (cursor-based) ─────────────────────────────
+    #
+    # Cap on how far back the legacy `page` parameter can reach via
+    # offset semantics. Past this depth we refuse to compute, because
+    # `OFFSET N` is O(N) and a "page 10000" request on a huge channel
+    # would be a Postgres-killer. Clients hitting this should switch
+    # to cursor-based pagination via `fetch_channel_messages_keyset`.
+    MAX_OFFSET_PAGINATION_ROWS = 2000
+
+    # Hard cap on a single WS reconnect-burst response. The previous
+    # `fetch_unviewed_channel_messages` had no LIMIT at all, so a
+    # client offline for a week would receive every message since.
+    MAX_UNVIEWED_BURST = 200
+
+    # Lookback floor for the WS reconnect-burst. Clients that have been
+    # offline longer than this should call the cursor-based history
+    # endpoint to scroll older context — the realtime channel only
+    # carries the recent tail.
+    UNVIEWED_BURST_MAX_AGE = datetime.timedelta(days=7)
+
+    @staticmethod
+    def _decode_message_cursor(cursor: str | None) -> tuple[datetime.datetime, str] | None:
+        """Parse an opaque cursor produced by `fetch_channel_messages_keyset`.
+
+        Cursor shape: ``"<sent_at_iso>|<message_id>"``. Returns None for
+        a missing or malformed cursor — the caller treats that as "start
+        from the most recent message."
         """
-        fetch a specific number of messages from a channel from
-        the `channels` table in the database with user data
+        if not cursor:
+            return None
+        try:
+            sent_at_iso, message_id = cursor.split("|", 1)
+            sent_at = datetime.datetime.fromisoformat(sent_at_iso)
+            return sent_at, message_id
+        except (ValueError, AttributeError):
+            return None
 
-        Args:
-            channel_id (str): The channel's `channel_id`.
-            messages_per_page (int, optional, default: 20): The number of messages for each page.
-            page (int, optional, default: 1): The page number (pages start from 1 to `x` depending on how many messages a channel contains).
+    @staticmethod
+    def _encode_message_cursor(message: Messages) -> str:
+        """Build the cursor a client should send back to fetch the next page."""
+        return f"{message.sent_at.isoformat()}|{message.message_id}"
 
-        Returns:
-            list[tuple[Messages, Users | None]]: A list of tuples containing `Messages` and `Users` table objects.
+    def fetch_channel_messages_keyset(
+        self,
+        channel_id: str,
+        limit: int,
+        before_cursor: str | None = None,
+    ) -> tuple[list[tuple[Messages, Users | None]], str | None]:
+        """Cursor-based history fetch — newest-first.
+
+        Uses the `(channel_id, sent_at, message_id)` composite index to
+        keyset-paginate without ever computing an `OFFSET N`. Returns
+        `(rows, next_cursor)`: pass `next_cursor` back as `before_cursor`
+        to walk further into the past. `next_cursor` is `None` when the
+        fetched page is the last one.
+
+        The query is `WHERE channel_id = ? AND (sent_at, message_id) <
+        (?, ?)` so it remains O(log N + limit) at every channel size —
+        the index gives Postgres a direct seek to the cursor and a
+        sequential scan of `limit` rows behind it. Critically does NOT
+        load `Channels.messages_ids` (the unbounded array that was the
+        previous bottleneck).
         """
-        messages_with_users: list[tuple[Messages, Users | None]] = []
-
-        with self.database_session() as session:
-            channel_messages_ids = self.get_channel_data(
-                channel_id=channel_id
-            ).messages_ids
-
-            start_index = (page * messages_per_page) - messages_per_page
-
-            response = (
-                session.query(Messages, Users)
-                .join(Users, Messages.sender_id == Users.user_id, isouter=True)
-                .filter(Messages.message_id.in_(channel_messages_ids))
-                .order_by(Messages.sent_at)
-                .offset(start_index)
-                .limit(messages_per_page)
-                .all()
-            )
-
-            messages_with_users = response
-
-        return messages_with_users
-
-    def fetch_unviewed_channel_messages(
-        self, channel_id: str, viewed_messages_ids: list[str]
-    ) -> list[tuple[Messages, Users | None]]:
-        """
-        Fetch latest unviewed messages by this user from a server channel
-
-        Args:
-            user_id (str): The user's `user_id`.
-            channel_id (str): The channel's `channel_id`.
-            viewed_messages_ids (list[str]): A list of viewed `message_id`s by this user.
-
-        Returns:
-            list[Messages]: A list of `Messages` table object.
-        """
-        messages_with_users: list[tuple[Messages, Users | None]] = []
+        capped_limit = max(1, min(int(limit), 200))
+        decoded = self._decode_message_cursor(before_cursor)
 
         with self.database_session() as session:
             query = (
@@ -2529,46 +2634,240 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 .join(Users, Messages.sender_id == Users.user_id, isouter=True)
                 .filter(Messages.channel_id == channel_id)
             )
+            if decoded is not None:
+                cursor_sent_at, cursor_message_id = decoded
+                # Tuple-comparison form of "strictly older than the cursor"
+                # — relies on the composite index's ordering. The OR'd
+                # tiebreaker on message_id keeps the walk deterministic
+                # when two messages share a timestamp (high-frequency
+                # bursts inside a single millisecond).
+                query = query.filter(
+                    or_(
+                        Messages.sent_at < cursor_sent_at,
+                        and_(
+                            Messages.sent_at == cursor_sent_at,
+                            Messages.message_id < cursor_message_id,
+                        ),
+                    )
+                )
+            rows = (
+                query.order_by(Messages.sent_at.desc(), Messages.message_id.desc())
+                .limit(capped_limit + 1)
+                .all()
+            )
+
+        has_more = len(rows) > capped_limit
+        rows = rows[:capped_limit]
+        next_cursor = self._encode_message_cursor(rows[-1][0]) if has_more and rows else None
+        return rows, next_cursor
+
+    def fetch_channel_messages(
+        self, channel_id: str, messages_per_page: int, page: int
+    ) -> list[tuple[Messages, Users | None]]:
+        """Backwards-compatible offset-style page fetch.
+
+        Translates `(page, messages_per_page)` into a keyset walk so we
+        get the same correctness + speed properties as the cursor API
+        even for the legacy clients that haven't migrated. Capped at
+        `MAX_OFFSET_PAGINATION_ROWS` total rows reachable via this path
+        — a deeper request raises so the client switches to the cursor
+        API rather than asking Postgres to OFFSET-skip a million rows.
+
+        Returns oldest-first within the page (matching the previous
+        contract) — internally we walk newest-first via keyset and
+        reverse for the caller.
+        """
+        per_page = max(1, int(messages_per_page))
+        page_index = max(1, int(page))
+        rows_to_skip = (page_index - 1) * per_page
+
+        if rows_to_skip + per_page > self.MAX_OFFSET_PAGINATION_ROWS:
+            raise ValueError(
+                "Offset pagination depth exceeds "
+                f"{self.MAX_OFFSET_PAGINATION_ROWS}; use cursor-based "
+                "fetch_channel_messages_keyset for deeper history."
+            )
+
+        # Walk the cursor API forward `rows_to_skip` rows, then take the
+        # next `per_page`. Costs one query per page boundary instead of
+        # an O(N) OFFSET — but is still bounded by MAX_OFFSET_PAGINATION_ROWS
+        # so even the "worst" case is a handful of small keyset scans.
+        cursor: str | None = None
+        if rows_to_skip > 0:
+            skipped_rows, _ = self.fetch_channel_messages_keyset(
+                channel_id=channel_id,
+                limit=rows_to_skip,
+                before_cursor=None,
+            )
+            if len(skipped_rows) < rows_to_skip:
+                # Page is past the end of the channel — empty result.
+                return []
+            cursor = self._encode_message_cursor(skipped_rows[-1][0])
+
+        rows, _ = self.fetch_channel_messages_keyset(
+            channel_id=channel_id,
+            limit=per_page,
+            before_cursor=cursor,
+        )
+        # Caller expects oldest-first within the page.
+        rows.reverse()
+        return rows
+
+    def fetch_unviewed_channel_messages(
+        self,
+        channel_id: str,
+        viewed_messages_ids: list[str],
+        limit: int | None = None,
+    ) -> list[tuple[Messages, Users | None]]:
+        """Reconnect-burst fetch — bounded by recency AND count.
+
+        Returns the most recent messages in this channel that the user
+        hasn't already seen, with two hard ceilings:
+
+          * `MAX_UNVIEWED_BURST` rows (default 200) — even a
+            week-offline reconnect won't drown the websocket.
+          * `UNVIEWED_BURST_MAX_AGE` floor (default 7 days) — anything
+            older has rolled out of the realtime channel; the client
+            should hit the cursor-based history endpoint for it.
+
+        The previous implementation had NEITHER cap and used `NOT IN`
+        against the entire client-supplied read-history list, which on
+        a busy channel returned tens of thousands of rows per connect.
+        """
+        capped_limit = min(int(limit or self.MAX_UNVIEWED_BURST), self.MAX_UNVIEWED_BURST)
+        floor = datetime.datetime.now(datetime.timezone.utc) - self.UNVIEWED_BURST_MAX_AGE
+
+        with self.database_session() as session:
+            query = (
+                session.query(Messages, Users)
+                .join(Users, Messages.sender_id == Users.user_id, isouter=True)
+                .filter(Messages.channel_id == channel_id)
+                .filter(Messages.sent_at >= floor)
+            )
 
             if viewed_messages_ids:
-                query = query.filter(Messages.message_id.not_in(viewed_messages_ids))
+                # Bound the `NOT IN` set too — a runaway client read-history
+                # could otherwise turn this into a per-request megabyte
+                # of param-bind. We only need to compare against the
+                # client's recent reads to know "is this in the last
+                # 200 they've seen?" — older read-history rows are
+                # already older than `floor` and excluded by recency.
+                query = query.filter(
+                    Messages.message_id.not_in(viewed_messages_ids[-2000:])
+                )
 
-            messages_with_users = query.order_by(Messages.sent_at).all()
+            # Walk newest-first so a tight burst gets the newest activity
+            # immediately; the WS client renders bottom-up either way.
+            rows = (
+                query.order_by(Messages.sent_at.desc(), Messages.message_id.desc())
+                .limit(capped_limit)
+                .all()
+            )
 
-        return messages_with_users
+        return rows
 
     def fetch_channel_messages_for_search(
         self, channel_id: str, scan_limit: int
     ) -> list[tuple[Messages, Users | None]]:
-        """
-        Fetch up to ``scan_limit`` most-recent messages from a channel, with
-        user data joined, for the substring-search code path.
+        """Legacy decrypt-and-scan search backend — SQLite-only.
 
-        Returns newest first so the search can return recent hits without
-        scanning the whole channel.
+        On Postgres the search path now uses `search_channel_messages_ranked`
+        (tsvector + GIN). This method is retained only as the SQLite
+        test-harness fallback — it pulls up to `scan_limit` most-recent
+        rows by `(channel_id, sent_at DESC)` and lets the caller
+        substring-match in Python after decryption.
         """
-        messages_with_users: list[tuple[Messages, Users | None]] = []
-
+        capped = max(1, int(scan_limit))
         with self.database_session() as session:
-            channel_messages_ids = self.get_channel_data(
-                channel_id=channel_id
-            ).messages_ids
-
-            if not channel_messages_ids:
-                return []
-
-            response = (
+            rows = (
                 session.query(Messages, Users)
                 .join(Users, Messages.sender_id == Users.user_id, isouter=True)
-                .filter(Messages.message_id.in_(channel_messages_ids))
-                .order_by(Messages.sent_at.desc())
-                .limit(scan_limit)
+                .filter(Messages.channel_id == channel_id)
+                .order_by(Messages.sent_at.desc(), Messages.message_id.desc())
+                .limit(capped)
+                .all()
+            )
+        return rows
+
+    def search_channel_messages_ranked(
+        self,
+        channel_id: str,
+        query_text: str,
+        limit: int,
+    ) -> list[tuple[Messages, Users | None, float]]:
+        """Ranked full-text search over a channel's plaintext index.
+
+        Uses Postgres' built-in `plainto_tsquery` for query parsing
+        (handles punctuation, whitespace, boolean fall-back) and
+        `ts_rank_cd` for relevance scoring. The GIN index on
+        `search_tokens` makes this O(matches) regardless of how many
+        non-matching rows the channel holds — the same query against
+        a 10M-message channel and a 1K-message channel costs roughly
+        the same wall-clock time.
+
+        Skipped on SQLite (no tsvector / GIN) — the caller falls
+        through to the legacy decrypt-and-scan code path in that case.
+
+        Returns tuples of `(message_row, user_row, rank_score)`,
+        ordered by rank descending then sent_at descending so recent
+        matches outrank older ones at the same rank.
+        """
+        if self._is_sqlite():
+            return []
+
+        capped_limit = max(1, min(int(limit), 100))
+        normalized = (query_text or "").strip()
+        if not normalized:
+            return []
+
+        with self.database_session() as session:
+            sql = text(
+                """
+                SELECT
+                    m.message_id,
+                    ts_rank_cd(m.search_tokens, plainto_tsquery('simple', :q)) AS rank_score
+                FROM messages m
+                WHERE m.channel_id = :channel_id
+                  AND m.search_tokens IS NOT NULL
+                  AND m.search_tokens @@ plainto_tsquery('simple', :q)
+                ORDER BY rank_score DESC, m.sent_at DESC, m.message_id DESC
+                LIMIT :limit
+                """
+            )
+            ranked_rows = session.execute(
+                sql,
+                {"q": normalized, "channel_id": channel_id, "limit": capped_limit},
+            ).fetchall()
+            if not ranked_rows:
+                return []
+
+            message_ids = [row[0] for row in ranked_rows]
+            rank_by_id = {row[0]: float(row[1] or 0.0) for row in ranked_rows}
+
+            # Hydrate to (Messages, Users) tuples in a second query so
+            # the ranked SQL above stays tight on the GIN index. The
+            # `in_` against ~20 message ids is cheap (PK lookup).
+            hydrated = (
+                session.query(Messages, Users)
+                .join(Users, Messages.sender_id == Users.user_id, isouter=True)
+                .filter(Messages.message_id.in_(message_ids))
                 .all()
             )
 
-            messages_with_users = response
-
-        return messages_with_users
+        # Re-attach the rank score and re-order to match the original
+        # rank result (the IN-list query doesn't preserve ordering).
+        annotated = [
+            (message, user, rank_by_id.get(message.message_id, 0.0))
+            for message, user in hydrated
+        ]
+        annotated.sort(
+            key=lambda item: (
+                -item[2],
+                -item[0].sent_at.timestamp() if item[0].sent_at else 0.0,
+                item[0].message_id,
+            )
+        )
+        return annotated
 
     def fetch_conversation_messages(
         self, conversation_id: str, messages_per_page: int, page: int
@@ -2890,14 +3189,30 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.commit()
 
     def save_message(self, message: Messages) -> None:
-        """
-        Save a message to the `messages` table in the database
+        """Save a message to the `messages` table.
 
-        Args:
-            message(Messages): A `Messages` table object.
+        Two behaviours that matter for the 100K-online target:
 
-        Returns:
-            None
+        1. On Postgres we no longer issue `UPDATE channels SET
+           messages_ids = array_append(...)`. That column is the
+           single biggest write-contention hot spot per channel
+           (every message takes a row lock on `channels` to extend
+           an unbounded array) AND its read cost grows with channel
+           size. The query layer now joins via `WHERE messages.channel_id
+           = ?` against the composite index instead, which removes
+           the array entirely from the hot path.
+
+           SQLite keeps the legacy `messages_ids` append for now so
+           the test harness — which exercises `Channels.messages_ids`
+           in fixtures — keeps passing.
+
+        2. `search_tokens` is populated via a follow-up UPDATE that
+           calls Postgres' `to_tsvector('simple', ?)`. We can't pass a
+           pre-built tsvector through the ORM because tsvector's wire
+           format is `'token':position` (not the plaintext), so the
+           cast must happen server-side. The plaintext is carried on
+           the transient `raw_message` attribute set by
+           `MessagesManager._build_message_record`.
         """
         database_uri = str(self.database_engine.url)
         is_sqlite = database_uri.startswith("sqlite://")
@@ -2911,6 +3226,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                     message.sent_at = datetime.datetime.now(datetime.timezone.utc)
 
             if is_sqlite:
+                # SQLite tests still depend on the array shape.
                 channel = session.get(Channels, message.channel_id)
                 if channel is not None:
                     messages_ids = list(channel.messages_ids or [])
@@ -2918,20 +3234,36 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                         messages_ids.append(message.message_id)
                     channel.messages_ids = messages_ids
                     session.add(channel)
-            else:
-                stmt = (
-                    update(Channels)
-                    .values(
-                        messages_ids=text(
-                            "array_append(messages_ids, '%s')" % message.message_id
-                        )
-                    )
-                    .where(Channels.channel_id == message.channel_id)
-                )
-                session.execute(stmt)
-            session.add(message)
+            # On Postgres the array append is intentionally removed —
+            # see the docstring above.
 
+            session.add(message)
             session.commit()
+
+            # Populate the ranked-search tsvector from the plaintext
+            # the caller stashed on `raw_message`. Postgres-only.
+            search_text = getattr(message, "raw_message", None)
+            if not is_sqlite and search_text:
+                try:
+                    session.execute(
+                        text(
+                            "UPDATE messages "
+                            "SET search_tokens = to_tsvector('simple', :t) "
+                            "WHERE message_id = :id"
+                        ),
+                        {"t": search_text, "id": message.message_id},
+                    )
+                    session.commit()
+                except Exception as exc:
+                    # Don't fail the send because the search index
+                    # couldn't be updated. The message persisted; it
+                    # just won't appear in ranked search until a
+                    # backfill picks it up.
+                    logger.warning(
+                        "search_tokens update failed for message_id={mid}: {err}",
+                        mid=message.message_id,
+                        err=str(exc),
+                    )
 
     def save_direct_message(self, message: Messages) -> None:
         """

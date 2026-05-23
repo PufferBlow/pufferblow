@@ -108,16 +108,49 @@ services:
     image: memcached:1.6-alpine
     container_name: pufferblow-memcached
     restart: unless-stopped
-    # `-m` is the in-memory budget in MB. 64 is enough for the small
-    # set of cached rows the v1.0 server uses (Users by id + Server
-    # singleton, ~1 KB each, TTL 60s). Bump it via .env if you cache
-    # more aggressively in a downstream fork.
-    command: ["memcached", "-m", "${PUFFERBLOW_MEMCACHE_MEMORY_MB:-64}"]
+    # Daemon flags (defense in depth on top of the no-host-port + private-
+    # network topology described below):
+    #
+    #   -m <MB>      In-memory budget. The v1.0 cache footprint is small
+    #                (Users + Server + ServerSettings rows + per-IP rate
+    #                counters + per-channel rows) — 128 MB is comfortable
+    #                for a 100K-online instance. Bump via .env if the cache
+    #                hit ratio drops as the keyspace grows.
+    #
+    #   -l <ADDR>    Bind address. We hardwire `0.0.0.0` so the daemon
+    #                listens on the container's bridge interface — that
+    #                interface is the private Docker network only — and
+    #                NOT on the loopback alone. This is the same shape
+    #                memcached's own Dockerfile defaults to, made explicit
+    #                so an operator who edits this file can see what's
+    #                bound and where.
+    #
+    #   -U 0         Disable UDP entirely. UDP is the amplification-attack
+    #                vector that put memcached on the news in 2018
+    #                (reflectors at 50,000× amp). The wrapper at
+    #                `api/cache/memcache.py` only uses TCP, so UDP is
+    #                pure attack surface. Off.
+    #
+    #   --enable-shutdown
+    #                Lets `docker stop` send SIGINT and have the daemon
+    #                flush + exit cleanly instead of getting SIGKILLed
+    #                after the 10s grace period.
+    command:
+      - memcached
+      - -m
+      - ${PUFFERBLOW_MEMCACHE_MEMORY_MB:-128}
+      - -l
+      - 0.0.0.0
+      - -U
+      - "0"
+      - --enable-shutdown
     # No host port mapped — the cache lives on the internal network
     # and the server reaches it by service name. Exposing 11211 on
     # the host would let any process on the host run commands; the
     # daemon has no auth, so the right deployment shape is "private
-    # network + service-name DNS".
+    # network + service-name DNS". If you ever need to debug from
+    # outside the network use `docker exec -it pufferblow-memcached
+    # nc 127.0.0.1 11211` — never publish 11211.
     networks:
       - pufferblow-server-net
 
