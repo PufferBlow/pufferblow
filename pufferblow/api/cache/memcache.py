@@ -452,3 +452,20 @@ def unread_notifications_count_key(user_id: str) -> str:
     `int`; invalidated by every notification create / read / mark-all.
     """
     return f"pb:unread_notifs:{user_id}"
+
+
+def user_read_history_key(user_id: str) -> str:
+    """Cache key for a user's bounded read-message-id list.
+
+    The WebSocket poll loop calls `get_user_read_messages_ids` on every
+    tick to build the `NOT IN (...)` predicate that filters out messages
+    the user has already seen. Uncached, that's a Postgres SELECT per
+    user per WS tick — 50k SELECT/sec at 100K connected users with a
+    2-second poll, all hitting one row in `message_read_history`.
+
+    Cached value is a bounded list (latest N ids only — the bound is
+    enforced by the reader, see `DatabaseHandler.get_user_read_messages_ids`).
+    Bounding matters: an unbounded per-user list would otherwise grow
+    until it blew past memcache's 1 MB item limit.
+    """
+    return f"pb:read_history:{user_id}"

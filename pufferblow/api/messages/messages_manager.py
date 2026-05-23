@@ -65,6 +65,7 @@ class MessagesManager:
         viewed_messages_ids: list | None = None,
         viewer_user_id: str | None = None,
         before_cursor: str | None = None,
+        accessible_channels: list[str] | None = None,
     ) -> list[dict] | tuple[list[dict], str | None]:
         """Load history for an HTTP page fetch or a WS reconnect burst.
 
@@ -107,9 +108,24 @@ class MessagesManager:
                 channel_id=channel_id, messages_per_page=messages_per_page, page=page
             )
         else:
-            messages = self.database_handler.fetch_unviewed_channel_messages(
-                channel_id=channel_id, viewed_messages_ids=viewed_messages_ids
-            )
+            # The WS path used to call this method once per accessible
+            # channel — N round-trips to Postgres per tick. When the
+            # caller supplies `accessible_channels`, route through the
+            # bulk handler that does it in ONE query. The per-channel
+            # path is retained for the deprecated `/ws/channels/{id}`
+            # endpoint and for back-compat with callers that don't
+            # supply the list.
+            if accessible_channels:
+                messages = (
+                    self.database_handler.fetch_unviewed_messages_across_channels(
+                        channel_ids=accessible_channels,
+                        viewed_messages_ids=viewed_messages_ids or [],
+                    )
+                )
+            else:
+                messages = self.database_handler.fetch_unviewed_channel_messages(
+                    channel_id=channel_id, viewed_messages_ids=viewed_messages_ids
+                )
         return self._hydrate_messages(messages, viewer_user_id=viewer_user_id)
 
     def search_messages(

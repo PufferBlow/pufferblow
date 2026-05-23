@@ -1023,19 +1023,48 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
         return users_number
 
+    # Cap on how many of a user's most-recent read-message ids we cache
+    # in memcache and return to callers. Bounded for two reasons:
+    #
+    #   1. Memcache items have a 1 MB default size limit; an unbounded
+    #      per-user list would blow past it on busy accounts.
+    #   2. The only consumer of this list is the WebSocket poll loop's
+    #      `NOT IN (viewed_messages_ids)` filter, which is already
+    #      paired with a 7-day `sent_at` floor on the message-fetch side
+    #      (`fetch_unviewed_channel_messages.UNVIEWED_BURST_MAX_AGE`).
+    #      Anything older than that 7-day window cannot resurface as
+    #      unread regardless of read-history truncation, so capping the
+    #      cached suffix is a safe approximation.
+    READ_HISTORY_CACHE_LIMIT = 2000
+
     def get_user_read_messages_ids(self, user_id: str) -> list[str]:
-        """
-        Fetch the user's read messages_ids from the `message_read_history`
-        table in the database
+        """Fetch the user's read message_ids (cached on Postgres).
+
+        Hot read on the WebSocket poll path — see the docstring on
+        `user_read_history_key` for why we cache it. The returned list
+        is the BOUNDED tail of the user's read history
+        (`READ_HISTORY_CACHE_LIMIT` newest ids), which is sufficient
+        for the WS filter that pairs with a 7-day `sent_at` floor.
 
         Args:
             user_id (str): The user's `user_id`.
 
         Returns:
-            list(str): A list of `message_id`s read by this user.
+            list[str]: Up to `READ_HISTORY_CACHE_LIMIT` newest
+            `message_id`s read by this user.
         """
-        messages_ids: list[str] = []
+        if not self._is_sqlite():
+            from pufferblow.api.cache.memcache import (
+                get_cache,
+                user_read_history_key,
+            )
 
+            cache = get_cache(self.config)
+            cached = cache.get(user_read_history_key(str(user_id)))
+            if cached is not None:
+                return list(cached)
+
+        messages_ids: list[str] = []
         with self.database_session() as session:
             stmt = select(MessageReadHistory.viewed_messages_ids).where(
                 MessageReadHistory.user_id == user_id
@@ -1045,7 +1074,41 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             if result is not None:
                 messages_ids = result[0] or []
 
+        # Cap to the latest N — the only consumer (`NOT IN` filter on
+        # the WS unviewed-burst path) pairs with a 7-day floor on
+        # `sent_at`, so truncating the long tail can't cause already-
+        # read messages to re-surface.
+        if len(messages_ids) > self.READ_HISTORY_CACHE_LIMIT:
+            messages_ids = messages_ids[-self.READ_HISTORY_CACHE_LIMIT:]
+
+        if not self._is_sqlite():
+            from pufferblow.api.cache.memcache import (
+                get_cache,
+                jittered_ttl,
+                user_read_history_key,
+            )
+
+            get_cache(self.config).set(
+                user_read_history_key(str(user_id)),
+                messages_ids,
+                ttl=jittered_ttl(60),
+            )
+
         return messages_ids
+
+    def _invalidate_user_read_history(self, user_id: str) -> None:
+        """Drop the cached read-history list for `user_id`.
+
+        Called from `add_message_to_read_history` so the WS poll's next
+        tick reflects the new read-confirmation immediately rather than
+        riding out the 60s TTL (would otherwise cause the freshly-read
+        message to re-appear in the next unviewed burst).
+        """
+        if self._is_sqlite():
+            return
+        from pufferblow.api.cache.memcache import get_cache, user_read_history_key
+
+        get_cache(self.config).delete(user_read_history_key(str(user_id)))
 
     def get_unread_message_counts_by_channel(
         self, user_id: str, channel_ids: list[str] | None = None
@@ -2766,6 +2829,74 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
         return rows
 
+    def fetch_unviewed_messages_across_channels(
+        self,
+        channel_ids: list[str],
+        viewed_messages_ids: list[str],
+        limit: int | None = None,
+    ) -> list[tuple[Messages, Users | None]]:
+        """One-query bulk variant of `fetch_unviewed_channel_messages`.
+
+        The previous WebSocket poll loop called the per-channel method
+        once for every accessible channel — N round-trips to Postgres
+        per tick per user. At 100K connected users with an average of 5
+        accessible channels and a 2-second poll cadence, that's 250k
+        SELECT/sec on `messages` for the "nothing changed" common
+        case.
+
+        This single-query equivalent does it in ONE round-trip per
+        tick by replacing `WHERE channel_id = ?` with `WHERE
+        channel_id IN (...)`. The composite `(channel_id, sent_at,
+        message_id)` index added by `_apply_messages_scaleout_migration`
+        still serves this query — Postgres uses it for each channel_id
+        in the `IN` list via a bitmap index scan and unions the
+        results, which is dramatically cheaper than N separate queries
+        with N separate parse/plan cycles. Result is capped, recency-
+        floored, and ordered identically to the per-channel variant.
+
+        Args:
+            channel_ids: Channels the user can access. Empty list →
+                empty result (the caller should not bother calling
+                this with no channels).
+            viewed_messages_ids: Already-seen ids to filter out.
+                Capped at the last 2000 entries internally for the
+                same parameter-bind reason described in
+                `fetch_unviewed_channel_messages`.
+            limit: Hard upper bound on rows returned across ALL
+                channels. Defaults to `MAX_UNVIEWED_BURST`.
+
+        Returns:
+            list[tuple[Messages, Users | None]] — newest-first.
+        """
+        if not channel_ids:
+            return []
+
+        capped_limit = min(
+            int(limit or self.MAX_UNVIEWED_BURST), self.MAX_UNVIEWED_BURST
+        )
+        floor = datetime.datetime.now(datetime.timezone.utc) - self.UNVIEWED_BURST_MAX_AGE
+
+        with self.database_session() as session:
+            query = (
+                session.query(Messages, Users)
+                .join(Users, Messages.sender_id == Users.user_id, isouter=True)
+                .filter(Messages.channel_id.in_(channel_ids))
+                .filter(Messages.sent_at >= floor)
+            )
+
+            if viewed_messages_ids:
+                query = query.filter(
+                    Messages.message_id.not_in(viewed_messages_ids[-2000:])
+                )
+
+            rows = (
+                query.order_by(Messages.sent_at.desc(), Messages.message_id.desc())
+                .limit(capped_limit)
+                .all()
+            )
+
+        return rows
+
     def fetch_channel_messages_for_search(
         self, channel_id: str, scan_limit: int
     ) -> list[tuple[Messages, Users | None]]:
@@ -3395,6 +3526,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 )
                 session.add(read_history)
                 session.commit()
+                self._invalidate_user_read_history(user_id)
                 return
 
             current_ids = list(read_history.viewed_messages_ids or [])
@@ -3405,6 +3537,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             read_history.updated_at = updated_at
 
             session.commit()
+
+        # Drop the cached bounded read-history list so the next WS poll
+        # tick filters this new id out of the unviewed-burst response.
+        self._invalidate_user_read_history(user_id)
 
     def delete_message(self, message_id: str, channel_id: str) -> None:
         """

@@ -135,7 +135,16 @@ async def global_messages_websocket(websocket: WebSocket, auth_token: str):
     total_messages_sent = 0
     total_read_confirmations = 0
 
-    MESSAGE_POLL_INTERVAL = 2  # seconds between polling for new messages
+    # Polling cadence for the catch-up safety-net poll. Realtime
+    # delivery happens via `WebSocketsManager.broadcast_to_eligible_users`
+    # the moment a message is sent — the poll is purely a fallback
+    # that catches messages a client missed during a transient
+    # disconnect or that the broadcast machinery dropped (worker
+    # crash, network glitch). A 10s cadence keeps that safety net
+    # responsive without turning the poll into a per-tick Postgres
+    # storm: at 100K connected users it cuts the polling SELECT rate
+    # by 5× versus the previous 2s interval.
+    MESSAGE_POLL_INTERVAL = 10
 
     try:
         logger.debug(
@@ -209,40 +218,41 @@ async def global_messages_websocket(websocket: WebSocket, auth_token: str):
                 # No client message, continue with message polling
                 pass
 
-            # Poll for new messages across all accessible channels
+            # Poll for new messages across all accessible channels in
+            # a SINGLE query — `WHERE channel_id IN (...) AND sent_at
+            # >= floor AND message_id NOT IN (viewed)`. The previous
+            # implementation looped per channel and issued one SELECT
+            # each, which at 100K connected users with ~5 channels
+            # apiece scaled to 250k SELECT/sec on `messages` for the
+            # "nothing changed" common case. The bulk variant rides
+            # the same `(channel_id, sent_at, message_id)` composite
+            # index and returns at most `MAX_UNVIEWED_BURST` rows.
             try:
-                # Get unread message IDs for all channels
+                # `viewed_messages_ids` is the bounded (latest-2000)
+                # read-history tail, cached per-user for 60s. The
+                # invalidator at `add_message_to_read_history` keeps
+                # it fresh; here we just read.
                 viewed_messages_ids = (
                     api_initializer.database_handler.get_user_read_messages_ids(user_id)
                 )
 
+                fetched_messages = (
+                    api_initializer.messages_manager.load_messages(
+                        websocket=True,
+                        channel_id=None,  # ignored when accessible_channels is passed below
+                        viewed_messages_ids=viewed_messages_ids,
+                        accessible_channels=accessible_channels,
+                    )
+                )
+
                 all_new_messages = []
-
-                # Check each accessible channel for new messages
-                for channel_id in accessible_channels:
-                    try:
-                        channel_messages = (
-                            api_initializer.messages_manager.load_messages(
-                                websocket=True,
-                                channel_id=channel_id,
-                                viewed_messages_ids=viewed_messages_ids,
-                            )
-                        )
-
-                        # Filter out already sent messages and add channel context
-                        for message in channel_messages:
-                            if isinstance(message, dict):
-                                message_id = message.get("message_id")
-                                if message_id and message_id not in sent_messages_ids:
-                                    # Add channel context to message
-                                    message["channel_id"] = channel_id
-                                    all_new_messages.append(message)
-
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to load messages for channel {channel_id}: {str(e)}"
-                        )
+                for message in fetched_messages:
+                    if not isinstance(message, dict):
                         continue
+                    message_id = message.get("message_id")
+                    if not message_id or message_id in sent_messages_ids:
+                        continue
+                    all_new_messages.append(message)
 
                 if not all_new_messages:
                     await asyncio.sleep(MESSAGE_POLL_INTERVAL)
