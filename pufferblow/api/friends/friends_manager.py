@@ -31,6 +31,7 @@ from sqlalchemy import and_, or_, select
 
 from pufferblow.api.database.tables.friend_request_blocks import FriendRequestBlocks
 from pufferblow.api.database.tables.friendships import Friendships
+from pufferblow.api.database.tables.users import Users
 
 if TYPE_CHECKING:
     from pufferblow.api.database.database_handler import DatabaseHandler
@@ -282,13 +283,58 @@ class FriendsManager:
 
     # ── Reads ────────────────────────────────────────────────────
 
+    def _hydrate_other_user(self, session, user_ids: list[str]) -> dict[str, dict]:
+        """One-shot lookup of username + origin_server for a batch of ids.
+
+        Returns a dict keyed by stringified user_id whose values are
+        small dicts of the user-facing identity:
+            {"username": <str>, "origin_server": <str>}
+
+        For shadow rows (federated users mirrored via WebFinger)
+        the stored `origin_server` is the remote host, which is
+        exactly what the client wants to render as
+        "username@remote-host". For native local users `origin_server`
+        is empty / None and the client treats it as "this instance".
+
+        Empty input → empty dict; missing rows → omitted from the
+        result so the caller can detect dangling foreign-key
+        references (shouldn't happen given CASCADE, but defensive).
+        """
+        if not user_ids:
+            return {}
+        normalized = [self._normalize_user_id(uid) for uid in user_ids]
+        rows = session.execute(
+            select(Users.user_id, Users.username, Users.origin_server).where(
+                Users.user_id.in_(normalized)
+            )
+        ).all()
+        return {
+            str(row[0]): {
+                "username": row[1] or "",
+                "origin_server": row[2] or "",
+            }
+            for row in rows
+        }
+
+    def _attach_identity(
+        self, payload: dict, identity_map: dict[str, dict]
+    ) -> dict:
+        """Splice the resolved identity onto a friendship dict."""
+        identity = identity_map.get(payload.get("other_user_id", ""), {})
+        payload["other_username"] = identity.get("username", "")
+        payload["other_origin_server"] = identity.get("origin_server", "")
+        return payload
+
     def list_friends(self, *, user_id: str) -> list[dict]:
         """Return every accepted friend for `user_id`.
 
-        Result rows surface BOTH the friendship row and the other
-        side of the pair, so the client doesn't need a follow-up
-        lookup to render a name / avatar. The 'other_user_id' field
-        is whichever side of the pair isn't `user_id`.
+        Each row carries the friendship row PLUS:
+          * `other_user_id`        — the side of the pair that isn't `user_id`
+          * `other_username`       — joined from `users.username`
+          * `other_origin_server`  — joined from `users.origin_server`;
+                                     empty string for local users.
+        Client renders `<username>@<origin_server>` or just `<username>`
+        when origin is empty (local).
         """
         normalized = self._normalize_user_id(user_id)
         with self.database_handler.database_session() as session:
@@ -302,25 +348,29 @@ class FriendsManager:
                 )
             ).scalars().all()
 
-            results: list[dict] = []
+            shaped: list[dict] = []
+            other_ids: list[str] = []
             for row in rows:
                 other_user_id = (
                     str(row.addressee_id)
                     if str(row.requester_id) == str(user_id)
                     else str(row.requester_id)
                 )
-                results.append({
+                other_ids.append(other_user_id)
+                shaped.append({
                     **row.to_dict(),
                     "other_user_id": other_user_id,
                 })
-            return results
+
+            identity_map = self._hydrate_other_user(session, other_ids)
+            return [self._attach_identity(p, identity_map) for p in shaped]
 
     def list_pending(self, *, user_id: str) -> dict:
         """Return the user's incoming + outgoing pending requests.
 
-        Split by direction so the UI can label each section
-        ("Sent" vs "Received") without re-deriving from
-        requester/addressee on the client.
+        Same identity hydration as `list_friends`. Split by direction
+        so the UI can label each section ("Sent" vs "Received") without
+        re-deriving from requester / addressee on the client.
         """
         normalized = self._normalize_user_id(user_id)
         with self.database_handler.database_session() as session:
@@ -337,17 +387,25 @@ class FriendsManager:
                 )
             ).scalars().all()
 
-        def _shape(row: Friendships, *, other_user_id: str) -> dict:
-            return {**row.to_dict(), "other_user_id": other_user_id}
+            shaped_in = [
+                {**row.to_dict(), "other_user_id": str(row.requester_id)}
+                for row in incoming
+            ]
+            shaped_out = [
+                {**row.to_dict(), "other_user_id": str(row.addressee_id)}
+                for row in outgoing
+            ]
+            identity_map = self._hydrate_other_user(
+                session,
+                [p["other_user_id"] for p in shaped_in + shaped_out],
+            )
 
         return {
             "incoming": [
-                _shape(row, other_user_id=str(row.requester_id))
-                for row in incoming
+                self._attach_identity(p, identity_map) for p in shaped_in
             ],
             "outgoing": [
-                _shape(row, other_user_id=str(row.addressee_id))
-                for row in outgoing
+                self._attach_identity(p, identity_map) for p in shaped_out
             ],
         }
 
@@ -444,7 +502,12 @@ class FriendsManager:
             return True
 
     def list_blocks(self, *, blocker_id: str) -> list[dict]:
-        """Return every user the actor has blocked from sending requests."""
+        """Return every user the actor has blocked from sending requests.
+
+        Hydrated with the blocked user's `username` + `origin_server`
+        so the client's Blocked tab can render
+        "<username>@<origin>" instead of a raw user_id.
+        """
         normalized = self._normalize_user_id(blocker_id)
         with self.database_handler.database_session() as session:
             rows = session.execute(
@@ -452,4 +515,17 @@ class FriendsManager:
                     FriendRequestBlocks.blocker_id == normalized
                 )
             ).scalars().all()
-        return [row.to_dict() for row in rows]
+            identity_map = self._hydrate_other_user(
+                session, [str(row.blocked_id) for row in rows]
+            )
+
+        results: list[dict] = []
+        for row in rows:
+            blocked_id = str(row.blocked_id)
+            identity = identity_map.get(blocked_id, {})
+            results.append({
+                **row.to_dict(),
+                "blocked_username": identity.get("username", ""),
+                "blocked_origin_server": identity.get("origin_server", ""),
+            })
+        return results

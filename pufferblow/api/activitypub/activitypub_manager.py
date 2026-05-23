@@ -417,6 +417,85 @@ class ActivityPubManager:
         )
         return str(updated_actor.user_id)
 
+    async def resolve_user_id_for_handle(
+        self,
+        *,
+        username: str,
+        origin_server: str | None,
+        base_url: str,
+    ) -> str | None:
+        """Resolve `(username, origin_server)` to a local-DB `user_id`.
+
+        Used by the friend-request flow when the user adds a friend
+        by handle (e.g. typing `alice` + "This instance" in the
+        Add Friend modal, or `alice` + `mastodon.example` for a
+        federated friend).
+
+        Behaviour:
+          * Local (`origin_server` is empty / None / matches THIS
+            instance's host) → straight `users.username` lookup. The
+            global UNIQUE constraint on `username` guarantees at
+            most one hit.
+          * Remote → WebFinger → `fetch_remote_actor` →
+            `_ensure_remote_shadow_user`, returning the shadow row's
+            `user_id` so the friend-graph row can reference it the
+            same way it would a local one. This is the only path
+            that triggers shadow creation outside of an inbound
+            Create(Note); we want it here because adding a friend
+            shouldn't require the remote user to message you first.
+
+        Returns `None` when the local lookup misses or when the
+        WebFinger lookup fails — the route layer translates that
+        into a 404 for the client.
+        """
+        normalized_username = (username or "").strip()
+        if not normalized_username:
+            return None
+
+        if self._is_local_origin(origin_server):
+            user = self.database_handler.get_user(username=normalized_username)
+            return str(user.user_id) if user is not None else None
+
+        # Remote — let WebFinger resolve actor URI, fetch it, and
+        # create / reuse the shadow user row.
+        handle = f"{normalized_username}@{(origin_server or '').strip()}"
+        try:
+            actor_uri = await self.resolve_actor_uri_from_handle(handle)
+            remote_actor = await self.fetch_remote_actor(actor_uri=actor_uri)
+        except Exception as exc:
+            logger.warning(
+                "Friend handle resolution failed: handle={h} err={e}",
+                h=handle, e=str(exc),
+            )
+            return None
+        return self._ensure_remote_shadow_user(remote_actor=remote_actor)
+
+    def _is_local_origin(self, origin_server: str | None) -> bool:
+        """True iff `origin_server` is empty / None / equals this host.
+
+        The empty / None case is the natural shape when the client
+        ticks "This instance" in the Add Friend modal. The
+        host-comparison case is defensive — a federated client that
+        explicitly passes our own host should still resolve locally
+        instead of round-tripping through WebFinger.
+        """
+        if not origin_server:
+            return True
+        normalized = origin_server.strip().lower().rstrip("/")
+        if not normalized:
+            return True
+        try:
+            base = self._base_url().rstrip("/")
+        except Exception:
+            return False
+        # `base` is `http(s)://host[:port]` — strip the scheme so the
+        # comparison ignores the wire scheme the operator picked.
+        for scheme in ("https://", "http://"):
+            if base.startswith(scheme):
+                base = base[len(scheme):]
+                break
+        return normalized == base.lower()
+
     async def _resolve_peer(self, peer: str, base_url: str) -> ActivityPubPeer:
         """
         Resolve a peer as local user, remote handle, or actor URI.

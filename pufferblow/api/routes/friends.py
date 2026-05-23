@@ -44,24 +44,70 @@ def _raise_from_friends_error(exc: FriendsError) -> None:
 @router.post("/requests", status_code=201)
 async def send_friend_request_route(
     auth_token: str,
-    target_user_id: str = Body(..., embed=True),
+    target_user_id: str | None = Body(default=None, embed=True),
+    target_username: str | None = Body(default=None, embed=True),
+    target_origin_server: str | None = Body(default=None, embed=True),
 ):
-    """Send a friend request to `target_user_id`.
+    """Send a friend request.
+
+    Two ways to identify the target — pass EXACTLY one:
+
+      * `target_user_id` — when the client already knows the local
+        UUID (e.g. clicking "Add Friend" on a user's UserCard).
+      * `target_username` + `target_origin_server` — handle form,
+        used by the Friends-panel "Add Friend" modal. Pass an
+        empty string or omit `target_origin_server` to mean
+        "this instance"; otherwise it's resolved via WebFinger
+        and a shadow `users` row is created for the remote actor
+        on first add. The shadow row carries `origin_server` so
+        subsequent listings render `username@remote-host` without
+        a separate hydration call.
 
     Idempotent — if a row already exists in either direction with
     any status, the response returns that existing row instead of
-    creating a duplicate. The caller can inspect `status` to
-    distinguish "freshly sent" from "already pending" from "already
-    friends."
+    creating a duplicate. Inspect `friendship.status` to know whether
+    the action moved the graph.
     """
     actor_user_id = get_current_user(auth_token)
-    if not api_initializer.user_manager.check_user(user_id=target_user_id):
-        raise exceptions.HTTPException(
-            status_code=404, detail="Target user not found."
+
+    # Resolve the target — either by id (local only) or by handle
+    # (local OR remote via WebFinger).
+    resolved_target_user_id: str | None = None
+    if target_user_id:
+        if not api_initializer.user_manager.check_user(user_id=target_user_id):
+            raise exceptions.HTTPException(
+                status_code=404, detail="Target user not found."
+            )
+        resolved_target_user_id = target_user_id
+    elif target_username:
+        # Handle path. `target_origin_server` empty / None / matching
+        # this instance's host resolves locally; anything else is a
+        # WebFinger lookup.
+        resolved_target_user_id = (
+            await api_initializer.activitypub_manager.resolve_user_id_for_handle(
+                username=target_username,
+                origin_server=target_origin_server,
+                base_url=api_initializer.activitypub_manager._base_url(),
+            )
         )
+        if not resolved_target_user_id:
+            raise exceptions.HTTPException(
+                status_code=404,
+                detail=(
+                    f"Could not find {target_username}"
+                    + (f"@{target_origin_server}" if target_origin_server else "")
+                    + " — check the spelling and instance."
+                ),
+            )
+    else:
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail="Provide either target_user_id, or target_username (+ optional target_origin_server).",
+        )
+
     try:
         row = api_initializer.friends_manager.send_request(
-            requester_id=actor_user_id, addressee_id=target_user_id
+            requester_id=actor_user_id, addressee_id=resolved_target_user_id
         )
     except FriendsError as exc:
         _raise_from_friends_error(exc)
