@@ -1113,18 +1113,55 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
     def get_unread_message_counts_by_channel(
         self, user_id: str, channel_ids: list[str] | None = None
     ) -> dict[str, int]:
-        """Return unread message counts grouped by channel for the given user."""
+        """Return unread message counts per channel for the badge UI.
+
+        The count must satisfy two consistency rules — both bugs in
+        the previous implementation:
+
+        1. Self-consistent with what the WS catch-up burst actually
+           delivers. The realtime path
+           (`fetch_unviewed_messages_across_channels`) enforces a
+           7-day `sent_at` floor (`UNVIEWED_BURST_MAX_AGE`); anything
+           older is not in the burst response, the client never sees
+           it, the client never reads it, and so the client's
+           "unread" dot would stay lit forever if we counted it
+           here. Apply the same floor.
+
+        2. Use the FULL read-history list, not the cached bounded
+           tail. `get_user_read_messages_ids` caps the cached return
+           at `READ_HISTORY_CACHE_LIMIT` (2000) for memcache item-size
+           safety — fine for the WS poll's `NOT IN` filter that's
+           already time-floored, but if we used the truncated list
+           HERE we'd count anything older than the 2000-id suffix as
+           unread and the dot would resurface on already-read
+           channels. So we read the raw row directly and pair it
+           with the time floor for cheap correctness.
+        """
         if channel_ids is not None and len(channel_ids) == 0:
             return {}
 
-        viewed_messages_ids = self.get_user_read_messages_ids(user_id)
-        counts: dict[str, int] = {}
-
+        # Raw read-history — bypass the bounded cache helper. The
+        # query is filtered by `sent_at >= floor` below so the
+        # `NOT IN` set we feed Postgres is still bounded (only the
+        # read-history entries newer than the floor matter; the
+        # planner prunes the rest at filter time).
         with self.database_session() as session:
+            raw = session.execute(
+                select(MessageReadHistory.viewed_messages_ids).where(
+                    MessageReadHistory.user_id == user_id
+                )
+            ).fetchone()
+            viewed_messages_ids: list[str] = list((raw[0] or []) if raw else [])
+
+            floor = (
+                datetime.datetime.now(datetime.timezone.utc)
+                - self.UNVIEWED_BURST_MAX_AGE
+            )
+
             query = session.query(
                 Messages.channel_id,
                 func.count(Messages.message_id),
-            )
+            ).filter(Messages.sent_at >= floor)
 
             if channel_ids:
                 query = query.filter(Messages.channel_id.in_(channel_ids))
@@ -1133,9 +1170,11 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 query = query.filter(Messages.message_id.not_in(viewed_messages_ids))
 
             rows = query.group_by(Messages.channel_id).all()
-            for channel_id, count in rows:
-                if channel_id:
-                    counts[str(channel_id)] = int(count)
+
+        counts: dict[str, int] = {}
+        for channel_id, count in rows:
+            if channel_id and count > 0:
+                counts[str(channel_id)] = int(count)
 
         return counts
 
