@@ -187,6 +187,17 @@ def _backfill_search_tokens(batch_size: int) -> None:
     total_done = 0
     total_failed = 0
 
+    # SQLAlchemy 2.x autobegins a transaction the moment we issue the
+    # first `execute(...)` on a connection. That means we can't wrap
+    # subsequent UPDATEs in a fresh `connection.begin()` — it raises
+    # "connection has already initialized a Transaction." Pattern that
+    # works in 2.x: call `connection.commit()` between logical
+    # operations to release the autobegun transaction and let the next
+    # one autobegin cleanly. Each loop iteration commits its own
+    # batch — partial progress survives if we crash mid-run, and the
+    # `WHERE search_tokens IS NULL` predicate naturally skips the rows
+    # we already finished, so re-running the command picks up where we
+    # left off.
     with handler.database_engine.connect() as connection:
         # Count first so the progress log is meaningful. The WHERE
         # clause matches the same predicate we'll loop on; on a
@@ -199,6 +210,7 @@ def _backfill_search_tokens(batch_size: int) -> None:
                     "WHERE search_tokens IS NULL AND hashed_message IS NOT NULL"
                 )
             ).scalar()
+            connection.commit()
         except Exception as exc:
             _ui_error(f"Could not count messages to backfill: {exc}")
             raise SystemExit(1)
@@ -227,6 +239,7 @@ def _backfill_search_tokens(batch_size: int) -> None:
                     ),
                     {"n": batch_size},
                 ).fetchall()
+                connection.commit()
             except Exception as exc:
                 _ui_error(f"Backfill SELECT failed: {exc}")
                 raise SystemExit(1)
@@ -264,16 +277,23 @@ def _backfill_search_tokens(batch_size: int) -> None:
 
             if updates:
                 try:
-                    with connection.begin():
-                        connection.execute(
-                            text(
-                                "UPDATE messages "
-                                "SET search_tokens = to_tsvector('simple', :t) "
-                                "WHERE message_id = :id"
-                            ),
-                            updates,
-                        )
+                    connection.execute(
+                        text(
+                            "UPDATE messages "
+                            "SET search_tokens = to_tsvector('simple', :t) "
+                            "WHERE message_id = :id"
+                        ),
+                        updates,
+                    )
+                    connection.commit()
                 except Exception as exc:
+                    # Roll back the autobegun transaction so the
+                    # connection is reusable; bail loudly so the
+                    # operator notices.
+                    try:
+                        connection.rollback()
+                    except Exception:
+                        pass
                     _ui_error(f"Backfill UPDATE failed mid-batch: {exc}")
                     raise SystemExit(1)
 
@@ -284,6 +304,20 @@ def _backfill_search_tokens(batch_size: int) -> None:
                 total=pending,
                 failed=total_failed,
             )
+
+            # Safety: if every row in this batch failed to decrypt or
+            # produced no tokens AND the SELECT keeps returning the
+            # same rows (because their `search_tokens` is still NULL),
+            # we'd loop forever. Break out when we made no forward
+            # progress AND the batch was full.
+            if not updates and len(rows) == batch_size:
+                logger.warning(
+                    "Backfill stalled: a full batch of {n} rows produced no "
+                    "updates (all decrypt-fails or empty plaintexts). "
+                    "Stopping to avoid an infinite loop.",
+                    n=len(rows),
+                )
+                break
 
     logger.success(
         "Search backfill complete: {done} indexed, {failed} skipped.",
