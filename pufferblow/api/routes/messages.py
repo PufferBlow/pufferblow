@@ -29,7 +29,13 @@ SEARCH_MAX_SCAN_LIMIT = 5000
 
 # Reactions must be short. The DB column is 32 chars to comfortably fit
 # multi-codepoint emoji like flags or skin-tone modifiers.
-REACTION_EMOJI_MAX_LENGTH = 32
+# Widened from 32 → 64 alongside the DB column widening so sticker
+# reactions (``sticker:<36-char-uuid>`` = 43 chars) fit. Plain
+# Unicode emoji are typically 1–8 codepoints / under 32 chars, so
+# this raises the ceiling without lowering the floor. The 64 cap
+# matches the ``message_reactions.emoji`` column width — anything
+# over 64 would truncate at the DB layer.
+REACTION_EMOJI_MAX_LENGTH = 64
 from pufferblow.api.dependencies import (
     check_channel_access,
     ensure_user_not_timed_out,
@@ -78,9 +84,23 @@ async def parse_send_message_form(
         "", description="ISO timestamp when message was sent by client"
     ),
     attachments: list[UploadFile] = Form([], description="File attachments (optional)"),
-) -> tuple[SendMessageForm, list[UploadFile]]:
+    sticker_ids: str = Form(
+        "",
+        description=(
+            "Comma-separated list of sticker_ids from the instance "
+            "library to include on this message. The server looks up "
+            "each id and synthesises the attachment dict from the "
+            "sticker_url — no file re-upload."
+        ),
+    ),
+) -> tuple[SendMessageForm, list[UploadFile], list[str]]:
     """
     Parse multipart form data into a validated SendMessageForm.
+
+    Returns a 3-tuple: validated form, file attachments (need
+    upload), and parsed sticker_ids (already on the server, just
+    need to be looked up + appended to the message's attachment
+    list).
     """
     form_data = SendMessageForm(
         auth_token=auth_token,
@@ -88,8 +108,10 @@ async def parse_send_message_form(
         sent_at=sent_at,
         attachments=[],
     )
-
-    return form_data, attachments
+    parsed_sticker_ids = [
+        sid.strip() for sid in (sticker_ids or "").split(",") if sid.strip()
+    ]
+    return form_data, attachments, parsed_sticker_ids
 
 
 @router.get("/load_messages", status_code=200, response_model=LoadMessagesResponse)
@@ -291,7 +313,7 @@ async def channel_search_messages(
 @router.post("/send_message")
 async def channel_send_message(
     channel_id: str,
-    form_data: tuple[SendMessageForm, list[UploadFile]] = Depends(
+    form_data: tuple[SendMessageForm, list[UploadFile], list[str]] = Depends(
         parse_send_message_form
     ),
 ):
@@ -300,15 +322,16 @@ async def channel_send_message(
 
     Args:
         channel_id: Channel ID
-        form_data: Validated form data and file attachments
+        form_data: Validated form data, file attachments, and
+            referenced sticker_ids from the instance library.
 
     Returns:
         201 CREATED: Message sent successfully
         400 BAD REQUEST: Invalid message or attachments
         404 NOT FOUND: Channel not found or no access
     """
-    # Unpack validated form data and attachments
-    validated_form, attachments = form_data
+    # Unpack validated form data, file attachments, and sticker refs.
+    validated_form, attachments, sticker_ids = form_data
     auth_token = validated_form.auth_token
     message = validated_form.message
     sent_at = validated_form.sent_at
@@ -322,8 +345,8 @@ async def channel_send_message(
             status_code=400,
         )
 
-    # Check if message is empty and no attachments
-    if not message.strip() and not attachments:
+    # Check if message is empty and no attachments / stickers
+    if not message.strip() and not attachments and not sticker_ids:
         raise exceptions.HTTPException(
             detail="Either a message or attachments must be provided.", status_code=400
         )
@@ -403,6 +426,37 @@ async def channel_send_message(
                         status_code=500,
                         detail=f"Failed to upload attachment '{file.filename}'. Please try again.",
                     )
+
+    # Resolve sticker_id references into attachment dicts. Sticker
+    # bytes are already in storage so no upload is needed — we just
+    # look up each row, validate it's active, and append the
+    # `type: "sticker"` attachment shape that the client renderer
+    # routes through the inline StickerRenderer branch. Missing or
+    # deactivated stickers raise 400 so the client can surface a
+    # clean error to the user (rather than silently dropping the
+    # reference and sending an empty message).
+    if sticker_ids and api_initializer.stickers_manager is not None:
+        for sid in sticker_ids:
+            sticker_row = api_initializer.database_handler.get_sticker_by_id(sid)
+            if sticker_row is None or not sticker_row.is_active:
+                raise exceptions.HTTPException(
+                    status_code=400,
+                    detail=f"Sticker '{sid}' isn't available.",
+                )
+            attachment_objects.append({
+                "url": sticker_row.sticker_url,
+                "filename": sticker_row.filename,
+                # The marker the client renderer checks to route this
+                # attachment through the inline StickerRenderer.
+                "type": "sticker",
+                "size": 0,
+                # Carry the sticker_id through so the manager's
+                # usage_count bump (and any future analytics) can key
+                # off the canonical id rather than parsing the URL.
+                "sticker_id": sticker_row.sticker_id,
+                "display_name": sticker_row.display_name,
+                "alias": sticker_row.alias,
+            })
 
     message_obj = api_initializer.messages_manager.send_message(
         channel_id=channel_id,
@@ -533,6 +587,17 @@ async def channel_add_message_reaction(
             detail=f"`emoji` exceeds the {REACTION_EMOJI_MAX_LENGTH}-character maximum.",
             status_code=400,
         )
+
+    # Sticker reactions go through the same column but require the
+    # referenced sticker to exist + be active. The manager's
+    # validator returns the key unchanged on success; raises a
+    # StickersError on miss which we map to the proper HTTP status.
+    if api_initializer.stickers_manager is not None and emoji_value.startswith("sticker:"):
+        from pufferblow.api.stickers.stickers_manager import StickersError
+        try:
+            emoji_value = api_initializer.stickers_manager.validate_reaction_key(emoji_value)
+        except StickersError as exc:
+            raise exceptions.HTTPException(status_code=exc.status_code, detail=str(exc))
 
     user_id = require_privilege(auth_token, "send_messages")
     check_channel_access(user_id, channel_id)

@@ -173,9 +173,52 @@ async def follow_remote_actor(request_body: ActivityPubFollowRequest, request: R
 async def send_direct_message(request_body: DirectMessageSendRequest, request: Request):
     """
     Send direct message to local or remote peer.
+
+    The wire model carries three optional payload classes:
+
+      * ``message`` — text body (markdown, may be empty).
+      * ``attachments`` — list of URL strings already on storage
+        (e.g. uploaded earlier via ``/api/v1/storage/upload``).
+      * ``sticker_ids`` — list of sticker IDs from the instance
+        library. Resolved server-side and merged into the
+        attachment URL list. Remote peers see the resulting URL
+        as a normal media attachment; the local renderer
+        recognises sticker URLs (via the cached sticker library
+        keyed on URL) and routes them through the inline
+        StickerRenderer.
+
+    At least one of the three must be non-empty.
     """
     user_id = get_current_user(request_body.auth_token)
     base_url = _request_base_url(request)
+
+    # Validate "at least one of body / attachments / stickers".
+    if (
+        not (request_body.message or "").strip()
+        and not request_body.attachments
+        and not request_body.sticker_ids
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Either a message, attachments, or stickers must be provided.",
+        )
+
+    # Resolve sticker_ids → URLs. We keep the wire shape of
+    # ``attachments`` as a flat URL list because the DM federation
+    # path (ActivityPub Note) expects strings; the typed-attachment
+    # shape used by channels is a server-side internal convention.
+    # Sticker reverse-lookup (URL → sticker_id) on read happens via
+    # the cached library on the client.
+    merged_attachments: list[str] = list(request_body.attachments)
+    if request_body.sticker_ids and api_initializer.stickers_manager is not None:
+        for sid in request_body.sticker_ids:
+            sticker_row = api_initializer.database_handler.get_sticker_by_id(sid)
+            if sticker_row is None or not sticker_row.is_active:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Sticker '{sid}' isn't available.",
+                )
+            merged_attachments.append(sticker_row.sticker_url)
 
     try:
         result = await api_initializer.activitypub_manager.send_direct_message(
@@ -184,7 +227,7 @@ async def send_direct_message(request_body: DirectMessageSendRequest, request: R
             message=request_body.message,
             base_url=base_url,
             sent_at=request_body.sent_at,
-            attachments=request_body.attachments,
+            attachments=merged_attachments,
         )
     except Exception as exc:
         logger.error(f"Direct message send failed: {str(exc)}")

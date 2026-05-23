@@ -364,6 +364,19 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 err=str(exc),
             )
 
+        # Stickers v1: add display_name + alias columns to
+        # server_stickers, and widen message_reactions.emoji from
+        # VARCHAR(32) to VARCHAR(64) so sticker-reaction keys
+        # (``sticker:<uuid>``, 43 chars) fit. Idempotent — skipped
+        # cleanly on instances that already have the new shape.
+        try:
+            self._apply_stickers_migration()
+        except Exception as exc:
+            logger.warning(
+                "stickers migration skipped due to error: {err}",
+                err=str(exc),
+            )
+
     def _create_tables_safely(self, base: DeclarativeBase) -> None:
         """
         Create all declared tables in a single idempotent call.
@@ -508,6 +521,154 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         if added:
             logger.info(
                 "Blocked IP counter columns added to live schema: {cols}",
+                cols=", ".join(added),
+            )
+
+    def _apply_stickers_migration(self) -> None:
+        """Bring stickers + sticker-reactions tables to v1 shape.
+
+        Three jobs, all idempotent so this is safe on every boot:
+
+          1. ``server_stickers.display_name`` (VARCHAR(64), NOT NULL,
+             default empty string). The picker shows this as the
+             user-facing label; legacy rows backfill to the filename
+             (stripped of its extension) so existing instances don't
+             render with empty labels.
+          2. ``server_stickers.alias`` (VARCHAR(48), nullable, unique).
+             Optional shortcode for type-to-send. NULL on legacy rows
+             — admins assign aliases later via the management UI.
+             Unique index is created separately so the migration can
+             survive existing duplicate NULLs (Postgres treats NULLs
+             as distinct under a UNIQUE constraint, so this is fine).
+          3. ``message_reactions.emoji`` widened from VARCHAR(32) to
+             VARCHAR(64). Sticker-reaction keys ``sticker:<uuid>``
+             are 43 chars — they DON'T fit in 32. The ALTER uses
+             ``TYPE`` which Postgres handles in-place for VARCHAR
+             length expansions (no table rewrite). SQLite ignores
+             the length entirely, so this is a Postgres-targeted
+             change; SQLite is already wide enough by accident.
+
+        Skipped silently on instances that don't have the tables yet
+        (test path with ``postgresql_only_tables``).
+        """
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.database_engine)
+        dialect = self.database_engine.dialect.name
+
+        # --- server_stickers column adds ---------------------------------
+        try:
+            existing = {col["name"] for col in inspector.get_columns("server_stickers")}
+        except Exception as exc:
+            logger.debug(
+                "server_stickers table not present, skipping stickers migration: {err}",
+                err=str(exc),
+            )
+            return
+
+        added: list[str] = []
+        sticker_columns: list[tuple[str, str]] = [
+            # display_name is NOT NULL with an empty-string default so
+            # the ALTER backfills cleanly in one statement.
+            ("display_name", "VARCHAR(64) NOT NULL DEFAULT ''"),
+            # alias is nullable; the unique index is added below.
+            ("alias", "VARCHAR(48)"),
+        ]
+        for col_name, col_clause in sticker_columns:
+            if col_name in existing:
+                continue
+            ddl = f"ALTER TABLE server_stickers ADD COLUMN {col_name} {col_clause}"
+            try:
+                with self.database_engine.begin() as conn:
+                    conn.execute(text(ddl))
+            except Exception as exc:
+                logger.error(
+                    "Failed to add column server_stickers.{col}: {err}",
+                    col=col_name,
+                    err=str(exc),
+                )
+                raise
+            added.append(f"server_stickers.{col_name}")
+
+        # Backfill display_name from filename for rows that pre-date
+        # the column. Strip the extension so "happy_cat.png" becomes
+        # "happy_cat". Idempotent — only touches rows still at the
+        # empty default.
+        if "display_name" in existing or any(
+            a == "server_stickers.display_name" for a in added
+        ):
+            try:
+                with self.database_engine.begin() as conn:
+                    # The regex strips the LAST extension only; multi-dot
+                    # filenames like "foo.bar.png" keep "foo.bar".
+                    if dialect == "postgresql":
+                        conn.execute(
+                            text(
+                                "UPDATE server_stickers "
+                                "SET display_name = regexp_replace(filename, '\\.[^.]+$', '') "
+                                "WHERE display_name = '' OR display_name IS NULL"
+                            )
+                        )
+                    else:
+                        # SQLite fallback — just copy the filename.
+                        conn.execute(
+                            text(
+                                "UPDATE server_stickers SET display_name = filename "
+                                "WHERE display_name = '' OR display_name IS NULL"
+                            )
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Sticker display_name backfill skipped: {err}", err=str(exc)
+                )
+
+        # Unique index on alias. Has to be separate from the column
+        # add because the column may be created with NULLs in many
+        # rows — adding the index in a second step keeps the column
+        # add atomic. ``IF NOT EXISTS`` keeps it idempotent.
+        if dialect == "postgresql":
+            try:
+                with self.database_engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS "
+                            "ix_server_stickers_alias_unique "
+                            "ON server_stickers (alias) WHERE alias IS NOT NULL"
+                        )
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Sticker alias unique index creation skipped: {err}",
+                    err=str(exc),
+                )
+
+        # --- message_reactions.emoji width ------------------------------
+        # Postgres-only — SQLite ignores VARCHAR lengths entirely so
+        # nothing to do there. We don't bother inspecting the current
+        # width; ALTER ... TYPE VARCHAR(64) is a no-op when the column
+        # is already that wide, and a non-locking metadata-only change
+        # when it's narrower (Postgres special-cases VARCHAR length
+        # expansions since 9.2).
+        if dialect == "postgresql":
+            try:
+                with self.database_engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE message_reactions "
+                            "ALTER COLUMN emoji TYPE VARCHAR(64)"
+                        )
+                    )
+            except Exception as exc:
+                # Non-fatal — if the widen fails the reaction code
+                # path just truncates / fails on sticker keys, which
+                # is recoverable. Emoji reactions still work.
+                logger.warning(
+                    "Reaction emoji column widen skipped: {err}", err=str(exc)
+                )
+
+        if added:
+            logger.info(
+                "Sticker columns added to live schema: {cols}",
                 cols=", ".join(added),
             )
 
@@ -4364,6 +4525,16 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 "name": "Manage Background Tasks",
                 "category": "server_management",
             },
+            # Sticker library management. Distinct from ``upload_files``
+            # (which is broadly granted to every regular user so they
+            # can attach files to messages); ``manage_stickers`` gates
+            # the curated, instance-wide sticker library that everyone
+            # shares — only admins / owner should be touching it.
+            {
+                "id": "manage_stickers",
+                "name": "Manage Stickers",
+                "category": "server_management",
+            },
         ]
 
         # Default roles data
@@ -4400,6 +4571,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                     "delete_files",
                     "view_files",
                     "manage_background_tasks",
+                    "manage_stickers",
                 ],
             },
             {
@@ -4431,6 +4603,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                     "delete_files",
                     "view_files",
                     "manage_background_tasks",
+                    "manage_stickers",
                 ],
             },
             {
@@ -4545,33 +4718,55 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
 
     def add_sticker_to_catalog(
-        self, sticker_url: str, filename: str, uploaded_by: uuid.UUID
+        self,
+        sticker_url: str,
+        filename: str,
+        uploaded_by: uuid.UUID,
+        display_name: str | None = None,
+        alias: str | None = None,
     ) -> str:
         """
         Add a sticker to the server catalog if it doesn't already exist.
 
         Args:
-            sticker_url (str): The storage URL of the sticker
-            filename (str): Original filename of the sticker
-            uploaded_by (uuid.UUID): User ID of who uploaded it
+            sticker_url (str): The storage URL of the sticker.
+            filename (str): Original filename of the sticker.
+            uploaded_by (uuid.UUID): User ID of who uploaded it.
+            display_name (str, optional): User-facing label for the
+                sticker. Falls back to the filename without its
+                extension when not provided — gives a clean default
+                without the admin having to type anything.
+            alias (str, optional): Optional ``:shortcode:``-style
+                handle. Unique per instance; passing a duplicate raises.
 
         Returns:
-            str: The sticker ID
+            str: The sticker ID.
         """
-        # Check if this sticker URL already exists
+        # Check if this sticker URL already exists. Dedup at the
+        # URL layer covers the case where the admin re-uploads the
+        # same file bytes (StorageManager dedupes by hash, so the
+        # URL collides) — we bump usage and return the existing id.
         existing_sticker = self.get_sticker_by_url(sticker_url)
         if existing_sticker:
-            # Increment usage count
             self.increment_sticker_usage(existing_sticker.sticker_id)
             return existing_sticker.sticker_id
 
-        # Generate new sticker ID
-        sticker_id = str(uuid.uuid4())
+        # Sensible default for display_name: filename minus the last
+        # extension. The migration backfills the same way for legacy
+        # rows, so we keep that convention here.
+        resolved_display_name = (display_name or "").strip()
+        if not resolved_display_name:
+            resolved_display_name = filename.rsplit(".", 1)[0] if "." in filename else filename
 
+        resolved_alias = (alias or "").strip() or None
+
+        sticker_id = str(uuid.uuid4())
         sticker = ServerStickers(
             sticker_id=sticker_id,
             sticker_url=sticker_url,
             filename=filename,
+            display_name=resolved_display_name,
+            alias=resolved_alias,
             uploaded_by=uploaded_by,
         )
 
@@ -4580,6 +4775,83 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.commit()
 
         return sticker_id
+
+    def get_sticker_by_id(self, sticker_id: str) -> ServerStickers | None:
+        """Fetch a single sticker by primary key. Returns None on miss."""
+        with self.database_session() as session:
+            stmt = select(ServerStickers).where(ServerStickers.sticker_id == sticker_id)
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def get_sticker_by_alias(self, alias: str) -> ServerStickers | None:
+        """Fetch a single sticker by its unique alias. Returns None on miss."""
+        with self.database_session() as session:
+            stmt = select(ServerStickers).where(ServerStickers.alias == alias)
+            result = session.execute(stmt).fetchone()
+            return result[0] if result else None
+
+    def update_sticker_metadata(
+        self,
+        sticker_id: str,
+        display_name: str | None = None,
+        alias: str | None = None,
+        is_active: bool | None = None,
+    ) -> ServerStickers | None:
+        """Patch a sticker's mutable metadata.
+
+        Each arg is independently optional — pass only the fields the
+        admin actually changed. Passing ``alias=""`` clears the alias
+        (DB NULL); passing a value reassigns it (unique check is
+        enforced by the DB index, so a 409-shaped error bubbles up
+        from the session.commit()).
+
+        Returns the refreshed row, or ``None`` if the sticker_id
+        doesn't exist.
+        """
+        import datetime
+
+        with self.database_session() as session:
+            sticker = session.get(ServerStickers, sticker_id)
+            if sticker is None:
+                return None
+            if display_name is not None:
+                cleaned = display_name.strip()
+                if cleaned:
+                    sticker.display_name = cleaned
+            if alias is not None:
+                # Empty string explicitly clears the alias.
+                cleaned_alias = alias.strip()
+                sticker.alias = cleaned_alias or None
+            if is_active is not None:
+                sticker.is_active = is_active
+            sticker.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            session.commit()
+            session.refresh(sticker)
+            session.expunge(sticker)
+            return sticker
+
+    def delete_sticker(self, sticker_id: str) -> str | None:
+        """Hard-delete a sticker row by id.
+
+        Returns the row's ``sticker_url`` so the caller can dereference
+        the underlying storage file (ref-count decrement; the file is
+        only removed when no other references hold it). Returns
+        ``None`` when the sticker_id doesn't exist.
+
+        We delete rather than soft-deactivate here because the
+        management UI exposes ``is_active`` separately — when the
+        admin clicks Delete they want it gone, full stop. Already-
+        sent messages keep their inline rendering because they
+        reference the storage URL directly, not the sticker_id.
+        """
+        with self.database_session() as session:
+            sticker = session.get(ServerStickers, sticker_id)
+            if sticker is None:
+                return None
+            sticker_url = sticker.sticker_url
+            session.delete(sticker)
+            session.commit()
+            return sticker_url
 
     def add_gif_to_catalog(
         self, gif_url: str, filename: str, uploaded_by: uuid.UUID
@@ -4687,23 +4959,38 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.execute(stmt)
             session.commit()
 
-    def list_server_stickers(self, limit: int = 50, offset: int = 0) -> list[dict]:
+    def list_server_stickers(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        include_inactive: bool = False,
+    ) -> list[dict]:
         """
-        List server stickers ordered by usage count.
+        List server stickers ordered by usage count then recency.
 
         Args:
-            limit (int): Maximum number of stickers to return
-            offset (int): Offset for pagination
+            limit: Maximum number of stickers to return. Default
+                bumped to 200 — the picker requests the full library
+                in one shot, and 200 is a comfortable ceiling for
+                v1 instance libraries; pagination kicks in past that.
+            offset: Pagination offset.
+            include_inactive: Owner/admin view returns deactivated
+                stickers too so the management UI can show them.
+                Default False — the picker only ever wants active
+                stickers.
 
         Returns:
-            list[dict]: List of sticker dictionaries
+            List of sticker dicts in the client wire shape
+            (``ServerStickers.to_dict()``).
         """
         with self.database_session() as session:
+            stmt = select(ServerStickers)
+            if not include_inactive:
+                stmt = stmt.where(ServerStickers.is_active == True)
             stmt = (
-                select(ServerStickers)
-                .where(ServerStickers.is_active == True)
-                .order_by(
-                    ServerStickers.usage_count.desc(), ServerStickers.created_at.desc()
+                stmt.order_by(
+                    ServerStickers.usage_count.desc(),
+                    ServerStickers.created_at.desc(),
                 )
                 .limit(limit)
                 .offset(offset)
@@ -4711,18 +4998,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             stickers = session.execute(stmt).fetchall()
 
-            return [
-                {
-                    "sticker_id": s.sticker_id,
-                    "sticker_url": s.sticker_url,
-                    "filename": s.filename,
-                    "uploaded_by": str(s.uploaded_by),
-                    "usage_count": s.usage_count,
-                    "created_at": s.created_at,
-                    "updated_at": s.updated_at,
-                }
-                for s in stickers
-            ]
+            # Use the model's ``to_dict`` so the wire shape stays in
+            # one place — adding a column means changing one method,
+            # not three call sites.
+            return [s[0].to_dict() for s in stickers]
 
     def list_server_gifs(self, limit: int = 50, offset: int = 0) -> list[dict]:
         """

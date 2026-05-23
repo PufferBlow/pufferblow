@@ -452,12 +452,26 @@ class DirectMessageSendRequest(BaseModel):
         min_length=1,
         description="Peer user_id/username for local DM, or remote handle user@domain, or actor URI",
     )
-    message: str = Field(min_length=1)
+    # `min_length=1` removed — a sticker-only message has an empty
+    # body. We validate "either body OR attachments OR stickers" at
+    # the route layer below, same as the channel send path.
+    message: str = Field(default="")
     sent_at: str | None = Field(
         default=None, description="Optional ISO timestamp sent by client"
     )
     attachments: list[str] = Field(
         default_factory=list, description="Optional attachment URLs for federated Note"
+    )
+    sticker_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sticker IDs from the instance library to attach. The "
+            "server resolves each id to its storage URL and includes "
+            "it in the federated Note's attachment array — remote "
+            "peers see a normal media attachment, local renderers "
+            "see the sticker_id and route through the inline "
+            "StickerRenderer."
+        ),
     )
 
 

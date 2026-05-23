@@ -352,6 +352,14 @@ class MessagesManager:
         )
         self.database_handler.save_message(message=message_metadata)
         self.database_handler.save_keys(key=encryption_key)
+        # Bump usage_count for any sticker attachments so the picker can
+        # rank most-used first. Best-effort — handled inside the manager
+        # via try/except, so a bump failure can't break the send.
+        try:
+            if api_initializer.stickers_manager is not None:
+                api_initializer.stickers_manager.bump_usage_from_attachments(attachments)
+        except Exception:  # pragma: no cover - defensive only
+            pass
         return message_metadata
 
     def send_direct_message(
@@ -375,6 +383,13 @@ class MessagesManager:
         )
         self.database_handler.save_direct_message(message=message_metadata)
         self.database_handler.save_keys(key=encryption_key)
+        # Same sticker-usage bump as send_message. Best-effort.
+        try:
+            from pufferblow.core.bootstrap import api_initializer as _ai
+            if _ai.stickers_manager is not None:
+                _ai.stickers_manager.bump_usage_from_attachments(attachments)
+        except Exception:  # pragma: no cover - defensive only
+            pass
         return message_metadata
 
     def delete_message(self, message_id: str, channel_id: str) -> None:

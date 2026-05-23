@@ -16,6 +16,21 @@ class MessageReactions(Base):
     A composite primary key on ``(message_id, user_id, emoji)`` enforces that a
     user can only react once with a given emoji to a given message. A user can
     still apply multiple distinct emoji to the same message.
+
+    The ``emoji`` column carries either:
+
+      * A Unicode emoji (one or more codepoints, e.g. ``"👍"`` or
+        ``"👨‍👩‍👧"`` — the latter is a multi-codepoint ZWJ sequence).
+      * An instance sticker reaction key of the form
+        ``"sticker:<sticker_id>"`` where ``<sticker_id>`` is the UUID
+        of a row in ``server_stickers``. The 7-char prefix +
+        36-char UUID totals 43 chars, so the column width must
+        comfortably exceed 32 — we use 64 to leave headroom for
+        future reaction types (e.g. ``"custom:<id>"`` if per-server
+        custom emoji land later) without another schema change.
+
+    Render-side code routes the value by inspecting the ``sticker:``
+    prefix; the storage layer doesn't care which shape it is.
     """
 
     __tablename__ = "message_reactions"
@@ -32,7 +47,9 @@ class MessageReactions(Base):
         nullable=False,
         index=True,
     )
-    emoji: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Widened from 32 → 64 to accommodate sticker-reaction keys
+    # (``sticker:<36-char-uuid>``); see class docstring.
+    emoji: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
