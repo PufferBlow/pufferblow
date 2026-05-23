@@ -284,17 +284,29 @@ class FriendsManager:
     # ── Reads ────────────────────────────────────────────────────
 
     def _hydrate_other_user(self, session, user_ids: list[str]) -> dict[str, dict]:
-        """One-shot lookup of username + origin_server for a batch of ids.
+        """One-shot lookup of identity fields for a batch of user ids.
 
         Returns a dict keyed by stringified user_id whose values are
         small dicts of the user-facing identity:
-            {"username": <str>, "origin_server": <str>}
+
+            {
+                "username": <str>,
+                "origin_server": <str>,
+                "avatar_url": <str | None>,
+                "status": <str>,
+            }
 
         For shadow rows (federated users mirrored via WebFinger)
         the stored `origin_server` is the remote host, which is
         exactly what the client wants to render as
         "username@remote-host". For native local users `origin_server`
         is empty / None and the client treats it as "this instance".
+
+        `avatar_url` and `status` let the client render an avatar
+        circle + presence dot on each friend / pending / blocked row
+        without a follow-up `/users/{id}` lookup per row. Both
+        degrade gracefully — empty avatar_url falls back to the
+        client's DiceBear identicon keyed on username.
 
         Empty input → empty dict; missing rows → omitted from the
         result so the caller can detect dangling foreign-key
@@ -304,14 +316,20 @@ class FriendsManager:
             return {}
         normalized = [self._normalize_user_id(uid) for uid in user_ids]
         rows = session.execute(
-            select(Users.user_id, Users.username, Users.origin_server).where(
-                Users.user_id.in_(normalized)
-            )
+            select(
+                Users.user_id,
+                Users.username,
+                Users.origin_server,
+                Users.avatar_url,
+                Users.status,
+            ).where(Users.user_id.in_(normalized))
         ).all()
         return {
             str(row[0]): {
                 "username": row[1] or "",
                 "origin_server": row[2] or "",
+                "avatar_url": row[3] or None,
+                "status": row[4] or "offline",
             }
             for row in rows
         }
@@ -323,6 +341,8 @@ class FriendsManager:
         identity = identity_map.get(payload.get("other_user_id", ""), {})
         payload["other_username"] = identity.get("username", "")
         payload["other_origin_server"] = identity.get("origin_server", "")
+        payload["other_avatar_url"] = identity.get("avatar_url")
+        payload["other_status"] = identity.get("status", "offline")
         return payload
 
     def list_friends(self, *, user_id: str) -> list[dict]:
@@ -527,5 +547,6 @@ class FriendsManager:
                 **row.to_dict(),
                 "blocked_username": identity.get("username", ""),
                 "blocked_origin_server": identity.get("origin_server", ""),
+                "blocked_avatar_url": identity.get("avatar_url"),
             })
         return results
