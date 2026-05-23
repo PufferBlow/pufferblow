@@ -3395,6 +3395,69 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             )
         return bool(deleted)
 
+    def bulk_set_channel_mute(
+        self, *, user_id: str, channel_ids: list[str], muted: bool
+    ) -> int:
+        """Apply the same `muted` state to many channels in one session.
+
+        Two shapes, depending on `muted`:
+
+        * `muted=True`  → upsert a preference row for every channel
+          with `muted=True, mention_only=False`. This is the
+          "Mute Server" affordance — it walks the user's accessible
+          channels and silences each one.
+        * `muted=False` → DELETE the preference row for every channel
+          (resets to default = notify). Matches the per-channel
+          `DELETE /preferences/{channel_id}` semantics for un-mute,
+          so an unmute leaves no row behind.
+
+        Returns the number of rows touched. Single transaction, so a
+        partial failure rolls the whole bulk back — better than a
+        half-muted server the user can't reason about.
+        """
+        if not channel_ids:
+            return 0
+        now = _datetime.now(timezone.utc)
+        touched = 0
+        with self.database_session() as session:
+            if muted:
+                existing = {
+                    row.channel_id: row
+                    for row in session.query(NotificationPreferences)
+                    .filter(
+                        NotificationPreferences.user_id == user_id,
+                        NotificationPreferences.channel_id.in_(channel_ids),
+                    )
+                    .all()
+                }
+                for channel_id in channel_ids:
+                    row = existing.get(channel_id)
+                    if row is None:
+                        row = NotificationPreferences(
+                            user_id=user_id,
+                            channel_id=channel_id,
+                            muted=True,
+                            mention_only=False,
+                            updated_at=now,
+                        )
+                        session.add(row)
+                        touched += 1
+                    elif not row.muted:
+                        row.muted = True
+                        row.mention_only = False
+                        row.updated_at = now
+                        touched += 1
+            else:
+                touched = (
+                    session.query(NotificationPreferences)
+                    .filter(
+                        NotificationPreferences.user_id == user_id,
+                        NotificationPreferences.channel_id.in_(channel_ids),
+                    )
+                    .delete(synchronize_session=False)
+                )
+        return int(touched or 0)
+
     def is_channel_muted_for_user(self, user_id: str, channel_id: str) -> bool:
         """Hot-path check called from record_mentions_for_message.
 
@@ -3591,6 +3654,123 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         # Drop the cached bounded read-history list so the next WS poll
         # tick filters this new id out of the unviewed-burst response.
         self._invalidate_user_read_history(user_id)
+
+    def add_messages_to_read_history(
+        self, user_id: str, message_ids: list[str]
+    ) -> int:
+        """Bulk-append message_ids to a user's read history.
+
+        Returns the number of NEW ids appended (already-present ids
+        are deduped and don't count). Single UPDATE / INSERT, single
+        cache invalidation. Used by the "Mark Channel Read" /
+        "Mark Server Read" affordances which would otherwise need
+        N round-trips through `add_message_to_read_history`.
+        """
+        if not message_ids:
+            return 0
+
+        updated_at = datetime.datetime.now(datetime.timezone.utc)
+        read_history_user_id = str(user_id) if self._is_sqlite() else user_id
+        # Dedup the caller's input first so a single channel-fetch
+        # with duplicate row ids doesn't bloat the column.
+        incoming = list(dict.fromkeys(message_ids))
+
+        with self.database_session() as session:
+            stmt = select(MessageReadHistory).where(
+                MessageReadHistory.user_id == read_history_user_id
+            )
+            read_history = session.execute(stmt).scalar_one_or_none()
+
+            if read_history is None:
+                read_history = MessageReadHistory(
+                    user_id=read_history_user_id,
+                    viewed_messages_ids=incoming,
+                    updated_at=updated_at,
+                )
+                session.add(read_history)
+                session.commit()
+                self._invalidate_user_read_history(user_id)
+                return len(incoming)
+
+            current = list(read_history.viewed_messages_ids or [])
+            current_set = set(current)
+            additions = [mid for mid in incoming if mid not in current_set]
+            if not additions:
+                # Nothing new — bail before issuing an UPDATE that wouldn't
+                # change a single column. Also skips the cache invalidation
+                # so concurrent readers don't pay the refill cost for a
+                # no-op write.
+                return 0
+
+            current.extend(additions)
+            read_history.viewed_messages_ids = current
+            read_history.updated_at = updated_at
+            session.commit()
+
+        self._invalidate_user_read_history(user_id)
+        return len(additions)
+
+    def mark_channel_read(self, user_id: str, channel_id: str) -> int:
+        """Mark every visible message in a channel as read for `user_id`.
+
+        Visibility window is `UNVIEWED_BURST_MAX_AGE` (7 days) — the same
+        floor `get_unread_message_counts_by_channel` uses, so the unread
+        badge collapses to zero immediately after this call. Messages
+        older than the floor weren't being counted as unread anyway.
+
+        Returns the number of newly-marked-read messages. Idempotent
+        (running twice in a row returns 0 the second time).
+        """
+        floor = (
+            datetime.datetime.now(datetime.timezone.utc)
+            - self.UNVIEWED_BURST_MAX_AGE
+        )
+        with self.database_session() as session:
+            message_ids = [
+                row[0]
+                for row in session.execute(
+                    select(Messages.message_id).where(
+                        Messages.channel_id == channel_id,
+                        Messages.sent_at >= floor,
+                    )
+                ).fetchall()
+            ]
+        added = self.add_messages_to_read_history(user_id, message_ids)
+        # Also drop the per-user notification count cache — marking a
+        # channel read can change the badge by clearing pending mention
+        # notifications for that channel.
+        self._invalidate_unread_notifications_count(str(user_id))
+        return added
+
+    def mark_channels_read_bulk(
+        self, user_id: str, channel_ids: list[str]
+    ) -> int:
+        """Mark every visible message across many channels as read.
+
+        Single SELECT across `WHERE channel_id IN (...)` plus a single
+        bulk read-history UPDATE. Used by the server-wide "Mark Server
+        Read" affordance — calling `mark_channel_read` per channel
+        would issue N×2 queries instead of 2.
+        """
+        if not channel_ids:
+            return 0
+        floor = (
+            datetime.datetime.now(datetime.timezone.utc)
+            - self.UNVIEWED_BURST_MAX_AGE
+        )
+        with self.database_session() as session:
+            message_ids = [
+                row[0]
+                for row in session.execute(
+                    select(Messages.message_id).where(
+                        Messages.channel_id.in_(channel_ids),
+                        Messages.sent_at >= floor,
+                    )
+                ).fetchall()
+            ]
+        added = self.add_messages_to_read_history(user_id, message_ids)
+        self._invalidate_unread_notifications_count(str(user_id))
+        return added
 
     def delete_message(self, message_id: str, channel_id: str) -> None:
         """

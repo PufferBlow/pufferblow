@@ -120,6 +120,60 @@ async def get_read_history_route(auth_token: str):
     }
 
 
+@router.post("/{channel_id}/mark_all_read", status_code=200)
+async def mark_channel_read_route(channel_id: str, auth_token: str):
+    """Mark every visible message in a channel as read for the viewer.
+
+    Visibility window matches `get_unread_message_counts_by_channel`'s
+    7-day floor, so the unread badge collapses to zero immediately after
+    this call rather than waiting for a per-message read-confirmation
+    walk. Backs the "Mark As Read" channel-context-menu item on the
+    client.
+    """
+    user_id = get_current_user(auth_token)
+    # Permission boundary: same as the read-history endpoint. A user
+    # must have access to a channel before they can mark it read.
+    check_channel_access(user_id=user_id, channel_id=channel_id)
+    added = api_initializer.database_handler.mark_channel_read(
+        user_id=user_id, channel_id=channel_id
+    )
+    return {
+        "status_code": 200,
+        "channel_id": channel_id,
+        "newly_marked_read": int(added),
+    }
+
+
+@router.post("/mark_all_read", status_code=200)
+async def mark_server_read_route(auth_token: str):
+    """Bulk-mark every accessible channel as read.
+
+    Single DB transaction. Backs the server-dropdown "Mark All As Read"
+    affordance — clicking it should collapse every channel's unread
+    dot at once without N round-trips from the client.
+    """
+    user_id = get_current_user(auth_token)
+    accessible = api_initializer.channels_manager.list_channels(
+        user_id=user_id,
+        include_private_channels=api_initializer.user_manager.has_privilege(
+            user_id=user_id, privilege_id="view_private_channels"
+        ),
+    )
+    channel_ids = [
+        channel.get("channel_id")
+        for channel in accessible or []
+        if isinstance(channel, dict) and channel.get("channel_id")
+    ]
+    added = api_initializer.database_handler.mark_channels_read_bulk(
+        user_id=user_id, channel_ids=channel_ids
+    )
+    return {
+        "status_code": 200,
+        "channels_touched": len(channel_ids),
+        "newly_marked_read": int(added),
+    }
+
+
 @router.post("/create/", status_code=200)
 async def create_new_channel_route(request: CreateChannelRequest):
     """

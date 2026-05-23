@@ -173,3 +173,45 @@ async def reset_notification_preference(channel_id: str, auth_token: str):
         "status_code": 200,
         "existed": existed,
     }
+
+
+@router.put("/preferences", status_code=200)
+async def bulk_set_notification_preference(
+    auth_token: str,
+    muted: bool = Body(default=False, embed=True),
+):
+    """Apply the same `muted` state to every accessible channel.
+
+    Body:
+        muted: when true, upsert a `muted=True` preference row for
+            every channel the viewer can access — this is the "Mute
+            Server" affordance. When false, DELETE the preference
+            row for every accessible channel (back to defaults).
+
+    Returns the number of channels touched + the count for client-
+    side toast feedback. A single transaction in the database so a
+    partial failure rolls back cleanly — no half-muted server.
+    """
+    user_id = get_current_user(auth_token)
+    accessible = api_initializer.channels_manager.list_channels(
+        user_id=user_id,
+        include_private_channels=api_initializer.user_manager.has_privilege(
+            user_id=user_id, privilege_id="view_private_channels"
+        ),
+    )
+    channel_ids = [
+        channel.get("channel_id")
+        for channel in accessible or []
+        if isinstance(channel, dict) and channel.get("channel_id")
+    ]
+    touched = api_initializer.database_handler.bulk_set_channel_mute(
+        user_id=user_id,
+        channel_ids=channel_ids,
+        muted=bool(muted),
+    )
+    return {
+        "status_code": 200,
+        "muted": bool(muted),
+        "channels_total": len(channel_ids),
+        "channels_changed": int(touched),
+    }
