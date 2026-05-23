@@ -5,7 +5,7 @@ import hashlib
 import json
 import time
 import uuid
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 import sqlalchemy
 from loguru import logger
@@ -144,6 +144,60 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         from pufferblow.api.cache.memcache import get_cache, server_key
 
         get_cache(self.config).delete(server_key())
+
+    def _invalidate_server_settings_cache(self) -> None:
+        """Drop the cached ServerSettings row in both tiers.
+
+        Called from `update_server_settings`. The in-process LRU in
+        this worker is dropped synchronously; other workers' local
+        tiers fall through to memcache (which we just emptied) on
+        their next read, within their 5-second TTL.
+        """
+        if self._is_sqlite():
+            return
+        from pufferblow.api.cache.memcache import (
+            get_cache,
+            get_local_cache,
+            server_settings_key,
+        )
+
+        key = server_settings_key()
+        get_cache(self.config).delete(key)
+        get_local_cache().delete(key)
+
+    def _invalidate_blocked_ip_cache(self, ip: str) -> None:
+        """Drop the per-IP blocked-IP cache sentinel.
+
+        Called from every mutation site that flips an IP's blocked
+        state (`save_blocked_ip_to_blocked_ips`, `delete_blocked_ip`)
+        so a manual unblock takes effect on the next request, not
+        after the 60s TTL.
+        """
+        if self._is_sqlite():
+            return
+        from pufferblow.api.cache.memcache import blocked_ip_key, get_cache
+
+        get_cache(self.config).delete(blocked_ip_key(ip))
+
+    def _invalidate_channel_cache(self, channel_id: str) -> None:
+        """Drop the cached `Channels` row after a mutation."""
+        if self._is_sqlite():
+            return
+        from pufferblow.api.cache.memcache import channel_key, get_cache
+
+        get_cache(self.config).delete(channel_key(str(channel_id)))
+
+    def _invalidate_user_privileges_cache(self, user_id: str) -> None:
+        """Drop the cached privilege set for a user.
+
+        Called from anything that mutates the user's `roles_ids` or
+        the privilege catalog inside one of those roles.
+        """
+        if self._is_sqlite():
+            return
+        from pufferblow.api.cache.memcache import get_cache, user_privileges_key
+
+        get_cache(self.config).delete(user_privileges_key(str(user_id)))
 
     def setup_tables(self, base: DeclarativeBase) -> None:
         """
@@ -2076,7 +2130,18 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
     def update_role(
         self, role_id: str, *, role_name: str, privileges_ids: list[str]
     ) -> Roles | None:
-        """Update an existing role."""
+        """Update an existing role.
+
+        Note: this mutates the privilege set that every user holding
+        the role inherits, so the cached `pb:user_privs:{user_id}`
+        values for those users become stale. We deliberately do NOT
+        enumerate those users to invalidate explicitly — that would
+        require a full users scan against the very table the cache
+        exists to protect — and instead rely on the 60s TTL on the
+        privilege cache to absorb the staleness. Role edits are an
+        operator action; ~1 minute of inertia on the role change is
+        acceptable.
+        """
         current_timestamp = datetime.datetime.now(datetime.timezone.utc)
         with self.database_session() as session:
             stmt = select(Roles).where(Roles.role_id == role_id)
@@ -2122,7 +2187,14 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.add(user)
             session.commit()
             session.refresh(user)
-            return user
+            session.expunge(user)
+
+        # Drop the user row cache so subsequent reads see the new
+        # roles_ids list, and drop the resolved privilege set so the
+        # next privilege check recomputes against the new roles.
+        self._invalidate_user_cache(user_id)
+        self._invalidate_user_privileges_cache(user_id)
+        return user
 
     def fetch_channels(self, user_id: str) -> list[tuple[Channels]]:
         """
@@ -2181,6 +2253,11 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             session.commit()
 
+        # Drop any cached negative entry from a previous existence
+        # check against this channel_id so the next read sees the new
+        # row instead of the stale "does not exist" sentinel.
+        self._invalidate_channel_cache(channel.channel_id)
+
         logger.info(
             info.INFO_NEW_CHANNEL_CREATED(
                 user_id=user_id,
@@ -2194,6 +2271,13 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         Fetch the metadata of a `channel` from
         the `channels` table in the database
 
+        Cached for ~5 minutes per channel_id. Every send_message,
+        load_messages, reaction add/remove, and permission check
+        funnels through this method 1-2 times; caching it removes a
+        Postgres roundtrip from every message-shaped request. The
+        cached row is detached from its session so it can be re-used
+        across sessions without `DetachedInstanceError`.
+
         Args:
             `channel_id` (str): The channel's `channel_id`.
 
@@ -2201,15 +2285,37 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             Channels: A `Channels` table object.
             None: If the channel doesn't exists.
         """
-        channel_metadata = None
+        if not self._is_sqlite():
+            from pufferblow.api.cache.memcache import channel_key, get_cache
 
+            cache = get_cache(self.config)
+            key = channel_key(str(channel_id))
+            cached = cache.get(key)
+            if cached is not None:
+                # Sentinel `False` => "we tried, the channel does not
+                # exist". Cache the negative so repeated probes for a
+                # missing channel don't hammer Postgres.
+                return None if cached is False else cached
+        else:
+            cache = None
+            key = None
+
+        channel_metadata = None
         with self.database_session() as session:
             stmt = select(Channels).where(Channels.channel_id == channel_id)
+            row = session.execute(stmt).fetchone()
+            if row is not None:
+                channel_metadata = row[0]
+                session.expunge(channel_metadata)
 
-            channel_metadata = session.execute(stmt).fetchone()
+        if cache is not None and key is not None:
+            from pufferblow.api.cache.memcache import jittered_ttl
 
-        if channel_metadata is not None:
-            channel_metadata = channel_metadata[0]
+            cache.set(
+                key,
+                channel_metadata if channel_metadata is not None else False,
+                ttl=jittered_ttl(300),
+            )
 
         return channel_metadata
 
@@ -2243,6 +2349,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             session.commit()
 
+        self._invalidate_channel_cache(channel_id)
+
     def update_channel_metadata(
         self,
         channel_id: str,
@@ -2274,7 +2382,9 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.add(channel)
             session.commit()
             session.refresh(channel)
-            return channel
+            session.expunge(channel)
+        self._invalidate_channel_cache(channel_id)
+        return channel
 
     def add_user_to_channel(self, to_add_user_id: str, channel_id: str) -> None:
         """
@@ -2314,6 +2424,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             session.commit()
 
+        # Membership is part of the cached channel row — invalidate
+        # so the next privilege check sees the new allowed_users list.
+        self._invalidate_channel_cache(channel_id)
+
     def remove_user_from_channel(self, to_remove_user_id: str, channel_id: str) -> None:
         """
         Remove a `user` from a private channel
@@ -2352,6 +2466,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 session.execute(stmt)
 
             session.commit()
+
+        self._invalidate_channel_cache(channel_id)
 
     def fetch_channel_messages(
         self, channel_id: str, messages_per_page: int, page: int
@@ -2934,6 +3050,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             session.commit()
 
+        # Drop the negative cache entry so the next request from this
+        # IP sees the block immediately instead of riding out the TTL.
+        self._invalidate_blocked_ip_cache(blocked_ip.ip)
+
     def fetch_blocked_ips(self) -> list[dict]:
         """
         Fetch a list of blocked ips from the blocked_ips table.
@@ -2976,18 +3096,46 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         """
         Checks if a raw IP addresses is already in the `blocked_ips` table.
 
+        Per-IP cached for 60s. We cache BOTH the positive ("yes,
+        blocked") and the negative ("no, clean") so that legitimate
+        traffic — which is the vast majority of `RateLimitingMiddleware`
+        calls — also stops hitting Postgres on every request. The
+        positive case is invalidated by `_invalidate_blocked_ip_cache`
+        on the unblock path; the negative case is bounded by the 60s
+        TTL (with jitter), so manually blocking an IP takes effect
+        within a minute even if invalidation gets skipped.
+
         Args:
             ip (str): The raw ip address to check.
 
         Returns:
             bool: True if the ip address is already blocked, otherwise False.
         """
+        if self._is_sqlite():
+            # Test harness — go straight to SQL, no daemon to talk to.
+            with self.database_session() as session:
+                stmt = select(BlockedIPS).where(BlockedIPS.ip == ip)
+                response = session.execute(stmt).fetchall()
+                return len(response) != 0
+
+        from pufferblow.api.cache.memcache import (
+            blocked_ip_key,
+            get_cache,
+            jittered_ttl,
+        )
+
+        cache = get_cache(self.config)
+        key = blocked_ip_key(ip)
+        cached = cache.get(key)
+        if cached is not None:
+            return bool(cached.get("blocked", False))
+
         with self.database_session() as session:
             stmt = select(BlockedIPS).where(BlockedIPS.ip == ip)
             response = session.execute(stmt).fetchall()
-
             is_blocked = len(response) != 0
 
+        cache.set(key, {"blocked": is_blocked}, ttl=jittered_ttl(60))
         return is_blocked
 
     def increment_blocked_ip_attempt(self, ip: str) -> None:
@@ -3041,14 +3189,22 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         """
         with self.database_session() as session:
             if blocked_ip is not None:
+                target_ip = blocked_ip.ip
                 result = session.execute(
                     delete(BlockedIPS).where(BlockedIPS.ip == blocked_ip.ip)
                 )
             else:
+                target_ip = ip
                 result = session.execute(delete(BlockedIPS).where(BlockedIPS.ip == ip))
 
             session.commit()
-            return result.rowcount > 0
+            deleted = result.rowcount > 0
+
+        # Drop the positive cache entry so traffic from the freshly
+        # unblocked IP is allowed on the next request.
+        if deleted and target_ip:
+            self._invalidate_blocked_ip_cache(target_ip)
+        return deleted
 
     def create_server_row(self, server: Server) -> None:
         """
@@ -3202,6 +3358,16 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         """
         Fetches the server settings row from the server_settings table.
 
+        Cached with a two-tier strategy: the in-process LRU absorbs
+        >99% of reads (this is hit by `RateLimitingMiddleware` on
+        EVERY request), backed by memcache so a cold worker doesn't
+        pay a Postgres roundtrip. Invalidated explicitly from
+        `update_server_settings` so a settings change propagates the
+        moment another worker re-reads from memcache (and within
+        ~5 seconds for the worker that did the write — its own
+        in-process tier carries the old value until then; acceptable
+        for a settings change that is itself rare and operator-driven).
+
         Args:
             None.
 
@@ -3214,17 +3380,53 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         if database_uri.startswith("sqlite://"):
             return None
 
+        # Tier 1: process-local LRU. ~5s TTL — bounds cross-worker
+        # propagation lag while still removing ~99% of memcache
+        # round-trips at peak load.
+        from pufferblow.api.cache.memcache import (
+            get_cache,
+            get_local_cache,
+            jittered_ttl,
+            server_settings_key,
+        )
+
+        local = get_local_cache()
+        key = server_settings_key()
+        cached_local = local.get(key)
+        if cached_local is not None:
+            # Sentinel `False` means "we tried, the row doesn't exist
+            # yet" — cache the negative so we don't refill on every
+            # request to a freshly-installed instance.
+            return None if cached_local is False else cached_local
+
+        # Tier 2: shared memcache.
+        cache = get_cache(self.config)
+        cached = cache.get(key)
+        if cached is not None:
+            local.set(key, cached, ttl_seconds=5)
+            return None if cached is False else cached
+
         try:
-            server_settings: ServerSettings
+            server_settings: ServerSettings | None = None
 
             with self.database_session() as session:
                 stmt = select(ServerSettings)
-                server_settings = session.execute(stmt).fetchone()
-
-            return server_settings[0] if server_settings else None
+                row = session.execute(stmt).fetchone()
+                if row is not None:
+                    server_settings = row[0]
+                    # Detach so the cached object outlives the session.
+                    session.expunge(server_settings)
         except Exception as e:
             logger.warning(f"Could not retrieve server settings, returning None: {e}")
             return None
+
+        # Cache hit or miss both deserve to be remembered — caching
+        # the negative result avoids retrying Postgres on every
+        # request when the row genuinely does not exist yet.
+        payload: Any = server_settings if server_settings is not None else False
+        cache.set(key, payload, ttl=jittered_ttl(300))
+        local.set(key, payload, ttl_seconds=5)
+        return server_settings
 
     def update_server_settings(self, settings_updates: dict) -> None:
         """
@@ -3254,6 +3456,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
 
             session.execute(stmt)
             session.commit()
+
+        self._invalidate_server_settings_cache()
 
         logger.info(f"Server settings updated: {list(settings_updates.keys())}")
 

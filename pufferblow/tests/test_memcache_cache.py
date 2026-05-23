@@ -220,3 +220,201 @@ def test_user_key_is_stable_for_string_uuid():
 
 def test_server_key_constant():
     assert server_key() == "pb:server"
+
+
+# ── New key builders (phase 1-4 expansion) ────────────────────────────
+
+
+def test_new_key_builders_are_stable():
+    """Pin the wire format for the new cache keys.
+
+    Any drift here would shadow reads against writes — invalidators
+    in database_handler must target the same shape readers used.
+    """
+    from pufferblow.api.cache.memcache import (
+        blocked_ip_key,
+        channel_key,
+        moderation_state_key,
+        rate_limit_cooldown_key,
+        rate_limit_counter_key,
+        rate_limit_warnings_key,
+        server_settings_key,
+        user_privileges_key,
+    )
+
+    assert server_settings_key() == "pb:server_settings"
+    assert blocked_ip_key("1.2.3.4") == "pb:blocked_ip:1.2.3.4"
+    assert moderation_state_key("u-1") == "pb:moderation:u-1"
+    assert channel_key("c-1") == "pb:channel:c-1"
+    assert user_privileges_key("u-1") == "pb:user_privs:u-1"
+    assert rate_limit_counter_key("1.2.3.4", 42) == "pb:rl:1.2.3.4:42"
+    assert rate_limit_warnings_key("1.2.3.4") == "pb:rlwarn:1.2.3.4"
+    assert rate_limit_cooldown_key("1.2.3.4") == "pb:rlcd:1.2.3.4"
+
+
+# ── Atomic counter primitives (incr/decr) ─────────────────────────────
+
+
+class CounterFakeClient:
+    """Fake client modelling the subset of pymemcache the wrapper drives.
+
+    Stores raw bytes (which is what memcache's `incr` operates on).
+    Implements the atomic-counter idiom: incr returns None on a
+    missing key, set/add behave like memcached's own ADD semantics.
+    """
+
+    def __init__(self, raise_on=None):
+        self.store: dict[str, bytes] = {}
+        self.ttls: dict[str, int | None] = {}
+        self._raise_on = set(raise_on or ())
+
+    def _check(self, op):
+        if op in self._raise_on:
+            raise RuntimeError(f"{op} failed")
+
+    def get(self, key):
+        self._check("get")
+        return self.store.get(key)
+
+    def set(self, key, value, expire=None):
+        self._check("set")
+        self.store[key] = value
+        self.ttls[key] = expire
+
+    def add(self, key, value, expire=None):
+        # `add` is a no-op when the key already exists — matches
+        # memcached's semantics. Returns True on success, False on miss.
+        self._check("add")
+        if key in self.store:
+            return False
+        self.store[key] = value
+        self.ttls[key] = expire
+        return True
+
+    def incr(self, key, delta):
+        self._check("incr")
+        raw = self.store.get(key)
+        if raw is None:
+            return None
+        try:
+            new_value = int(raw) + int(delta)
+        except (TypeError, ValueError):
+            return None
+        self.store[key] = str(new_value).encode("ascii")
+        return new_value
+
+    def decr(self, key, delta):
+        self._check("decr")
+        return self.incr(key, -int(delta))
+
+    def delete(self, key):
+        self._check("delete")
+        self.store.pop(key, None)
+
+
+def test_incr_seeds_missing_key_then_increments(monkeypatch):
+    """First incr against an absent key seeds + increments atomically."""
+    cache = MemcacheCache("h", 1, default_ttl=10)
+    fake = CounterFakeClient()
+    monkeypatch.setattr(cache, "_ensure_client", lambda: fake)
+
+    result = cache.incr("counter", delta=1)
+    assert result == 1
+    # Subsequent calls should just keep counting.
+    assert cache.incr("counter", delta=1) == 2
+    assert cache.incr("counter", delta=5) == 7
+
+
+def test_incr_returns_none_when_backend_unreachable(monkeypatch):
+    """Daemon down → None so the caller can fail open."""
+    cache = MemcacheCache("h", 1, default_ttl=10)
+
+    class Broken:
+        def get(self, key): raise RuntimeError("nope")
+        def set(self, *a, **kw): raise RuntimeError("nope")
+        def add(self, *a, **kw): raise RuntimeError("nope")
+        def incr(self, *a, **kw): raise RuntimeError("nope")
+        def decr(self, *a, **kw): raise RuntimeError("nope")
+        def delete(self, *a, **kw): raise RuntimeError("nope")
+
+    monkeypatch.setattr(cache, "_ensure_client", lambda: Broken())
+    assert cache.incr("k") is None
+
+
+def test_decr_is_a_negative_incr(monkeypatch):
+    cache = MemcacheCache("h", 1, default_ttl=10)
+    fake = CounterFakeClient()
+    fake.store["k"] = b"10"
+    monkeypatch.setattr(cache, "_ensure_client", lambda: fake)
+
+    assert cache.decr("k", delta=3) == 7
+
+
+# ── ProcessLocalCache (two-tier LRU) ──────────────────────────────────
+
+
+def test_process_local_cache_basic_lifecycle():
+    from pufferblow.api.cache.memcache import ProcessLocalCache
+
+    local = ProcessLocalCache(max_entries=2)
+    local.set("a", 1, ttl_seconds=60)
+    assert local.get("a") == 1
+    local.delete("a")
+    assert local.get("a") is None
+
+
+def test_process_local_cache_respects_ttl(monkeypatch):
+    """An expired entry must look like a miss AND get evicted."""
+    from pufferblow.api.cache import memcache as memcache_module
+
+    fake_clock = {"now": 1000.0}
+    monkeypatch.setattr(memcache_module.time, "monotonic", lambda: fake_clock["now"])
+
+    local = memcache_module.ProcessLocalCache(max_entries=8)
+    local.set("k", "v", ttl_seconds=5)
+    assert local.get("k") == "v"
+    fake_clock["now"] += 10  # past TTL
+    assert local.get("k") is None
+
+
+def test_process_local_cache_evicts_oldest_on_overflow():
+    from pufferblow.api.cache.memcache import ProcessLocalCache
+
+    local = ProcessLocalCache(max_entries=2)
+    local.set("a", 1, ttl_seconds=60)
+    local.set("b", 2, ttl_seconds=60)
+    local.set("c", 3, ttl_seconds=60)
+    # `a` is oldest by insertion → evicted.
+    assert local.get("a") is None
+    assert local.get("b") == 2
+    assert local.get("c") == 3
+
+
+def test_process_local_cache_get_marks_lru_touch():
+    """Reading bumps an entry to most-recent so it survives the next eviction."""
+    from pufferblow.api.cache.memcache import ProcessLocalCache
+
+    local = ProcessLocalCache(max_entries=2)
+    local.set("a", 1, ttl_seconds=60)
+    local.set("b", 2, ttl_seconds=60)
+    # Touch `a` so `b` becomes the oldest.
+    assert local.get("a") == 1
+    local.set("c", 3, ttl_seconds=60)
+    assert local.get("b") is None
+    assert local.get("a") == 1
+    assert local.get("c") == 3
+
+
+# ── Jittered TTL ──────────────────────────────────────────────────────
+
+
+def test_jittered_ttl_stays_in_band():
+    """The jitter must spread workers but never drop below 1s."""
+    from pufferblow.api.cache.memcache import jittered_ttl
+
+    for _ in range(50):
+        ttl = jittered_ttl(60, jitter_fraction=0.1)
+        assert 53 <= ttl <= 67  # 60 ± 10% with int truncation
+
+    assert jittered_ttl(1) == 1  # short TTLs aren't jittered
+    assert jittered_ttl(60, jitter_fraction=0) == 60  # explicit no-jitter

@@ -438,20 +438,30 @@ class UserManager:
             bool: True is the user exists, otherswise False.
         """
         if user_id is not None:
-            users_id = self.database_handler.get_users_id()
-
-            # Convert string user_id to UUID for comparison with UUID objects in the list
+            # PRE-100K HOT PATH: the original implementation here was
+            # `users_id = self.database_handler.get_users_id(); return uuid in users_id`,
+            # i.e. a full-table SELECT of every user row on EVERY
+            # authenticated request through SecurityMiddleware. At 100K
+            # users that is the #1 Postgres killer. The cached
+            # `get_user(user_id=...)` path turns the same check into a
+            # single keyed memcache read (and a single keyed Postgres
+            # read on miss), so existence collapses to "did get_user
+            # return a row?".
             try:
-                user_uuid = uuid.UUID(user_id)
-                return user_uuid in users_id
-            except ValueError:
+                uuid.UUID(str(user_id))
+            except (TypeError, ValueError):
                 logger.warning(f"Invalid user_id format: {user_id}")
                 return False
+            return self.database_handler.get_user(user_id=user_id) is not None
 
         if username is not None:
-            usernames = self.database_handler.get_usernames()
-
-            return username in usernames
+            # Username existence is only checked at signin/signup time
+            # (and a sparse handful of admin paths), not per-request.
+            # Route it through `get_user(username=...)` for the same
+            # reason — but note that path deliberately skips the cache
+            # (see comment in database_handler.get_user) because a
+            # stale row could leak a freshly-rotated credential.
+            return self.database_handler.get_user(username=username) is not None
 
         if auth_token is not None:
             is_users_auth_token = self.auth_token_manager.check_users_auth_token(
@@ -523,10 +533,50 @@ class UserManager:
         return resolved_roles
 
     def get_user_privileges(self, user_id: str) -> set[str]:
-        """Return the effective privilege set for a user."""
+        """Return the effective privilege set for a user.
+
+        Cached per user_id (60s TTL). Called from `has_privilege`
+        which fires from every privileged route via
+        `dependencies.require_privilege`. The uncached path issues
+        N+1 SELECTs (one per role) on every authorized request;
+        caching collapses it to a single memcache hit.
+
+        Invalidate via `_invalidate_user_privileges_cache(user_id)`
+        from anything that mutates `users.roles_ids` or the privilege
+        list inside one of the user's roles.
+        """
+        database_uri = str(self.database_handler.database_engine.url)
+        if not database_uri.startswith("sqlite://"):
+            from pufferblow.api.cache.memcache import (
+                get_cache,
+                user_privileges_key,
+            )
+
+            cache = get_cache(self.database_handler.config)
+            key = user_privileges_key(str(user_id))
+            cached = cache.get(key)
+            if cached is not None:
+                # Stored as a list (pickle-friendly) — rehydrate to a
+                # set for the caller's contract.
+                return set(cached)
+
         privilege_ids: set[str] = set()
         for role in self.get_user_roles(user_id=user_id):
             privilege_ids.update(role.get("privileges_ids") or [])
+
+        if not database_uri.startswith("sqlite://"):
+            from pufferblow.api.cache.memcache import (
+                get_cache,
+                jittered_ttl,
+                user_privileges_key,
+            )
+
+            get_cache(self.database_handler.config).set(
+                user_privileges_key(str(user_id)),
+                list(privilege_ids),
+                ttl=jittered_ttl(60),
+            )
+
         return privilege_ids
 
     def has_privilege(self, user_id: str, privilege_id: str) -> bool:
@@ -534,7 +584,28 @@ class UserManager:
         return privilege_id in self.get_user_privileges(user_id=user_id)
 
     def get_user_moderation_state(self, user_id: str) -> dict:
-        """Resolve ban and timeout state for a user from audit history."""
+        """Resolve ban and timeout state for a user from audit history.
+
+        Result is cached per user_id (60s TTL) — this used to scan 500
+        audit rows on every authenticated request through
+        `dependencies.get_current_user` and was the #2 Postgres hot
+        spot after `get_users_id`. The cache is invalidated explicitly
+        from the moderation routes via
+        `invalidate_user_moderation_state(user_id)` so a ban / unban /
+        timeout / clear takes effect on the next request, not after
+        the TTL.
+        """
+        # SQLite (test harness) skips the cache — same rationale as
+        # database_handler.get_user.
+        database_uri = str(self.database_handler.database_engine.url)
+        if not database_uri.startswith("sqlite://"):
+            from pufferblow.api.cache.memcache import get_cache, moderation_state_key
+
+            cache = get_cache(self.database_handler.config)
+            cached = cache.get(moderation_state_key(str(user_id)))
+            if cached is not None:
+                return cached
+
         now = datetime.datetime.now(datetime.timezone.utc)
         relevant_entries = self.database_handler.list_activity_audit_entries(
             activity_types=[
@@ -613,7 +684,7 @@ class UserManager:
                 timeout_reason = metadata.get("reason")
             break
 
-        return {
+        result = {
             "is_banned": is_banned,
             "ban_reason": ban_reason,
             "banned_at": banned_at,
@@ -621,6 +692,41 @@ class UserManager:
             "timeout_reason": timeout_reason,
             "is_timed_out": bool(timeout_until),
         }
+
+        if not database_uri.startswith("sqlite://"):
+            from pufferblow.api.cache.memcache import (
+                get_cache,
+                jittered_ttl,
+                moderation_state_key,
+            )
+
+            # Short TTL bounds staleness if a moderation write happens
+            # in another worker without invalidating us. Jitter avoids
+            # synchronized refills across workers.
+            get_cache(self.database_handler.config).set(
+                moderation_state_key(str(user_id)),
+                result,
+                ttl=jittered_ttl(60),
+            )
+
+        return result
+
+    def invalidate_user_moderation_state(self, user_id: str) -> None:
+        """Drop the cached moderation state for `user_id`.
+
+        Call this from every moderation route that writes an audit
+        entry against the target user (ban / unban / timeout /
+        timeout-cleared). Without this the cache would shadow the
+        write for up to 60s.
+        """
+        database_uri = str(self.database_handler.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return
+        from pufferblow.api.cache.memcache import get_cache, moderation_state_key
+
+        get_cache(self.database_handler.config).delete(
+            moderation_state_key(str(user_id))
+        )
 
     def is_banned(self, user_id: str) -> bool:
         """Return whether the user is currently banned."""

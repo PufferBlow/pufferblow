@@ -82,17 +82,42 @@ class MessageOperationsQuery(BaseModel):
 
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
-    """
-    Sliding-window rate limiting middleware with endpoint tiers and cooldowns.
+    """Distributed sliding-window rate limiting backed by memcache counters.
+
+    The previous implementation kept three per-IP dicts in process
+    memory (`request_timestamps_per_ip`, `cooldowns_per_ip`,
+    `warning_counts_per_ip`). With N gunicorn workers a client got
+    `N × limit` requests because nothing was shared between workers
+    — defeating the limit at any non-trivial deployment size and
+    making the 100K-user target unreachable.
+
+    The shared state moves to memcache as three keys per IP:
+
+      * `pb:rl:<ip>:<minute_bucket>`   — atomic `incr` counter,
+        TTL 120s. We sample the current bucket plus the immediately
+        previous one to approximate a sliding window without paying
+        for a sorted-set data structure memcache doesn't offer.
+      * `pb:rlwarn:<ip>`               — cumulative warning counter,
+        TTL 1 hour.
+      * `pb:rlcd:<ip>`                 — cooldown sentinel storing
+        the unix-epoch end time; the key itself expires when the
+        cooldown elapses.
+
+    Memcache `incr` returns `None` if the daemon is unreachable; the
+    wrapper's fail-open policy means a transient memcache outage
+    becomes "rate limit temporarily not enforced" rather than "every
+    request 500s." That is the right tradeoff for a security-but-not-
+    correctness control.
+
+    The in-process fallback (`_FallbackInProcessRateLimit`) is only
+    used by the SQLite test harness — production always goes through
+    memcache.
     """
 
     def __init__(self, app):
         """Initialize the instance."""
         super().__init__(app)
-        self.request_timestamps_per_ip = defaultdict(deque)
-        self.cooldowns_per_ip = {}
-        self.warning_counts_per_ip = defaultdict(int)
-        self.rate_limit_lock = asyncio.Lock()
+        self._fallback = _FallbackInProcessRateLimit()
 
     async def dispatch(self, request, call_next):
         """Dispatch."""
@@ -137,9 +162,202 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             "default": 1.0,
         }.get(endpoint_bucket, 1.0)
 
-        window = timedelta(minutes=max(base_window_minutes, 1))
+        window_minutes = max(base_window_minutes, 1)
         max_requests = max(5, int(base_max_requests * bucket_multiplier))
 
+        # SQLite test harness has no memcache daemon — fall back to
+        # the per-process implementation so the existing tests still
+        # exercise the threshold logic deterministically.
+        if str(
+            api_initializer.database_handler.database_engine.url
+        ).startswith("sqlite://"):
+            return await self._fallback.dispatch(
+                request=request,
+                call_next=call_next,
+                client_ip=client_ip,
+                window_minutes=window_minutes,
+                max_requests=max_requests,
+                max_rate_limit_warnings=max_rate_limit_warnings,
+            )
+
+        return await self._dispatch_via_memcache(
+            request=request,
+            call_next=call_next,
+            client_ip=client_ip,
+            window_minutes=window_minutes,
+            max_requests=max_requests,
+            max_rate_limit_warnings=max_rate_limit_warnings,
+        )
+
+    async def _dispatch_via_memcache(
+        self,
+        *,
+        request,
+        call_next,
+        client_ip: str,
+        window_minutes: int,
+        max_requests: int,
+        max_rate_limit_warnings: int,
+    ):
+        """Run the rate-limit checks against the shared memcache counters."""
+        from pufferblow.api.cache.memcache import (
+            get_cache,
+            rate_limit_cooldown_key,
+            rate_limit_counter_key,
+            rate_limit_warnings_key,
+        )
+
+        cache = get_cache(api_initializer.config)
+        now_epoch = int(datetime.now().timestamp())
+        minute_bucket = now_epoch // 60
+
+        # Cooldown check first — short-circuit before incrementing.
+        cooldown_value = cache.get(rate_limit_cooldown_key(client_ip))
+        if cooldown_value is not None:
+            try:
+                cooldown_until = int(cooldown_value)
+            except (TypeError, ValueError):
+                cooldown_until = 0
+            if cooldown_until > now_epoch:
+                retry_after_seconds = max(cooldown_until - now_epoch, 1)
+                return ORJSONResponse(
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after_seconds)},
+                    content={
+                        "message": "Rate limit exceeded. Cooldown active.",
+                        "retry_after_seconds": retry_after_seconds,
+                    },
+                )
+
+        # Increment the current minute bucket and sum the trailing
+        # window. The bucket TTL (120s) is independent of the window
+        # length: as long as it outlives the longest realistic window,
+        # the sum has the right answer.
+        current_count = cache.incr(
+            rate_limit_counter_key(client_ip, minute_bucket),
+            delta=1,
+            initial=0,
+            ttl=120,
+        )
+        if current_count is None:
+            # Memcache unreachable — fail OPEN. A flaky daemon must
+            # not become a denial-of-service vector against the
+            # server itself.
+            return await call_next(request)
+
+        windowed_total = int(current_count)
+        for back in range(1, max(1, window_minutes)):
+            prev = cache.get(rate_limit_counter_key(client_ip, minute_bucket - back))
+            if prev is None:
+                continue
+            try:
+                windowed_total += int(prev)
+            except (TypeError, ValueError):
+                continue
+
+        if windowed_total < max_requests:
+            return await call_next(request)
+
+        warnings_count = cache.incr(
+            rate_limit_warnings_key(client_ip),
+            delta=1,
+            initial=0,
+            ttl=3600,
+        )
+        warnings_count = int(warnings_count) if warnings_count is not None else 1
+        logger.warning(
+            warnings.IP_REACHED_RATE_LIMIT(
+                ip=client_ip,
+                request_count=windowed_total,
+                rate_limit_warnings=warnings_count,
+            )
+        )
+
+        if warnings_count > max_rate_limit_warnings:
+            logger.info(
+                info.CLIENT_IP_BLOCKED(
+                    client_ip=client_ip,
+                    requests_count=windowed_total,
+                    rate_limit_warnings=warnings_count,
+                )
+            )
+
+            blocked_ip = BlockedIPS(
+                ip=client_ip,
+                block_reason="The IP has exceeded the rate limit warnings threshold, indicating potential DDOS attack.",
+                ip_id=str(uuid.uuid4()),
+            )
+            api_initializer.database_handler.save_blocked_ip_to_blocked_ips(
+                blocked_ip=blocked_ip
+            )
+            return ORJSONResponse(
+                status_code=403,
+                content={
+                    "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
+                },
+            )
+
+        if 2 <= warnings_count <= max_rate_limit_warnings:
+            cooldown_seconds = min(300, 30 * warnings_count)
+            cache.set(
+                rate_limit_cooldown_key(client_ip),
+                now_epoch + cooldown_seconds,
+                ttl=cooldown_seconds,
+            )
+            return ORJSONResponse(
+                status_code=429,
+                headers={"Retry-After": str(cooldown_seconds)},
+                content={
+                    "message": "Rate limit exceeded. Please try again later.",
+                    "retry_after_seconds": cooldown_seconds,
+                },
+            )
+
+        return ORJSONResponse(
+            status_code=429,
+            content={"message": "Rate limit exceeded. Please try again later."},
+        )
+
+    @staticmethod
+    def _get_bucket(path: str) -> str:
+        """Get bucket."""
+        if "/signin" in path or "/signup" in path or "/auth/" in path:
+            return "auth"
+        if "/upload" in path or "/storage/" in path:
+            return "uploads"
+        if "/send_message" in path or "/load_messages" in path or "/ws" in path:
+            return "messages"
+        return "default"
+
+
+class _FallbackInProcessRateLimit:
+    """Per-process rate-limit state used only by the SQLite test harness.
+
+    Production runs through the memcache-backed path in
+    `RateLimitingMiddleware._dispatch_via_memcache`. This class
+    exists so the unit tests — which run against SQLite and have no
+    memcached daemon — can still exercise the rate-limit threshold
+    behaviour deterministically without us tying the test harness to
+    a real memcached.
+    """
+
+    def __init__(self) -> None:
+        self.request_timestamps_per_ip = defaultdict(deque)
+        self.cooldowns_per_ip: dict[str, datetime] = {}
+        self.warning_counts_per_ip: dict[str, int] = defaultdict(int)
+        self.rate_limit_lock = asyncio.Lock()
+
+    async def dispatch(
+        self,
+        *,
+        request,
+        call_next,
+        client_ip: str,
+        window_minutes: int,
+        max_requests: int,
+        max_rate_limit_warnings: int,
+    ):
+        window = timedelta(minutes=window_minutes)
         async with self.rate_limit_lock:
             now = datetime.now()
             warnings_count = self.warning_counts_per_ip[client_ip]
@@ -186,11 +404,9 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
                         block_reason="The IP has exceeded the rate limit warnings threshold, indicating potential DDOS attack.",
                         ip_id=str(uuid.uuid4()),
                     )
-
                     api_initializer.database_handler.save_blocked_ip_to_blocked_ips(
                         blocked_ip=blocked_ip
                     )
-
                     return ORJSONResponse(
                         status_code=403,
                         content={
@@ -198,7 +414,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
                         },
                     )
 
-                if warnings_count >= 2 and warnings_count <= max_rate_limit_warnings:
+                if 2 <= warnings_count <= max_rate_limit_warnings:
                     cooldown_seconds = min(300, 30 * warnings_count)
                     self.cooldowns_per_ip[client_ip] = now + timedelta(
                         seconds=cooldown_seconds
@@ -220,17 +436,6 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             timestamps.append(now)
 
         return await call_next(request)
-
-    @staticmethod
-    def _get_bucket(path: str) -> str:
-        """Get bucket."""
-        if "/signin" in path or "/signup" in path or "/auth/" in path:
-            return "auth"
-        if "/upload" in path or "/storage/" in path:
-            return "uploads"
-        if "/send_message" in path or "/load_messages" in path or "/ws" in path:
-            return "messages"
-        return "default"
 
 
 # Re-export PrivateNetworkAccessMiddleware from its leaf module so existing

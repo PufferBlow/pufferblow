@@ -1,4 +1,5 @@
-"""Thin pickle-backed wrapper over `pymemcache.Client`.
+"""Thin pickle-backed wrapper over `pymemcache.Client` + helpers for
+scale-out caching of hot reads.
 
 Memcache is a required runtime dependency of the v1.0 server. The
 bundled Docker Compose stack ships a memcached service the API
@@ -6,7 +7,7 @@ depends on, so a fresh install has nothing to configure; operators
 running an existing memcache cluster point `MEMCACHE_HOST` at it
 via `pufferblow setup --setup-memcache`.
 
-Two properties drive the wrapper:
+Three properties drive the wrapper:
 
 1. **Failure is invisible.** A memcache that goes down should slow
    the server modestly (one TCP timeout per call), never crash it.
@@ -20,6 +21,13 @@ Two properties drive the wrapper:
    their own connection on first use, which matches pymemcache's
    own thread-safety model.
 
+3. **Two-tier read path for hot global keys.** A bounded in-process
+   LRU sits in front of memcache via `ProcessLocalCache`. At 100K
+   req/s even memcache becomes a single-key hot spot for things like
+   `pb:server_settings`; the local layer absorbs >99% of those reads
+   at zero network cost, with a short TTL (5-10s) so cross-worker
+   propagation stays bounded.
+
 The wrapper does NOT have an "off" mode. Callers can't disable the
 cache; the only escape hatch is the `_is_sqlite()` short-circuit
 inside `database_handler` that skips the cache for the SQLite test
@@ -30,11 +38,21 @@ cache ORM rows (Users, Server) without a separate serialization
 layer; pymemcache also supports a `serde` argument to do this for us,
 but pickling at the call site keeps the wire format under our
 control and avoids depending on pymemcache's internal helpers.
+
+Atomic counters (`incr`) and compare-and-swap (`cas`) primitives are
+exposed for the rate-limit counters and the unread-message badges.
+Both are best-effort under the same "failure is invisible" policy:
+`incr` returns `None` if the daemon is unreachable and callers must
+treat that as "we don't know — let it through" (fail-open).
 """
 
 from __future__ import annotations
 
 import pickle
+import random
+import threading
+import time
+from collections import OrderedDict
 from typing import Any
 
 from loguru import logger
@@ -106,6 +124,160 @@ class MemcacheCache:
         except Exception as exc:
             logger.debug("memcache delete failed: {err}", err=str(exc))
 
+    # ── Atomic counters ────────────────────────────────────────────
+    #
+    # `incr` / `decr` operate on the raw bytes stored at `key`. They
+    # are NOT pickle-aware — memcached's atomic counters require a
+    # plain ASCII integer payload, so callers must use these helpers
+    # rather than `set(key, 1)` if they want `incr` to work.
+    #
+    # The wrapper handles the bootstrap race for us: on the first
+    # incr against a missing key, pymemcache returns None, and we
+    # fall back to `add` with the initial value (which is itself
+    # atomic — at most one worker wins) and re-issue the increment.
+
+    def incr(
+        self,
+        key: str,
+        delta: int = 1,
+        initial: int = 0,
+        ttl: int | None = None,
+    ) -> int | None:
+        """Atomically add `delta` to the integer stored at `key`.
+
+        Returns the new value, or `None` if the daemon was
+        unreachable. Callers MUST treat `None` as "don't know" and
+        fail open — this is the rate-limit-counter contract: better
+        to let a request through than to crash the middleware.
+        """
+        try:
+            client = self._ensure_client()
+        except Exception as exc:
+            logger.debug("memcache incr connect failed: {err}", err=str(exc))
+            return None
+        expire = ttl or self._default_ttl
+        try:
+            result = client.incr(key, delta) if delta >= 0 else client.decr(key, -delta)
+            if result is not None:
+                return int(result)
+
+            # Key missing. Seed it with `initial + delta` so the very
+            # first call ALSO counts. `add` is atomic across workers:
+            # only one wins; the loser falls through to a follow-up
+            # incr that mutates the value the winner just placed.
+            seeded_value = initial + delta
+            seeded_bytes = str(seeded_value).encode("ascii")
+            won = client.add(key, seeded_bytes, expire=expire)
+            if won:
+                return seeded_value
+
+            # Lost the race — someone else seeded. Increment their
+            # value to record OUR request.
+            result = client.incr(key, delta) if delta >= 0 else client.decr(key, -delta)
+            if result is not None:
+                return int(result)
+            # Pathological: still missing after a successful `add`
+            # from the winner means the key got evicted between
+            # `add` and `incr`. Reseed once more and accept the
+            # answer.
+            raw = client.get(key)
+            return int(raw) if raw is not None else None
+        except Exception as exc:
+            logger.debug("memcache incr failed: {err}", err=str(exc))
+            return None
+
+    def decr(self, key: str, delta: int = 1, ttl: int | None = None) -> int | None:
+        """Decrement convenience wrapper around `incr`."""
+        return self.incr(key, delta=-delta, ttl=ttl)
+
+
+# ───────────────────────────────────────────────────────────────────
+# Process-local two-tier cache
+# ───────────────────────────────────────────────────────────────────
+
+class ProcessLocalCache:
+    """Tiny bounded LRU that sits in front of memcache for hot keys.
+
+    The classic anti-pattern at 100K req/s is "everything's cached in
+    memcache" → the network round-trip and pickle decode for
+    `pb:server_settings` happen on every request anyway, and the key
+    becomes a fan-out hot spot on the memcached daemon. Adding a 5-10
+    second TTL local LRU in front absorbs >99% of those reads at zero
+    network cost.
+
+    Only suitable for keys that:
+      - Are READ on every request (so the local cache pays off).
+      - Tolerate a few seconds of staleness across workers (because
+        invalidations on worker A don't propagate to worker B's local
+        LRU; only memcache's deletion + the short TTL do).
+
+    NOT suitable for per-user keys (would blow the LRU budget) or
+    keys with strict freshness requirements (passwords, auth tokens,
+    moderation state for the actor in the current request).
+    """
+
+    def __init__(self, max_entries: int = 128) -> None:
+        self._entries: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+        self._max = max_entries
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Any | None:
+        """Return the cached value if present AND unexpired, else None."""
+        now = time.monotonic()
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            expires_at, value = entry
+            if expires_at <= now:
+                # Evict eagerly so memory doesn't grow with stale entries.
+                self._entries.pop(key, None)
+                return None
+            # LRU touch.
+            self._entries.move_to_end(key)
+            return value
+
+    def set(self, key: str, value: Any, ttl_seconds: float) -> None:
+        """Insert or refresh a key with an absolute expiry time."""
+        expires_at = time.monotonic() + max(0.1, float(ttl_seconds))
+        with self._lock:
+            self._entries[key] = (expires_at, value)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._max:
+                self._entries.popitem(last=False)
+
+    def delete(self, key: str) -> None:
+        with self._lock:
+            self._entries.pop(key, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
+# Module-level singleton for the in-process tier. Shared by every
+# caller in this worker; safe because every method is internally
+# locked.
+_local_cache = ProcessLocalCache(max_entries=256)
+
+
+def get_local_cache() -> ProcessLocalCache:
+    """Return the process-wide in-process tier."""
+    return _local_cache
+
+
+def jittered_ttl(base_seconds: int, jitter_fraction: float = 0.1) -> int:
+    """Add ±jitter_fraction noise to a TTL.
+
+    Stops every worker from refilling the same key in lockstep when
+    the central TTL fires — would otherwise produce a synchronized
+    Postgres stampede every `base_seconds`.
+    """
+    if base_seconds <= 1 or jitter_fraction <= 0:
+        return base_seconds
+    spread = base_seconds * jitter_fraction
+    return max(1, int(base_seconds + random.uniform(-spread, spread)))
+
 
 # Process-local singleton. `get_cache(config)` builds it on first
 # call from the bootstrap config; subsequent calls reuse the same
@@ -142,9 +314,12 @@ def get_cache(config) -> MemcacheCache:
     return _singleton
 
 
+# ───────────────────────────────────────────────────────────────────
 # Convenience key builders. Keeping them in one place means future
 # invalidation code can match the same key shapes the readers use
 # without depending on string formatting at call sites.
+# ───────────────────────────────────────────────────────────────────
+
 def user_key(user_id: str) -> str:
     """Cache key for a `Users` row keyed by `user_id`."""
     return f"pb:user:{user_id}"
@@ -153,3 +328,57 @@ def user_key(user_id: str) -> str:
 def server_key() -> str:
     """Cache key for the single-server row."""
     return "pb:server"
+
+
+def server_settings_key() -> str:
+    """Cache key for the single `server_settings` row.
+
+    Read by `RateLimitingMiddleware` on every request — the canonical
+    two-tier key (in-process LRU in front of memcache).
+    """
+    return "pb:server_settings"
+
+
+def blocked_ip_key(ip: str) -> str:
+    """Cache key for a per-IP `BlockedIPS` presence sentinel.
+
+    Stores a small dict `{"blocked": True}` on hit and `{"blocked":
+    False}` on negative cache (so we don't keep re-SELECTing for
+    legitimate traffic). A short TTL bounds the staleness window if
+    an operator unblocks an IP.
+    """
+    return f"pb:blocked_ip:{ip}"
+
+
+def moderation_state_key(user_id: str) -> str:
+    """Cache key for `get_user_moderation_state(user_id)` output."""
+    return f"pb:moderation:{user_id}"
+
+
+def channel_key(channel_id: str) -> str:
+    """Cache key for a `Channels` row by id."""
+    return f"pb:channel:{channel_id}"
+
+
+def user_privileges_key(user_id: str) -> str:
+    """Cache key for the resolved privilege set for a user."""
+    return f"pb:user_privs:{user_id}"
+
+
+def rate_limit_counter_key(ip: str, minute_bucket: int) -> str:
+    """Cache key for the per-IP per-minute request counter.
+
+    The `minute_bucket` is `epoch_seconds // 60` so the key naturally
+    rolls over every minute without explicit cleanup.
+    """
+    return f"pb:rl:{ip}:{minute_bucket}"
+
+
+def rate_limit_warnings_key(ip: str) -> str:
+    """Cache key for the cumulative rate-limit warning counter per IP."""
+    return f"pb:rlwarn:{ip}"
+
+
+def rate_limit_cooldown_key(ip: str) -> str:
+    """Cache key for an active cooldown timestamp on an IP."""
+    return f"pb:rlcd:{ip}"

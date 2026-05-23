@@ -163,6 +163,10 @@ async def ban_user_route(target_user_id: str, request: UserBanRequest) -> dict:
             "banned_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+    # Drop the cached moderation state so the next authenticated
+    # request from this user sees the ban immediately rather than
+    # waiting for the TTL.
+    api_initializer.user_manager.invalidate_user_moderation_state(target_user_id)
 
     return {
         "status_code": 201,
@@ -192,6 +196,7 @@ async def unban_user_route(target_user_id: str, auth_token: str) -> dict:
             "unbanned_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+    api_initializer.user_manager.invalidate_user_moderation_state(target_user_id)
 
     return {
         "status_code": 200,
@@ -223,6 +228,7 @@ async def timeout_user_route(target_user_id: str, request: UserTimeoutRequest) -
             "timed_out_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+    api_initializer.user_manager.invalidate_user_moderation_state(target_user_id)
 
     return {
         "status_code": 201,
@@ -355,6 +361,7 @@ async def clear_user_timeout_route(target_user_id: str, auth_token: str) -> dict
             "cleared_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+    api_initializer.user_manager.invalidate_user_moderation_state(target_user_id)
 
     return {
         "status_code": 200,
