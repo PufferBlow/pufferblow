@@ -1,120 +1,160 @@
+"""Debug-level log message builders.
+
+Every function in this module previously interpolated raw secret material
+(auth tokens, plaintext passwords, encryption key values, hashed-but-
+nonetheless-sensitive blobs) directly into the log message. That
+exposes any attacker who can read the log file — or its rotated
+backups in `/var/log/` — to credential replay and key extraction.
+
+The functions are kept (and keep their original signatures) so call
+sites in `user_manager.py` / `database_handler.py` don't need to
+change. The bodies are rewritten to log ONLY the safe, non-secret
+metadata that's useful for debugging: which user, which key
+relationship, validity outcome. The secret material itself never
+reaches the log surface.
+"""
+
+
 def DEBUG_NEW_USER_ID_GENERATED(user_id) -> str:
-    """DEBUG NEW USER ID GENERATED."""
-    msg = f"Generated new user ID: '{user_id}'."
-    return msg
+    """Log a freshly generated user id (non-secret)."""
+    return f"Generated user_id={user_id}"
 
 
 def DEBUG_NEW_AUTH_TOKEN_GENERATED(auth_token) -> str:
-    """DEBUG NEW AUTH TOKEN GENERATED."""
-    msg = f"Generated new authentication token: '{auth_token}'."
-    return msg
+    """Log auth-token generation WITHOUT the token value.
+
+    `auth_token` is intentionally not interpolated. The argument is
+    accepted (and ignored) so existing call sites stay working.
+    """
+    _ = auth_token  # explicitly discarded — see module docstring
+    return "Generated new auth token"
 
 
 def DEBUG_NEW_AUTH_TOKEN_HASHED(auth_token, hashed_auth_token, key) -> str:
-    """DEBUG NEW AUTH TOKEN HASHED."""
-    msg = f"Ciphered new authentication token. Auth token: '{auth_token}', Hashed token: '{hashed_auth_token}', key: '{key.key_value}'."
-    return msg
+    """Log auth-token hashing WITHOUT token, ciphertext, or key value."""
+    _ = (auth_token, hashed_auth_token, key)
+    return "Hashed auth token"
 
 
 def DEBUG_NEW_AUTH_TOKEN_SAVED(auth_token) -> str:
-    """DEBUG NEW AUTH TOKEN SAVED."""
-    msg = f"Saved new authentication token, AuthToken: '{auth_token}'."
-    return msg
+    """Log auth-token persistence WITHOUT the token value."""
+    _ = auth_token
+    return "Persisted new auth token"
 
 
 def DEBUG_NEW_DERIVED_KEY_CREATED(user, key) -> str:
-    """DEBUG NEW DERIVED KEY CREATED."""
-    msg = f"Created new derived key. User ID: '{user.user_id}', Key: '{key.key_value}'."
-    return msg
+    """Log derived-key creation with user + relationship only."""
+    return (
+        f"Derived key created: user_id={user.user_id} "
+        f"associated_to={key.associated_to}"
+    )
 
 
 def DEBUG_NEW_DERIVED_KEY_SAVED(key) -> str:
-    """DEBUG NEW DERIVED KEY SAVED."""
-    msg = f"Saved new derived key in 'keys': '{key.to_dict()}'."
-    return msg
+    """Log derived-key persistence with the relationship metadata only.
+
+    The previous implementation called `key.to_dict()` and dropped
+    the entire row into the log, including the raw key material.
+    """
+    return (
+        f"Derived key saved: user_id={key.user_id} "
+        f"associated_to={key.associated_to}"
+    )
 
 
 def DEBUG_DERIVED_KEY_UPDATED(key) -> str:
-    """DEBUG DERIVED KEY UPDATED."""
-    msg = f"Derived key updated for User ID: '{key.user_id}', associated_to: '{key.associated_to}', New Key value: '{key.key_value}'."
-    return msg
+    """Log a derived-key rotation without exposing the new value."""
+    return (
+        f"Derived key rotated: user_id={key.user_id} "
+        f"associated_to={key.associated_to}"
+    )
 
 
 def DEBUG_DERIVED_KEY_DELETED(key) -> str:
-    """DEBUG DERIVED KEY DELETED."""
-    msg = f"Deleted derived key from 'keys': {key.to_dict()}."
-    return msg
+    """Log a derived-key deletion with relationship metadata only."""
+    return (
+        f"Derived key deleted: user_id={key.user_id} "
+        f"associated_to={key.associated_to}"
+    )
 
 
 def DEBUG_NEW_HASH_SALT_CREATED(salt) -> str:
-    """DEBUG NEW HASH SALT CREATED."""
-    msg = f"Created new hash salt. Salt: '{salt.salt_value}', Associated to: '{salt.associated_to}', Hashed data: '{salt.hashed_data}'."
-    return msg
+    """Log hash-salt creation without the salt value or hashed data."""
+    return f"Hash salt created: associated_to={salt.associated_to}"
 
 
 def DEBUG_NEW_HASH_SALT_SAVED(salt) -> str:
-    """DEBUG NEW HASH SALT SAVED."""
-    msg = f"Saved new hash salt in 'salts': {salt.to_dict()}."
-    return msg
+    """Log hash-salt persistence without the salt value."""
+    return f"Hash salt saved: associated_to={salt.associated_to}"
 
 
 def DEBUG_NEW_PASSWORD_HASHED(password, hashed_password) -> str:
-    """DEBUG NEW PASSWORD HASHED."""
-    msg = f"Hashed new password. Password: '{password}', Hashed password: '{hashed_password}'."
-    return msg
+    """Log password hashing WITHOUT the password or its hash.
+
+    Hashed passwords are still credential-equivalent: an attacker who
+    grabs the hash can attempt offline cracking. Neither field is
+    logged.
+    """
+    _ = (password, hashed_password)
+    return "Hashed password"
 
 
 def DEBUG_USERNAME_ENCRYPTED(username, encrypted_username) -> str:
-    """DEBUG USERNAME ENCRYPTED."""
-    msg = f"Encrypted username. Username: '{username}', Encrypted username: '{encrypted_username}'."
-    return msg
+    """Log username encryption without the plaintext or ciphertext."""
+    _ = (username, encrypted_username)
+    return "Encrypted username"
 
 
 def DEBUG_SIGN_UP_USER_START(user_id, username) -> str:
-    """DEBUG SIGN UP USER START."""
-    msg = (
-        f"Starting user sign up process. User ID: '{user_id}', Username: '{username}'."
-    )
-    return msg
+    """Log the start of a signup flow with the new user_id + username."""
+    return f"Sign up start: user_id={user_id} username={username}"
 
 
 def DEBUG_GET_USER_START(user_id, username) -> str:
-    """DEBUG GET USER START."""
-    msg = f"Starting user retrieval process. User ID: '{user_id}', Username: '{username}'."
-    return msg
+    """Log the start of a user-fetch with the identifying inputs."""
+    return f"Fetch user: user_id={user_id} username={username}"
 
 
 def DEBUG_USER_FOUND(user_id, username) -> str:
-    """DEBUG USER FOUND."""
-    msg = f"User found in database. User ID: '{user_id}', Username: '{username}'."
-    return msg
+    """Log a successful user lookup."""
+    return f"User found: user_id={user_id} username={username}"
 
 
 def DEBUG_USER_NOT_FOUND(user_id, username) -> str:
-    """DEBUG USER NOT FOUND."""
-    msg = f"User not found in database. User ID: '{user_id}', Username: '{username}'."
-    return msg
+    """Log a missed user lookup."""
+    return f"User not found: user_id={user_id} username={username}"
 
 
 def DEBUG_USERNAME_DECRYPTED(encrypted_username, decrypted_username) -> str:
-    """DEBUG USERNAME DECRYPTED."""
-    msg = f"Decrypted username. Encrypted username: '{encrypted_username}', Decrypted username: '{decrypted_username}'."
-    return msg
+    """Log username decryption without exposing either form."""
+    _ = (encrypted_username, decrypted_username)
+    return "Decrypted username"
 
 
 def DEBUG_VALIDATE_AUTH_TOKEN(hashed_auth_token, is_valid) -> str:
-    """DEBUG VALIDATE AUTH TOKEN."""
-    msg = f"Validated authentication token. Hashed token: '{hashed_auth_token}', Valid: '{is_valid}'."
-    return msg
+    """Log the outcome of an auth-token validation without the hash."""
+    _ = hashed_auth_token
+    return f"Auth token validation: valid={is_valid}"
 
 
 def DEBUG_FETCH_USERS_ID(users_id) -> str:
-    """DEBUG FETCH USERS ID."""
-    msg = f"Fetched user IDs. User IDs: {users_id}."
-    return msg
+    """Log a user-id batch fetch with the count, not the full list.
+
+    The previous version dumped the entire list of user ids into the
+    log line, which on a populous instance can be megabytes per call
+    and turns the log into a noisy data export.
+    """
+    try:
+        count = len(users_id)
+    except TypeError:
+        count = "?"
+    return f"Fetched user ids: count={count}"
 
 
 def DEBUG_FETCH_USERNAMES(usernames) -> str:
-    """DEBUG FETCH USERNAMES."""
-    msg = f"Fetched usernames. Usernames: {usernames}."
-    return msg
+    """Log a username batch fetch with the count, not the full list."""
+    try:
+        count = len(usernames)
+    except TypeError:
+        count = "?"
+    return f"Fetched usernames: count={count}"

@@ -1,154 +1,192 @@
+"""Info-level log message builders.
+
+Same call-site contract as before — these helpers are imported as
+`from ..logger.msgs import info` and called with keyword arguments
+from `user_manager.py`, the rate-limit middleware, and friends. The
+content has been rewritten so each line reads as a short, scannable
+sentence: subject first, action verb, then the relevant identifiers
+after a colon. The old pattern (`"X. User ID: '...', Param: '...'"`)
+was a brittle hand-rolled key/value format that loguru couldn't index
+and an operator couldn't grep cleanly.
+"""
+
 # Models
 from pufferblow.api.database.tables.users import Users as User
 
 
 def INFO_NEW_USER_SIGNUP_SUCCESSFULLY(user: User) -> str:
-    """INFO NEW USER SIGNUP SUCCESSFULLY."""
-    msg = f"New user signed up successfully. User ID: '{user.user_id}'"
-    return msg
+    """Log a successful signup with the new user id."""
+    return f"User signed up: user_id={user.user_id}"
 
 
 def INFO_REQUEST_USER_PROFILE(user_data, viewer_user_id) -> str:
-    """INFO REQUEST USER PROFILE."""
-    msg = f"Requested user profile. Viewer: '{viewer_user_id}', Target: '{user_data['user_id']}', User Data: {user_data}"
-    return msg
+    """Log a profile view (who viewed whom)."""
+    target = user_data["user_id"] if isinstance(user_data, dict) else getattr(
+        user_data, "user_id", "?"
+    )
+    return f"Profile viewed: viewer={viewer_user_id} target={target}"
 
 
 def INFO_REQUEST_USERS_LIST(viewer_user_id, auth_token) -> str:
-    """INFO REQUEST USERS LIST."""
-    msg = f"Request to get the list of users by User ID: '{viewer_user_id}'."
-    return msg
+    """Log a users-list request. `auth_token` accepted but never logged."""
+    _ = auth_token
+    return f"Users list requested: viewer={viewer_user_id}"
 
 
 def INFO_UPDATE_USERNAME(user_id, new_username, old_username) -> str:
-    """INFO UPDATE USERNAME."""
-    msg = f"Updated username. User ID: '{user_id}', Old username: '{old_username}', New username: '{new_username}'."
-    return msg
+    """Log a username change in `old → new` form."""
+    return (
+        f"Username changed: user_id={user_id} {old_username!r} → {new_username!r}"
+    )
 
 
 def INFO_UPDATE_USER_STATUS(user_id, from_status, to_status) -> str:
-    """INFO UPDATE USER STATUS."""
-    msg = f"Updated user status. User ID: '{user_id}', From status: '{from_status}', To status: '{to_status}'."
-    return msg
+    """Log a presence-status change in `from → to` form."""
+    return (
+        f"Status changed: user_id={user_id} {from_status} → {to_status}"
+    )
 
 
 def INFO_USER_STATUS_UPDATE_SKIPPED(user_id) -> str:
-    """INFO USER STATUS UPDATE SKIPPED."""
-    msg = f"Skipped status update for User ID: '{user_id}' due to passing the same status value."
-    return msg
+    """Log a no-op status update (caller passed the current value)."""
+    return f"Status update skipped (already current): user_id={user_id}"
 
 
 def INFO_USER_STATUS_UPDATE_FAILED(user_id, status) -> str:
-    """INFO USER STATUS UPDATE FAILED."""
-    msg = f"Failed to update the status for User ID: '{user_id}'. Provided status value not found. Status: '{status}', Accepted status values: ['online', 'offline']."
-    return msg
+    """Log a rejected status update due to an out-of-range value."""
+    return (
+        f"Status update rejected: user_id={user_id} "
+        f"status={status!r} (allowed: 'online', 'offline')"
+    )
 
 
 def INFO_UPDATE_USER_PASSWORD(user_id, hashed_new_password) -> str:
-    """INFO UPDATE USER PASSWORD."""
-    msg = f"Updated password. User ID: '{user_id}', Hashed new password: '{hashed_new_password}'"
-    return msg
+    """Log a password rotation WITHOUT the hash value.
+
+    Hashed passwords are still credential-equivalent (offline crack
+    target). We acknowledge the rotation happened; we don't show
+    what to.
+    """
+    _ = hashed_new_password
+    return f"Password changed: user_id={user_id}"
 
 
 def INFO_UPDATE_USER_PASSWORD_FAILED(user_id) -> str:
-    """INFO UPDATE USER PASSWORD FAILED."""
-    msg = f"Failed to update the password for User ID: '{user_id}' due to an invalid old password."
-    return msg
+    """Log a rejected password change (caller supplied wrong old password)."""
+    return f"Password change rejected (wrong current password): user_id={user_id}"
 
 
 def INFO_RESET_USER_AUTH_TOKEN(user_id, new_hashed_auth_token) -> str:
-    """INFO RESET USER AUTH TOKEN."""
-    msg = f"Reseted auth_token for User ID: '{user_id}', New hashed auth_token: '{new_hashed_auth_token}'."
-    return msg
+    """Log an auth-token rotation WITHOUT the new hash."""
+    _ = new_hashed_auth_token
+    return f"Auth token rotated: user_id={user_id}"
 
 
 def INFO_RESET_USER_AUTH_TOKEN_FAILED(user_id) -> str:
-    """INFO RESET USER AUTH TOKEN FAILED."""
-    msg = f"Faild to reset auth_token for User ID: '{user_id}' due to the incorrect password that was passed in."
-    return msg
+    """Log a rejected auth-token rotation due to a bad password."""
+    return f"Auth token rotation rejected (wrong password): user_id={user_id}"
 
 
 def INFO_AUTH_TOKEN_SUSPENSION_TIME(user_id) -> str:
-    """INFO AUTH TOKEN SUSPENSION TIME."""
-    msg = f"Faild to reset authentication token for User ID: {user_id}. Suspension time has not elapsed."
-    return msg
+    """Log a rejected auth-token rotation due to the suspension window."""
+    return (
+        f"Auth token rotation rejected (suspension window not elapsed): "
+        f"user_id={user_id}"
+    )
 
 
 def INFO_NEW_CHANNEL_CREATED(user_id, channel_id, channel_name) -> str:
-    """INFO NEW CHANNEL CREATED."""
-    msg = f"New channel created by User ID: '{user_id}', Channel ID: '{channel_id}', Channel Name: '{channel_name}'."
-    return msg
+    """Log a channel creation."""
+    return (
+        f"Channel created: name={channel_name!r} channel_id={channel_id} "
+        f"by user_id={user_id}"
+    )
 
 
 def INFO_CHANNEL_DELETED(user_id, channel_id) -> str:
-    """INFO CHANNEL DELETED."""
-    msg = f"Channel ID: '{channel_id}' deleted by Admin with User ID: '{user_id}'."
-    return msg
+    """Log a channel deletion."""
+    return f"Channel deleted: channel_id={channel_id} by admin user_id={user_id}"
 
 
 def INFO_REQUESTED_CHANNEL_DATA(channel_id, viewer_user_id) -> str:
-    """INFO REQUESTED CHANNEL DATA."""
-    msg = f"Requested data about Channel ID: '{channel_id}' by User ID: '{viewer_user_id}'."
-    return msg
+    """Log a channel-data view."""
+    return (
+        f"Channel viewed: channel_id={channel_id} viewer={viewer_user_id}"
+    )
 
 
 def INFO_CHANNEL_ID_NOT_FOUND(channel_id, viewer_user_id) -> str:
-    """INFO CHANNEL ID NOT FOUND."""
-    msg = f"The provided channel ID: {channel_id} by User ID: '{viewer_user_id}' was not found."
-    return msg
+    """Log a miss on a channel-id lookup."""
+    return (
+        f"Channel not found: channel_id={channel_id} "
+        f"(requested by viewer={viewer_user_id})"
+    )
 
 
 def INFO_CHANNEL_IS_NOT_PRIVATE(user_id, channel_id, to_add_user_id) -> str:
-    """INFO CHANNEL IS NOT PRIVATE."""
-    msg = f"Faild to add User ID: '{to_add_user_id}' to Channel ID: '{channel_id}' by Admin User ID: '{user_id}'. Channel is not private."
-    return msg
+    """Log a rejected add-user on a non-private channel."""
+    return (
+        f"Add-user rejected (channel not private): "
+        f"channel_id={channel_id} target_user={to_add_user_id} "
+        f"by admin user_id={user_id}"
+    )
 
 
 def INFO_NEW_USER_ADDED_TO_PRIVATE_CHANNEL(user_id, channel_id, to_add_user_id) -> str:
-    """INFO NEW USER ADDED TO PRIVATE CHANNEL."""
-    msg = f"New User ID: '{to_add_user_id}' added to Channel ID: '{channel_id}' by Admin User ID: '{user_id}'."
-    return msg
+    """Log a successful add to a private channel."""
+    return (
+        f"User added to private channel: channel_id={channel_id} "
+        f"user_id={to_add_user_id} by admin user_id={user_id}"
+    )
 
 
 def INFO_USER_REMOVED_FROM_A_PRIVATE_CHANNEL(
     user_id, channel_id, to_remove_user_id
 ) -> str:
-    """INFO USER REMOVED FROM A PRIVATE CHANNEL."""
-    msg = f"User ID: '{to_remove_user_id}' was removed from Channel ID: '{channel_id}' by Admin User ID: '{user_id}'."
-    return msg
+    """Log a successful remove from a private channel."""
+    return (
+        f"User removed from private channel: channel_id={channel_id} "
+        f"user_id={to_remove_user_id} by admin user_id={user_id}"
+    )
 
 
 def INFO_FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_AN_ADMIN(
     user_id, channel_id, to_remove_user_id
 ) -> str:
-    """INFO FAILD TO REMOVE USER FROM CHANNEL TARGETED USER IS AN ADMIN."""
-    msg = f"Admin User ID: '{user_id}' tried to remove Admin User ID: '{to_remove_user_id}' from Channel ID: '{channel_id}'."
-    return msg
+    """Log a rejected remove-user where the target is also an admin."""
+    return (
+        f"Remove-user rejected (target is admin): "
+        f"channel_id={channel_id} target_user={to_remove_user_id} "
+        f"by admin user_id={user_id}"
+    )
 
 
 def INFO_FAILD_TO_REMOVE_USER_FROM_CHANNEL_TARGETED_USER_IS_SERVER_OWNER(
     user_id, channel_id, to_remove_user_id
 ) -> str:
-    """INFO FAILD TO REMOVE USER FROM CHANNEL TARGETED USER IS SERVER OWNER."""
-    msg = f"User ID: '{user_id}' tried to remove the server Admin ID: '{to_remove_user_id}' from Channel ID: '{channel_id}'."
-    return msg
+    """Log a rejected remove-user where the target is the server owner."""
+    return (
+        f"Remove-user rejected (target is server owner): "
+        f"channel_id={channel_id} target_owner={to_remove_user_id} "
+        f"by user_id={user_id}"
+    )
 
 
 def CLIENT_IP_BLOCKED(
     client_ip: str, requests_count: int, rate_limit_warnings: int
 ) -> str:
-    """CLIENT IP BLOCKED."""
-    msg = f"Malicious activities detected with the client IP: '{client_ip}', it have been [bold red]blocked[reset]. Number of requests is '{requests_count}' and number of rate limite warnings is '{rate_limit_warnings}'."
-
-    return msg
+    """Log an IP block triggered by rate-limit warning threshold."""
+    return (
+        f"IP blocked (rate-limit threshold): ip={client_ip} "
+        f"requests={requests_count} warnings={rate_limit_warnings}"
+    )
 
 
 def CLIENT_IP_BLOCKED_SQL_INJECTION(
     client_ip: str, injection_warnings: int
 ) -> str:
-    """CLIENT IP BLOCKED FOR REPEATED SQL INJECTION ATTEMPTS."""
-    msg = (
-        f"Client IP: '{client_ip}' has been [bold red]blocked[reset] after "
-        f"'{injection_warnings}' SQL injection attempts."
+    """Log an IP block triggered by repeated SQL-injection attempts."""
+    return (
+        f"IP blocked (sql-injection threshold): ip={client_ip} "
+        f"attempts={injection_warnings}"
     )
-    return msg

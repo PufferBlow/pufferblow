@@ -38,46 +38,69 @@ def _has_request_context(extra: dict) -> bool:
 
 
 def console_log_format(record: dict) -> str:
+    """Modern terminal format.
+
+    Two flavours of record share one column layout:
+
+    * Request records (carry method/path/status/duration in `extra`)
+      lean on the message body — which the request middleware now
+      writes as `→ GET /path` / `← 200 GET /path 5ms` — so the format
+      stays out of the way: timestamp, level, short request id, then
+      the message itself. No more `method=- path=- status=-` glob.
+    * Everything else (startup, background tasks, domain events) gets
+      timestamp, level, message, and a dim source attribution at the
+      tail so a developer can `grep` to the exact emitter without it
+      crowding the read.
+
+    Colour is intentionally restrained: loguru's `<level>` tag carries
+    the only semantic colour. Status / duration colouring lives inside
+    the request middleware's message body (it knows the class).
     """
-    Tone-down terminal format. Color is restricted to the level tag and
-    a dim timestamp/location; the rainbow of per-field colors is gone.
-    HTTP request fields (method/path/status/duration) are only rendered
-    when the record was emitted inside a request — background tasks,
-    startup and scheduler logs no longer print 'method=- path=- status=-'.
-    """
-    template = (
-        "<dim>{time:HH:mm:ss}</dim>  "
-        "<level>{level: <8}</level>"
-    )
-    if _has_request_context(record["extra"]):
-        template += (
-            "  <cyan>{extra[method]: <6}</cyan>"
-            "<blue>{extra[path]}</blue>"
-            "  <magenta>{extra[status_code]}</magenta>"
-            "  <yellow>{extra[duration_ms]}ms</yellow>"
+    extras = record["extra"]
+    if _has_request_context(extras):
+        return (
+            "<dim>{time:HH:mm:ss}</dim>  "
+            "<level>{level: <7}</level>  "
+            "<dim>{extra[request_id_short]}</dim>  "
+            "{message}"
+            "\n{exception}"
         )
-    template += "  <dim>{name}:{line}</dim>  {message}\n{exception}"
-    return template
+    return (
+        "<dim>{time:HH:mm:ss}</dim>  "
+        "<level>{level: <7}</level>  "
+        "{message}"
+        "  <dim>{name}:{line}</dim>"
+        "\n{exception}"
+    )
 
 
 def file_log_format(record: dict) -> str:
+    """Grep-friendly logfmt-ish file format.
+
+    Every line carries `timestamp | level | message | source | extras`
+    in a fixed positional layout. The extras tail collapses to nothing
+    for non-request records — same conditional behaviour the console
+    sink uses — so background-task and startup lines don't waste a
+    column on placeholder dashes. Tracebacks are appended via the
+    standard `{exception}` token.
     """
-    Plain-text file format. Same conditional treatment of HTTP request
-    fields as the console variant so the file is not padded with '-'
-    placeholders for non-request logs. Tracebacks are appended via
-    {exception} which the previous static format string was missing.
-    """
-    template = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8}"
-    if _has_request_context(record["extra"]):
-        template += (
-            " | {extra[method]} {extra[path]}"
+    extras = record["extra"]
+    tail = ""
+    if _has_request_context(extras):
+        tail = (
+            " | method={extra[method]}"
+            " path={extra[path]}"
             " status={extra[status_code]}"
-            " duration={extra[duration_ms]}ms"
-            " client={extra[client_ip]}"
-            " req={extra[request_id]}"
+            " duration_ms={extra[duration_ms]}"
+            " client_ip={extra[client_ip]}"
+            " request_id={extra[request_id]}"
         )
-    template += " | {name}:{function}:{line} | {message}\n{exception}"
-    return template
+    return (
+        "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8}"
+        f"{tail}"
+        " | {name}:{function}:{line}"
+        " | {message}\n{exception}"
+    )
 
 
 @dataclass(slots=True)
@@ -113,7 +136,12 @@ class InterceptHandler(logging.Handler):
 
 
 def enrich_log_record(record: dict) -> None:
-    """Ensure expected structured log fields are always present."""
+    """Ensure expected structured log fields are always present.
+
+    Also computes `request_id_short` — an 8-char slice of the full
+    request id — so the console format can render a compact handle
+    without recomputing it inside every formatter call.
+    """
     extra = record["extra"]
     extra.setdefault("request_id", "-")
     extra.setdefault("method", "-")
@@ -121,6 +149,11 @@ def enrich_log_record(record: dict) -> None:
     extra.setdefault("status_code", "-")
     extra.setdefault("duration_ms", "-")
     extra.setdefault("client_ip", "-")
+    request_id = extra.get("request_id", "-")
+    if isinstance(request_id, str) and request_id != "-" and len(request_id) > 8:
+        extra["request_id_short"] = request_id[:8]
+    else:
+        extra["request_id_short"] = request_id if request_id != "-" else "        "
 
 
 def build_database_uri_from_config(config: Config) -> str:

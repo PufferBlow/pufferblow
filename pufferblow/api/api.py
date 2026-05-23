@@ -47,28 +47,36 @@ def _load_cors_settings() -> tuple[list[str], str | None, bool, list[str], list[
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan hook."""
-    logger.info("API_STARTUP_BEGIN")
+    """Application lifespan hook.
+
+    Emits a small number of human-readable milestones rather than the
+    old shouty `API_STARTUP_BEGIN` / `API_INITIALIZER_LOADED` event
+    names. Operators reading the log should be able to tell at a
+    glance "where is the boot stuck?" — so the lines read like a
+    progress report, not a key-value enum.
+    """
+    logger.info("Server starting…")
 
     if not api_initializer.is_loaded:
         api_initializer.load_objects()
-        logger.info("API_INITIALIZER_LOADED")
+        logger.info("API initializer loaded")
     else:
-        logger.info("API_INITIALIZER_ALREADY_LOADED")
+        logger.info("API initializer already loaded — reusing")
 
     _mount_static_routes()
 
     async with lifespan_background_tasks():
-        logger.info("API_STARTUP_COMPLETE")
+        logger.success("Server ready — accepting requests")
         yield
 
+    logger.info("Server shutting down…")
     if api_initializer.database_handler is not None:
         try:
             api_initializer.database_handler.database_engine.dispose()
         except Exception:
-            logger.warning("API_DATABASE_DISPOSE_FAILED")
+            logger.warning("Database engine dispose failed — continuing shutdown")
 
-    logger.info("API_SHUTDOWN_COMPLETE")
+    logger.info("Server stopped")
 
 
 api = FastAPI(lifespan=lifespan)
@@ -134,7 +142,23 @@ async def readyz():
 
 @api.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
-    """Emit structured request logs with latency and status details."""
+    """Emit human-readable request logs with latency and status details.
+
+    Two lines per request: one on entry (`» GET /path`) and one on
+    exit (`« 200 GET /path in 5ms`). The level on the exit line
+    tracks the status class — INFO for 2xx/3xx, WARNING for 4xx,
+    ERROR for 5xx — so an operator can `--level WARNING` and
+    immediately see every client / server fault without grepping for
+    status codes. Loguru's level palette carries the colour (green
+    for INFO, yellow for WARN, red for ERROR); the message stays as
+    plain text so URL paths can't accidentally inject markup tags
+    into the colour parser.
+
+    Both lines bind the same `request_id` / `method` / `path` /
+    `client_ip` to the loguru extras, so the file sink emits them
+    structurally (one per `key=value` field) even though the console
+    sink keeps them out of the prefix.
+    """
     request_id = str(uuid.uuid4())
     started_at = perf_counter()
 
@@ -142,45 +166,42 @@ async def request_logging_middleware(request: Request, call_next):
     if not client_ip and request.client:
         client_ip = request.client.host
 
+    method = request.method
+    path = request.url.path
+
     request_logger = logger.bind(
         request_id=request_id,
-        method=request.method,
-        path=request.url.path,
+        method=method,
+        path=path,
         client_ip=client_ip or "<unknown>",
     )
-    request_logger.info("REQUEST_START")
+    request_logger.info(f"» {method} {path}")
 
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = int((perf_counter() - started_at) * 1000)
-        request_logger.exception(
-            "REQUEST_FAILED duration_ms={duration_ms}",
+        request_logger.bind(
+            status_code="ERR",
             duration_ms=elapsed_ms,
-        )
+        ).exception(f"× {method} {path} crashed after {elapsed_ms}ms")
         raise
 
     elapsed_ms = int((perf_counter() - started_at) * 1000)
     status_code = response.status_code
     response.headers["X-Request-ID"] = request_id
 
+    line = f"« {status_code} {method} {path} in {elapsed_ms}ms"
+    exit_logger = request_logger.bind(
+        status_code=status_code,
+        duration_ms=elapsed_ms,
+    )
+
     if status_code >= 500:
-        request_logger.error(
-            "REQUEST_END status_code={status_code} duration_ms={duration_ms}",
-            status_code=status_code,
-            duration_ms=elapsed_ms,
-        )
+        exit_logger.error(line)
     elif status_code >= 400:
-        request_logger.warning(
-            "REQUEST_END status_code={status_code} duration_ms={duration_ms}",
-            status_code=status_code,
-            duration_ms=elapsed_ms,
-        )
+        exit_logger.warning(line)
     else:
-        request_logger.info(
-            "REQUEST_END status_code={status_code} duration_ms={duration_ms}",
-            status_code=status_code,
-            duration_ms=elapsed_ms,
-        )
+        exit_logger.info(line)
 
     return response
