@@ -16,25 +16,24 @@ class Messages(Base):
     __tablename__ = "messages"
     __allow_unmapped__ = True
 
-    # Composite + tsvector indexes for the scale-out work — declared at the
-    # bottom of this class via __table_args__. They make:
-    #   1. keyset pagination (`WHERE channel_id = ? AND sent_at < ?`) hit a
-    #      btree index instead of a seq scan on huge channels, and
-    #   2. ranked search (`WHERE search_tokens @@ ?`) hit a GIN index.
-    # Both are Postgres-only; the SQLite test harness uses array containment
-    # against a JSON column and an in-Python substring search instead.
+    # Composite btree for keyset pagination (channel_id, sent_at,
+    # message_id). Declared here so `create_all` builds it on fresh
+    # installs of both dialects; the idempotent migration in
+    # `DatabaseHandler._apply_messages_scaleout_migration` also issues a
+    # `CREATE INDEX IF NOT EXISTS` so upgrading instances pick it up.
+    #
+    # The GIN index on `search_tokens` is deliberately NOT declared
+    # here — its DDL (`USING gin`, partial `WHERE search_tokens IS NOT
+    # NULL`) is Postgres-only and SQLAlchemy would attempt to render it
+    # on SQLite too. The migration helper creates it explicitly on
+    # Postgres; SQLite uses the in-Python substring fallback and never
+    # needs a search index.
     __table_args__ = (
         Index(
             "ix_messages_channel_sent_at_msg",
             "channel_id",
             "sent_at",
             "message_id",
-        ),
-        Index(
-            "ix_messages_search_tokens",
-            "search_tokens",
-            postgresql_using="gin",
-            postgresql_where="search_tokens IS NOT NULL",
         ),
     )
 

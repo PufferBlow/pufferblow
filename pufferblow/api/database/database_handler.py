@@ -2976,6 +2976,13 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         with self.database_session() as session:
             session.add_all(notifications)
 
+        # Drop the unread-count cache for every user that just got a new
+        # notification so their next badge read reflects the increase.
+        # The set-comprehension de-dupes when multiple notifications
+        # target the same user in one call (mention bursts).
+        for affected_user_id in {str(n.user_id) for n in notifications if n.user_id}:
+            self._invalidate_unread_notifications_count(affected_user_id)
+
     def list_notifications_for_user(
         self,
         user_id: str,
@@ -3001,9 +3008,33 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             )
 
     def count_unread_notifications_for_user(self, user_id: str) -> int:
-        """Cheap unread-badge count."""
+        """Cheap unread-badge count, cached per user (30s TTL).
+
+        Read on every WS tick to render the notification badge — at
+        100K concurrent users on the default 3-second poll cadence
+        the uncached `SELECT COUNT(*)` against `notifications` is
+        ~33k Postgres calls/sec on this single query. The cache
+        collapses that to ~33k MEMCACHE calls/sec at steady state,
+        with a Postgres roundtrip only on the first read after a
+        write (the invalidators at `create_notifications_bulk` /
+        `mark_notification_read` / `mark_all_notifications_read`
+        drop the entry; the TTL caps staleness if any path misses
+        an explicit invalidate).
+        """
+        if not self._is_sqlite():
+            from pufferblow.api.cache.memcache import (
+                get_cache,
+                unread_notifications_count_key,
+            )
+
+            cache = get_cache(self.config)
+            key = unread_notifications_count_key(str(user_id))
+            cached = cache.get(key)
+            if cached is not None:
+                return int(cached)
+
         with self.database_session() as session:
-            return (
+            count = (
                 session.query(Notifications)
                 .filter(
                     Notifications.user_id == user_id,
@@ -3011,6 +3042,36 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 )
                 .count()
             )
+
+        if not self._is_sqlite():
+            from pufferblow.api.cache.memcache import (
+                get_cache,
+                jittered_ttl,
+                unread_notifications_count_key,
+            )
+
+            get_cache(self.config).set(
+                unread_notifications_count_key(str(user_id)),
+                int(count),
+                ttl=jittered_ttl(30),
+            )
+
+        return int(count)
+
+    def _invalidate_unread_notifications_count(self, user_id: str) -> None:
+        """Drop the cached unread-notification badge for `user_id`.
+
+        Called from every notification mutation path so the next badge
+        read reflects the change immediately rather than after the TTL.
+        """
+        if self._is_sqlite():
+            return
+        from pufferblow.api.cache.memcache import (
+            get_cache,
+            unread_notifications_count_key,
+        )
+
+        get_cache(self.config).delete(unread_notifications_count_key(str(user_id)))
 
     def mark_notification_read(
         self, notification_id: str, user_id: str
@@ -3033,6 +3094,9 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             if row is None or row.read_at is not None:
                 return False
             row.read_at = now
+
+        # One fewer unread for this user — drop the cached count.
+        self._invalidate_unread_notifications_count(str(user_id))
         return True
 
     def mark_all_notifications_read(self, user_id: str) -> int:
@@ -3053,6 +3117,12 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                     synchronize_session=False,
                 )
             )
+
+        # All-read collapses the unread count to zero; drop the cache
+        # so the next read reseeds (rather than relying on a manual
+        # set(0), which would race with a concurrent notification
+        # creation that's already past the invalidate barrier above).
+        self._invalidate_unread_notifications_count(str(user_id))
         return int(count or 0)
 
     # --- Notification preferences ---------------------------------------

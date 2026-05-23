@@ -440,3 +440,15 @@ def rate_limit_warnings_key(ip: str) -> str:
 def rate_limit_cooldown_key(ip: str) -> str:
     """Cache key for an active cooldown timestamp on an IP."""
     return f"pb:rlcd:{ip}"
+
+
+def unread_notifications_count_key(user_id: str) -> str:
+    """Cache key for a user's unread-notification count badge.
+
+    Hot read — the client polls this on every WS tick to render the
+    notification badge, so the uncached path (`SELECT COUNT(*) FROM
+    notifications WHERE user_id = ? AND read_at IS NULL`) hits Postgres
+    50k req/s at 100K concurrent users with a 3s poll. Pickle-stored
+    `int`; invalidated by every notification create / read / mark-all.
+    """
+    return f"pb:unread_notifs:{user_id}"

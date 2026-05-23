@@ -69,8 +69,21 @@ def _detect_schema_drift() -> tuple[list[str], list[tuple[str, str]]]:
     return missing_tables, missing_columns
 
 
-def migrate_command(check: bool = False) -> None:
-    """Apply database schema (idempotent) or report drift in --check mode."""
+def migrate_command(
+    check: bool = False,
+    backfill_search: bool = False,
+    backfill_batch_size: int = 500,
+) -> None:
+    """Apply database schema (idempotent) or report drift in --check mode.
+
+    With `backfill_search=True`, also walks every existing message row
+    and populates its `search_tokens` tsvector from the decrypted
+    plaintext. Required on long-lived instances upgrading to the ranked-
+    search feature: new messages are auto-populated at write time, but
+    rows that existed before the upgrade have NULL tokens and are
+    invisible to search until backfilled. The operation is idempotent —
+    rows with non-NULL `search_tokens` are skipped.
+    """
     from pufferblow.cli.common import (
         configure_cli_logging,
         ensure_database_exists,
@@ -141,3 +154,139 @@ def migrate_command(check: bool = False) -> None:
         logger.info(
             "Idempotent post-migrations (appearance, blocked IP counters, backfills) ran successfully."
         )
+
+    if backfill_search:
+        _backfill_search_tokens(batch_size=max(1, int(backfill_batch_size)))
+
+
+def _backfill_search_tokens(batch_size: int) -> None:
+    """Walk historic messages and populate their `search_tokens` tsvector.
+
+    Streams `messages.message_id` in batches, decrypts each plaintext via
+    `MessagesManager.decrypt_message`, and issues a single transactional
+    `UPDATE … SET search_tokens = to_tsvector('simple', :t) WHERE
+    message_id = :id` per row. Rows whose tokens are already populated
+    are skipped at SQL filter time so the command is cheap to re-run.
+
+    No-op on SQLite (the column type degrades to plain String and the
+    GIN index isn't present anyway — search on SQLite uses the
+    decrypt-and-scan fallback).
+    """
+    import base64
+
+    from sqlalchemy import text
+
+    from pufferblow.core.bootstrap import api_initializer
+
+    handler = api_initializer.database_handler
+    if str(handler.database_engine.url).startswith("sqlite://"):
+        logger.info("Skipping search backfill on SQLite (no tsvector column).")
+        return
+
+    messages_manager = api_initializer.messages_manager
+    total_done = 0
+    total_failed = 0
+
+    with handler.database_engine.connect() as connection:
+        # Count first so the progress log is meaningful. The WHERE
+        # clause matches the same predicate we'll loop on; on a
+        # freshly-migrated instance this might be the whole table, so
+        # this is the only full-table scan we ever issue here.
+        try:
+            pending = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM messages "
+                    "WHERE search_tokens IS NULL AND hashed_message IS NOT NULL"
+                )
+            ).scalar()
+        except Exception as exc:
+            _ui_error(f"Could not count messages to backfill: {exc}")
+            raise SystemExit(1)
+
+        if not pending:
+            logger.success("Search backfill: nothing to do.")
+            return
+
+        logger.info(
+            "Search backfill starting: {n} message(s) to index "
+            "(batch size {b}).",
+            n=pending,
+            b=batch_size,
+        )
+
+        while True:
+            try:
+                rows = connection.execute(
+                    text(
+                        "SELECT message_id, sender_id, hashed_message "
+                        "FROM messages "
+                        "WHERE search_tokens IS NULL "
+                        "  AND hashed_message IS NOT NULL "
+                        "ORDER BY sent_at DESC "
+                        "LIMIT :n"
+                    ),
+                    {"n": batch_size},
+                ).fetchall()
+            except Exception as exc:
+                _ui_error(f"Backfill SELECT failed: {exc}")
+                raise SystemExit(1)
+
+            if not rows:
+                break
+
+            updates: list[dict] = []
+            for row in rows:
+                message_id, sender_id, hashed_message = row
+                try:
+                    plaintext = messages_manager.decrypt_message(
+                        user_id=str(sender_id),
+                        message_id=message_id,
+                        encrypted_message=base64.b64decode(hashed_message),
+                    )
+                except Exception as exc:
+                    # An undecryptable row is rare but not catastrophic
+                    # — usually it means the sender's key rotation
+                    # raced a federated rewrite. Leave the token NULL
+                    # so the next backfill skips it cleanly, and move
+                    # on.
+                    total_failed += 1
+                    logger.warning(
+                        "Backfill skipped message_id={mid}: {err}",
+                        mid=message_id,
+                        err=str(exc),
+                    )
+                    continue
+
+                normalized = (plaintext or "").strip()
+                if not normalized:
+                    continue
+                updates.append({"t": normalized, "id": message_id})
+
+            if updates:
+                try:
+                    with connection.begin():
+                        connection.execute(
+                            text(
+                                "UPDATE messages "
+                                "SET search_tokens = to_tsvector('simple', :t) "
+                                "WHERE message_id = :id"
+                            ),
+                            updates,
+                        )
+                except Exception as exc:
+                    _ui_error(f"Backfill UPDATE failed mid-batch: {exc}")
+                    raise SystemExit(1)
+
+            total_done += len(updates)
+            logger.info(
+                "Search backfill progress: {done}/{total} ({failed} skipped)",
+                done=total_done,
+                total=pending,
+                failed=total_failed,
+            )
+
+    logger.success(
+        "Search backfill complete: {done} indexed, {failed} skipped.",
+        done=total_done,
+        failed=total_failed,
+    )

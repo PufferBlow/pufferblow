@@ -125,6 +125,28 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report schema drift without applying it. Exits 1 if drift exists.",
     )
+    migrate_p.add_argument(
+        "--backfill-search",
+        action="store_true",
+        help=(
+            "After applying schema, walk every existing message row and "
+            "populate its `search_tokens` tsvector from the decrypted "
+            "plaintext. Required on long-lived instances upgrading to the "
+            "ranked-search feature — new messages auto-populate, but rows "
+            "that existed before the upgrade are invisible to search until "
+            "this runs. Idempotent; safe to re-run."
+        ),
+    )
+    migrate_p.add_argument(
+        "--backfill-batch-size",
+        type=int,
+        default=500,
+        help=(
+            "How many messages per transaction when backfilling search "
+            "tokens (default 500). Larger batches finish faster but hold "
+            "row locks longer."
+        ),
+    )
 
     # ── doctor ───────────────────────────────────────────────────
     subparsers.add_parser(
@@ -226,7 +248,11 @@ def _dispatch(args: argparse.Namespace) -> int:
         if args.command == "migrate":
             from pufferblow.cli.commands.migrate import migrate_command
 
-            migrate_command(check=args.check)
+            migrate_command(
+                check=args.check,
+                backfill_search=args.backfill_search,
+                backfill_batch_size=args.backfill_batch_size,
+            )
             return 0
 
         if args.command == "doctor":

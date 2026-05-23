@@ -506,16 +506,17 @@ def test_message_cursor_decode_returns_none_for_garbage():
     assert DatabaseHandler._decode_message_cursor("not-an-iso|id") is None
 
 
-def test_messages_table_has_scaleout_indexes():
-    """Pin the index names so a rename would be caught immediately.
+def test_messages_table_has_keyset_index():
+    """Pin the composite-btree index name on the declarative metadata.
 
-    The schema migration in `_apply_messages_scaleout_migration` issues
-    `CREATE INDEX IF NOT EXISTS <name>` against these specific names —
-    a drift between the declarative metadata and the migration script
-    would silently shadow itself.
+    The GIN index on `search_tokens` is NOT declared here — its DDL is
+    Postgres-only and is built via the explicit migration helper. The
+    composite btree IS declared in metadata so a fresh `create_all` on
+    either dialect picks it up; this test catches a rename that would
+    drift it away from the migration script's `CREATE INDEX IF NOT
+    EXISTS` name.
     """
     from pufferblow.api.database.tables.messages import Messages
 
     index_names = {ix.name for ix in Messages.__table__.indexes}
     assert "ix_messages_channel_sent_at_msg" in index_names
-    assert "ix_messages_search_tokens" in index_names
