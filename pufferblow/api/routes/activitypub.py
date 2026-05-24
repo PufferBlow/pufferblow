@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from loguru import logger
 
 from pufferblow.api.dependencies import get_current_user
@@ -203,13 +203,33 @@ async def send_direct_message(request_body: DirectMessageSendRequest, request: R
             detail="Either a message, attachments, or stickers must be provided.",
         )
 
-    # Resolve sticker_ids → URLs. We keep the wire shape of
-    # ``attachments`` as a flat URL list because the DM federation
-    # path (ActivityPub Note) expects strings; the typed-attachment
-    # shape used by channels is a server-side internal convention.
-    # Sticker reverse-lookup (URL → sticker_id) on read happens via
-    # the cached library on the client.
-    merged_attachments: list[str] = list(request_body.attachments)
+    # Normalise the attachments list into the internal typed-dict
+    # form. The wire surface accepts either plain URL strings
+    # (legacy / federation-inbound) or full typed objects from the
+    # client's file picker. Both end up as dicts so the read path's
+    # render layer can rely on a consistent shape.
+    merged_attachments: list[dict] = []
+    for raw in (request_body.attachments or []):
+        if isinstance(raw, str):
+            # Bare URL string — wrap into the minimal dict. Filename
+            # / MIME are unknown here; the renderer will fall back to
+            # extension-based inference on the URL path.
+            if raw.strip():
+                merged_attachments.append({"url": raw})
+        elif isinstance(raw, dict):
+            url = raw.get("url")
+            if not url:
+                continue
+            # Preserve any of the standard channel-attachment keys
+            # that the client passed through. Unknown keys are
+            # dropped so a malicious / outdated client can't sneak
+            # extra payload into the persisted row.
+            entry: dict = {"url": str(url)}
+            for key in ("filename", "type", "size", "lqip_url"):
+                if key in raw and raw[key] is not None:
+                    entry[key] = raw[key]
+            merged_attachments.append(entry)
+
     if request_body.sticker_ids and api_initializer.stickers_manager is not None:
         for sid in request_body.sticker_ids:
             sticker_row = api_initializer.database_handler.get_sticker_by_id(sid)
@@ -218,7 +238,19 @@ async def send_direct_message(request_body: DirectMessageSendRequest, request: R
                     status_code=400,
                     detail=f"Sticker '{sid}' isn't available.",
                 )
-            merged_attachments.append(sticker_row.sticker_url)
+            # Stickers carry the same typed shape as other
+            # attachments — `type: "sticker"` is what the client
+            # renderer keys off to use the inline sticker bubble
+            # instead of the generic image bubble.
+            merged_attachments.append({
+                "url": sticker_row.sticker_url,
+                "filename": sticker_row.filename,
+                "type": "sticker",
+                "size": 0,
+                "sticker_id": sticker_row.sticker_id,
+                "display_name": sticker_row.display_name,
+                "alias": sticker_row.alias,
+            })
 
     try:
         result = await api_initializer.activitypub_manager.send_direct_message(
@@ -268,6 +300,100 @@ async def load_direct_messages(
         "peer_actor_uri": result["peer_actor_uri"],
         "messages": result["messages"],
     }
+
+
+@router.patch("/api/v1/dms/messages/{message_id}", status_code=200)
+async def edit_direct_message(
+    message_id: str,
+    auth_token: str = Body(..., embed=True),
+    message: str = Body(..., embed=True),
+):
+    """Edit a DM message's body.
+
+    Same constraints as the channel edit route — only the original
+    sender may edit, edit metadata is bumped server-side, body is
+    re-encrypted through the existing pipeline. Federation: the
+    edit is local-only for now (no AP Update activity emitted yet);
+    a follow-up will propagate edits to remote peers.
+    """
+    cleaned = (message or "").strip()
+    if not cleaned:
+        raise HTTPException(
+            status_code=400, detail="Edited message cannot be empty."
+        )
+    user_id = get_current_user(auth_token)
+    try:
+        result = api_initializer.messages_manager.edit_message(
+            message_id=message_id,
+            editor_user_id=user_id,
+            new_body=cleaned,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {
+        "status_code": 200,
+        "message_id": result["message_id"],
+        "message": result["message"],
+        "edit_count": result["edit_count"],
+        "last_edited_at": result["last_edited_at"],
+    }
+
+
+@router.get("/api/v1/dms/conversations/{conversation_id}/settings", status_code=200)
+async def get_dm_conversation_settings(conversation_id: str, auth_token: str):
+    """Read a conversation's per-conversation settings.
+
+    Returns the row if present, or a defaulted shape (
+    ``disappear_after_seconds = 86400``, the instance default)
+    when the conversation hasn't been customised yet. Either way
+    the client gets a consistent JSON shape to render.
+    """
+    get_current_user(auth_token)
+    row = api_initializer.database_handler.get_dm_conversation_settings(
+        conversation_id=conversation_id
+    )
+    if row is None:
+        # No customised row yet — return the default-shape body so
+        # the client doesn't need a separate "not set" branch.
+        return {
+            "status_code": 200,
+            "settings": {
+                "conversation_id": conversation_id,
+                "disappear_after_seconds": 24 * 60 * 60,
+                "is_default": True,
+            },
+        }
+    payload = row.to_dict()
+    payload["is_default"] = False
+    return {"status_code": 200, "settings": payload}
+
+
+@router.patch("/api/v1/dms/conversations/{conversation_id}/settings", status_code=200)
+async def update_dm_conversation_settings(
+    conversation_id: str,
+    auth_token: str = Body(..., embed=True),
+    disappear_after_seconds: int | None = Body(..., embed=True),
+):
+    """Update a conversation's disappearing-messages TTL.
+
+    ``disappear_after_seconds=null`` turns the feature off — future
+    messages in this conversation won't be auto-deleted. Any
+    positive integer enables the feature with that interval. Zero
+    is rejected because it would mean "delete on send."
+    """
+    get_current_user(auth_token)
+    if disappear_after_seconds is not None and disappear_after_seconds <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="disappear_after_seconds must be null (never) or > 0.",
+        )
+    row = api_initializer.database_handler.upsert_dm_conversation_settings(
+        conversation_id=conversation_id,
+        disappear_after_seconds=disappear_after_seconds,
+    )
+    return {"status_code": 200, "settings": row.to_dict()}
 
 
 @router.get("/api/v1/dms/conversations", status_code=200)

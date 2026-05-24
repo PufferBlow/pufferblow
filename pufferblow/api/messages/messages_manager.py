@@ -82,6 +82,14 @@ def _summarize_reactions(
     return summary
 
 
+# Default disappearing-DM TTL when a conversation hasn't customised
+# its own setting. 24 hours — enough to keep a normal day's
+# back-and-forth visible, short enough that DM history doesn't pile
+# up indefinitely. Operators can override via instance config in a
+# follow-up; this constant is the floor used today.
+DEFAULT_DM_DISAPPEAR_SECONDS = 24 * 60 * 60
+
+
 class MessagesManager:
     """Messages manager class"""
 
@@ -392,6 +400,82 @@ class MessagesManager:
             pass
         return message_metadata
 
+    def edit_message(
+        self,
+        message_id: str,
+        editor_user_id: str,
+        new_body: str,
+    ) -> dict:
+        """Update a message's body and bump its edit metadata.
+
+        Only the original sender may edit; the caller's authority
+        is verified inside this method (returns None if the editor
+        doesn't own the message). The new body is re-encrypted
+        through the existing pipeline and replaces ``hashed_message``;
+        the encryption key row is replaced to keep one-key-per-id.
+        ``edit_count`` increments by one and ``last_edited_at`` is
+        stamped — these power the client's "edited / edited N times"
+        badge.
+
+        Search index (``search_tokens``) is refreshed alongside so
+        a message that was edited stays findable by its new text.
+
+        Returns a dict with the post-edit shape (decrypted message,
+        edit_count, last_edited_at) so the route can echo it back
+        without a second fetch.
+        """
+        import base64
+        import datetime
+
+        existing = self.database_handler.get_message_by_id(message_id=message_id)
+        if existing is None:
+            raise ValueError("Message not found.")
+        if str(existing.sender_id) != str(editor_user_id):
+            # Editing someone else's message is never allowed —
+            # not even moderators (their lever is delete, not
+            # rewrite). The wire-level error stays generic so the
+            # client doesn't get a "you're not the author" signal
+            # that could be enumerated.
+            raise PermissionError("Only the original author can edit this message.")
+
+        # Re-encrypt the new body. Replaces the existing key row
+        # (same message_id) so decryption keeps working.
+        new_hashed, new_key = self.encrypt_message(
+            message=new_body,
+            user_id=str(editor_user_id),
+            message_id=message_id,
+        )
+
+        new_edit_count = (existing.edit_count or 0) + 1
+        new_last_edited_at = datetime.datetime.now(datetime.timezone.utc)
+        new_search_text = build_search_index_text(
+            message=new_body, attachments=existing.attachments
+        )
+
+        self.database_handler.update_message_body(
+            message_id=message_id,
+            new_hashed_message=new_hashed,
+            new_search_tokens=new_search_text,
+            edit_count=new_edit_count,
+            last_edited_at=new_last_edited_at,
+        )
+        # Replace the encryption key in the keys table. Keys are
+        # keyed by (user_id, message_id, associated_to=message), so
+        # save_keys with the new key bytes overwrites the row.
+        new_key.user_id = str(editor_user_id)
+        new_key.message_id = message_id
+        new_key.associated_to = "message"
+        self.database_handler.replace_message_key(key=new_key)
+
+        return {
+            "message_id": message_id,
+            "message": new_body,
+            "edit_count": new_edit_count,
+            "last_edited_at": new_last_edited_at.isoformat(),
+            "channel_id": existing.channel_id,
+            "conversation_id": existing.conversation_id,
+        }
+
     def delete_message(self, message_id: str, channel_id: str) -> None:
         """
         Delete a message from a channel in the server
@@ -569,6 +653,25 @@ class MessagesManager:
         message_metadata.conversation_id = conversation_id
         message_metadata.sender_id = user_id
         message_metadata.attachments = attachments or []
+
+        # Disappearing-DMs: compute expires_at from the
+        # conversation's TTL setting at send time. Channel messages
+        # (conversation_id is None) never expire — the moderator
+        # delete path is the channel surface for purges.
+        if conversation_id:
+            from datetime import datetime, timedelta, timezone
+
+            ttl_seconds = DEFAULT_DM_DISAPPEAR_SECONDS
+            settings = self.database_handler.get_dm_conversation_settings(
+                conversation_id=conversation_id
+            )
+            if settings is not None:
+                # Explicit None on the row means "never expire."
+                ttl_seconds = settings.disappear_after_seconds
+            if ttl_seconds is not None and ttl_seconds > 0:
+                message_metadata.expires_at = datetime.now(timezone.utc) + timedelta(
+                    seconds=ttl_seconds
+                )
 
         if sent_at:
             try:

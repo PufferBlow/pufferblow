@@ -563,6 +563,75 @@ async def channel_mark_message_as_read(
     }
 
 
+@router.patch("/messages/{message_id}", status_code=200)
+async def channel_edit_message(
+    channel_id: str,
+    message_id: str,
+    auth_token: str = Body(..., embed=True),
+    message: str = Body(..., embed=True),
+):
+    """Edit a channel message's body.
+
+    Only the original sender may edit. Edits bump ``edit_count`` +
+    stamp ``last_edited_at`` so the client can render an
+    "edited" / "edited N times" badge. The body is re-encrypted
+    through the same pipeline as a fresh send and replaces the
+    existing ciphertext; the search index is refreshed alongside.
+    """
+    cleaned = (message or "").strip()
+    if not cleaned:
+        raise exceptions.HTTPException(
+            status_code=400, detail="Edited message cannot be empty."
+        )
+    max_message_length, _ = _get_message_and_attachment_policy()
+    if len(cleaned) > max_message_length:
+        raise exceptions.HTTPException(
+            status_code=400,
+            detail=f"Message exceeds the instance limit of {max_message_length} characters.",
+        )
+
+    user_id = require_privilege(auth_token, "send_messages")
+    check_channel_access(user_id, channel_id)
+    ensure_user_not_timed_out(user_id, "edit messages")
+
+    try:
+        result = api_initializer.messages_manager.edit_message(
+            message_id=message_id,
+            editor_user_id=user_id,
+            new_body=cleaned,
+        )
+    except PermissionError as exc:
+        raise exceptions.HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise exceptions.HTTPException(status_code=404, detail=str(exc))
+
+    # Broadcast the edit so other viewers see it without polling.
+    try:
+        await api_initializer.websockets_manager.broadcast_to_eligible_users(
+            channel_id,
+            {
+                "type": "message_edited",
+                "message_id": message_id,
+                "channel_id": channel_id,
+                "message": result["message"],
+                "edit_count": result["edit_count"],
+                "last_edited_at": result["last_edited_at"],
+            },
+        )
+    except Exception:
+        logger.exception(
+            f"Failed to broadcast message_edited for message_id={message_id}"
+        )
+
+    return {
+        "status_code": 200,
+        "message_id": result["message_id"],
+        "message": result["message"],
+        "edit_count": result["edit_count"],
+        "last_edited_at": result["last_edited_at"],
+    }
+
+
 @router.post("/messages/{message_id}/reactions", status_code=201)
 async def channel_add_message_reaction(
     auth_token: str,

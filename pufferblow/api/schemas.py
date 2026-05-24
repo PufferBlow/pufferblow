@@ -459,8 +459,27 @@ class DirectMessageSendRequest(BaseModel):
     sent_at: str | None = Field(
         default=None, description="Optional ISO timestamp sent by client"
     )
-    attachments: list[str] = Field(
-        default_factory=list, description="Optional attachment URLs for federated Note"
+    # Two shapes accepted, both for back-compat and for richer
+    # rendering on read:
+    #   * Plain URL strings (legacy / federation outbound form).
+    #     The server forwards these as-is in the ActivityPub Note's
+    #     `attachment` array.
+    #   * Typed dicts {url, filename, type, size}. Same shape the
+    #     channel send path uses internally. Carrying type/filename
+    #     fixes the "image attachments render as a generic file"
+    #     bug — the storage URL `/storage/<hash>` has no extension
+    #     for the client renderer to infer the MIME from, so the
+    #     server-known type has to ride along with it.
+    # The route layer normalises both into the internal list of
+    # dicts before storing.
+    attachments: list = Field(
+        default_factory=list,
+        description=(
+            "Optional attachments. Each entry may be a URL string "
+            "(forwarded as-is to ActivityPub) or an object "
+            "{url, filename, type, size} with MIME/filename hints "
+            "that the renderer uses to pick the right bubble."
+        ),
     )
     sticker_ids: list[str] = Field(
         default_factory=list,

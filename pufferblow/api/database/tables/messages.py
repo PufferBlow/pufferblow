@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID as SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,6 +63,31 @@ class Messages(Base):
 
     attachments: Mapped[list | None] = mapped_column(JSON(), nullable=True)
 
+    # Edit history columns. Populated on every successful edit:
+    #   * ``edit_count`` increments by one (new column defaults to 0,
+    #     so legacy rows that have never been edited cleanly read as 0).
+    #   * ``last_edited_at`` stamps the most-recent edit time so the
+    #     client can show "edited 2 minutes ago" on hover.
+    # Distinct from ``sent_at`` so the original timestamp survives —
+    # editing doesn't reset the message's place in history.
+    edit_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Disappearing DMs. When non-null, a background sweep deletes
+    # the message (and its key row) after this time has passed.
+    # Channel messages stay null — disappearing is a DM-only
+    # feature, the channel surface uses the moderator delete path
+    # instead. Computed server-side at send time from the
+    # conversation's TTL setting (defaults to 24h when the
+    # conversation hasn't customised it).
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
     # Server-side ranked-search column. Populated from plaintext at write
     # time (see `MessagesManager._build_message_record`), kept NULL on
     # SQLite (the test harness uses the in-Python fallback). The GIN index
@@ -88,6 +113,14 @@ class Messages(Base):
             "conversation_id": self.conversation_id,
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
             "attachments": self.attachments or [],
+            # Edit metadata. ``edit_count == 0`` means never edited;
+            # the client renders the "edited" / "edited N times" tag
+            # only when this is > 0. ``last_edited_at`` is null in
+            # the unedited case.
+            "edit_count": self.edit_count or 0,
+            "last_edited_at": (
+                self.last_edited_at.isoformat() if self.last_edited_at else None
+            ),
         }
 
     def __repr__(self) -> str:

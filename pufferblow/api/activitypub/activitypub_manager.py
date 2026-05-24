@@ -50,6 +50,26 @@ class ActivityPubPeer:
     shared_inbox_uri: str | None
 
 
+def _attachment_url(item) -> str | None:
+    """Coerce an attachment item to its URL string.
+
+    DM attachments live in the database as a JSON list that may hold
+    either bare URL strings (the legacy / federation-inbound shape)
+    or typed dicts with ``url`` + metadata (the new shape produced
+    by the client's file picker). Federation outbound consumes URLs
+    only, so the local format normaliser strips the metadata
+    before serialisation.
+    """
+    if isinstance(item, str):
+        s = item.strip()
+        return s or None
+    if isinstance(item, dict):
+        url = item.get("url")
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    return None
+
+
 class ActivityPubManager:
     """ActivityPub manager for cross-instance identity and direct messaging."""
 
@@ -616,12 +636,15 @@ class ActivityPubManager:
         # sticker_ids must be present" before reaching here. Blocking
         # empty bodies here too would reject legitimate
         # attachment-only sends (the file/sticker IS the message,
-        # body is just an a11y hint). The strip + isinstance guard
-        # keeps us safe against None / non-string callers in case
-        # an internal call site forgets the route's pre-check.
+        # body is just an a11y hint). The check below also strips
+        # noise from the attachments list — entries with no URL
+        # don't count as a real attachment.
+        has_real_attachment = any(
+            _attachment_url(item) for item in (attachments or [])
+        )
         if (
             (not isinstance(message, str) or not message.strip())
-            and not (attachments or [])
+            and not has_real_attachment
         ):
             raise ValueError(
                 "Direct message must include a body or at least one attachment"
@@ -678,7 +701,18 @@ class ActivityPubManager:
             "published": published_at,
             "content": message,
             "conversation": conversation_id,
-            "attachment": [{"type": "Link", "href": item} for item in (attachments or [])],
+            # Federation outbound: ActivityPub Notes carry attachments
+            # as `{type: Link, href: <url>}`. The internal attachments
+            # list may be either bare URL strings (legacy) or typed
+            # dicts with metadata; extract just the URL for the
+            # remote peer (they can re-derive MIME from the URL on
+            # their end, and we'd be leaking sticker_id / lqip_url
+            # extras that don't belong on the wire).
+            "attachment": [
+                {"type": "Link", "href": _attachment_url(item)}
+                for item in (attachments or [])
+                if _attachment_url(item)
+            ],
             "sensitive": False,
             "pufferblow:visibility": "direct",
             "pufferblow:kind": "dm",

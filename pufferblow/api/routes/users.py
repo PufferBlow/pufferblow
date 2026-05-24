@@ -275,8 +275,13 @@ async def users_profile_route(request: UserProfileRequest):
     is_account_owner = api_initializer.auth_token_manager.check_users_auth_token(
         user_id=target_user_id, raw_auth_token=request.auth_token
     )
+    # Thread the viewer id through so the manager can apply the
+    # block-privacy scrub when the target has the viewer blocked.
+    # Account-owner reads bypass the scrub inside the manager.
     user_data = api_initializer.user_manager.user_profile(
-        user_id=target_user_id, is_account_owner=is_account_owner
+        user_id=target_user_id,
+        is_account_owner=is_account_owner,
+        viewer_user_id=user_id,
     )
     return {"status_code": 200, "user_data": user_data}
 

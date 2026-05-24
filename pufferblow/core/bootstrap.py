@@ -290,6 +290,19 @@ class APIInitializer:
             enabled=bool(getattr(self.config, "BACKUP_ENABLED", False)),
         )
 
+        # Disappearing-DM sweeper. Deletes messages whose
+        # `expires_at` has passed plus their encryption-key rows.
+        # 5-minute interval is conservative — the user-visible
+        # latency between "expires_at" and "actually gone" is at
+        # most this interval, which is well inside the user's
+        # mental model of "disappears around the 24h mark."
+        self.background_tasks_manager.register_task(
+            task_id="dm_disappearing_sweep",
+            task_func=self.background_tasks_manager.sweep_expired_dms,
+            interval_minutes=5,
+            enabled=True,
+        )
+
     def load_database(self, database_uri: str | None = None) -> None:
         """
         Initialize database and database handler.

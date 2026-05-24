@@ -42,6 +42,21 @@ class BackgroundTasksManager(BackgroundTaskSchedulerMixin, BackgroundTaskAnalyti
         self.logger = logging.getLogger(__name__)
         self._initialize_chart_data()
 
+    async def sweep_expired_dms(self):
+        """Delete DM messages whose ``expires_at`` has passed.
+
+        Powers the disappearing-DMs feature. Runs every 5 minutes;
+        skipped silently when the database handler isn't ready
+        (test boot path). Deletes the encryption-key rows alongside
+        so we don't leak keys for messages that no longer exist.
+        """
+        try:
+            count = self.database_handler.delete_expired_dm_messages()
+            if count > 0:
+                logger.info(f"Disappearing-DM sweep deleted {count} expired messages")
+        except Exception as exc:
+            logger.warning(f"Disappearing-DM sweep failed: {exc}")
+
     async def cleanup_storage_orphaned_files(self):
         """Clean up orphaned files in storage."""
         logger.info("Starting storage cleanup task")

@@ -521,6 +521,46 @@ class FriendsManager:
             )
             return True
 
+    def is_viewer_blocked_by(self, *, viewer_id: str, target_id: str) -> bool:
+        """Has ``target_id`` blocked ``viewer_id`` from sending them
+        friend requests?
+
+        Used by the profile-read paths to scrub identifying fields
+        (avatar / banner / about / status) so a viewer the target
+        has blocked sees only the bare username — same wire shape
+        for them as a stranger they've never met. The block remains
+        silent from the viewer's perspective: no special error, no
+        UI hint, the redaction looks identical to a profile that
+        was simply never customised.
+
+        Returns False when the table doesn't exist (test path that
+        skips the friend-block migration) or on any other read
+        failure — fail open rather than block-by-default, because
+        the failure mode of "redact everyone's avatar" is worse
+        than the failure mode of "miss a block check."
+        """
+        if not viewer_id or not target_id:
+            return False
+        try:
+            with self.database_handler.database_session() as session:
+                row = session.execute(
+                    select(FriendRequestBlocks).where(
+                        FriendRequestBlocks.blocker_id
+                        == self._normalize_user_id(target_id),
+                        FriendRequestBlocks.blocked_id
+                        == self._normalize_user_id(viewer_id),
+                    )
+                ).scalar_one_or_none()
+                return row is not None
+        except Exception as exc:
+            logger.warning(
+                "is_viewer_blocked_by failed: viewer={v} target={t}: {err}",
+                v=viewer_id,
+                t=target_id,
+                err=str(exc),
+            )
+            return False
+
     def list_blocks(self, *, blocker_id: str) -> list[dict]:
         """Return every user the actor has blocked from sending requests.
 

@@ -362,13 +362,35 @@ class UserManager:
 
         return users
 
-    def user_profile(self, user_id: str, is_account_owner: bool | None = False) -> dict:
+    def user_profile(
+        self,
+        user_id: str,
+        is_account_owner: bool | None = False,
+        viewer_user_id: str | None = None,
+    ) -> dict:
         """
-        Fetch the user's profile metadata
+        Fetch the user's profile metadata.
 
-        Paramters:
-            `user_id` (str): The user's `user_id`.
-            `is_account_owner` (bool, optional, default: False): Is this `user_id` ownes this account.
+        Block privacy: when ``viewer_user_id`` is provided and the
+        target has the viewer in their ``friend_request_blocks``, we
+        scrub the personal-presentation fields (avatar, banner,
+        about, status, custom_status, accent_color, banner_color,
+        avatar_seed) before serialising. The viewer sees the bare
+        username only — same shape they'd see for a never-customised
+        account, so the block doesn't announce itself.
+
+        Account-owner reads (``is_account_owner=True``) bypass the
+        scrub: the user always sees their own profile in full,
+        regardless of who they've blocked.
+
+        Parameters:
+            user_id: The user whose profile is being fetched.
+            is_account_owner: True when the viewer IS the target.
+                Suppresses the block-privacy scrub.
+            viewer_user_id: The viewer's user_id. When ``None`` the
+                scrub is also suppressed (back-compat with internal
+                callers that haven't threaded the viewer through
+                yet); these paths should migrate.
 
         Returns:
             dict: The user's profile metadata in a dict format.
@@ -376,6 +398,55 @@ class UserManager:
         user_data = self.database_handler.get_user(
             user_id=user_id,
         ).to_dict()
+
+        # Block-privacy scrub. Runs after `to_dict()` so we redact
+        # ALREADY-SERIALISED fields (cheaper than re-fetching) and
+        # so the scrub list lives in one place rather than
+        # branching the query.
+        if (
+            viewer_user_id
+            and not is_account_owner
+            and str(viewer_user_id) != str(user_id)
+        ):
+            try:
+                from pufferblow.core.bootstrap import api_initializer as _ai
+                if (
+                    _ai.friends_manager is not None
+                    and _ai.friends_manager.is_viewer_blocked_by(
+                        viewer_id=str(viewer_user_id),
+                        target_id=str(user_id),
+                    )
+                ):
+                    # Zero out everything except the username +
+                    # user_id + origin_server. The result is the
+                    # same shape a stranger sees for a brand-new
+                    # account — no signal of "you're blocked."
+                    REDACT_FIELDS = (
+                        "avatar_url",
+                        "banner_url",
+                        "about",
+                        "status",
+                        "custom_status",
+                        "accent_color",
+                        "banner_color",
+                        "avatar_seed",
+                        "last_seen",
+                        "bio",
+                    )
+                    for field in REDACT_FIELDS:
+                        if field in user_data:
+                            user_data[field] = None
+                    # Status defaults to "offline" elsewhere — match
+                    # that so the client doesn't render a stale
+                    # online dot.
+                    user_data["status"] = "offline"
+            except Exception as exc:
+                # Fail open: if the block check throws, render the
+                # full profile rather than redacting everyone.
+                logger.warning(
+                    "Block-privacy scrub skipped due to error: {err}",
+                    err=str(exc),
+                )
 
         # Process avatar_url and banner_url - they are stored as relative paths (/storage/{hash})
         # and should be returned as-is to work with client's URL construction

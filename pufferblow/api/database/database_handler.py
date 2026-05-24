@@ -32,6 +32,9 @@ from pufferblow.api.database.tables.decentralized_sessions import (
     DecentralizedNodeSession,
 )
 from pufferblow.api.database.tables.declarative_base import Base
+from pufferblow.api.database.tables.dm_conversation_settings import (
+    DmConversationSettings,
+)
 from pufferblow.api.database.tables.file_objects import FileObjects, FileReferences
 from pufferblow.api.database.tables.friend_request_blocks import FriendRequestBlocks
 from pufferblow.api.database.tables.friendships import Friendships
@@ -377,6 +380,29 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 err=str(exc),
             )
 
+        # Message-edit columns: edit_count + last_edited_at on
+        # messages. Idempotent — skipped when the columns already
+        # exist.
+        try:
+            self._apply_message_edit_columns_migration()
+        except Exception as exc:
+            logger.warning(
+                "message-edit columns migration skipped due to error: {err}",
+                err=str(exc),
+            )
+
+        # Disappearing-DMs migration: adds messages.expires_at and
+        # ensures the dm_conversation_settings table is in place
+        # (the SQLAlchemy create_all run above handles fresh
+        # installs; this helper is the upgrade-in-place path).
+        try:
+            self._apply_disappearing_dms_migration()
+        except Exception as exc:
+            logger.warning(
+                "disappearing-DMs migration skipped due to error: {err}",
+                err=str(exc),
+            )
+
     def _create_tables_safely(self, base: DeclarativeBase) -> None:
         """
         Create all declared tables in a single idempotent call.
@@ -671,6 +697,181 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
                 "Sticker columns added to live schema: {cols}",
                 cols=", ".join(added),
             )
+
+    def _apply_message_edit_columns_migration(self) -> None:
+        """Add ``edit_count`` + ``last_edited_at`` to messages.
+
+        Powers the "edited" / "edited N times" tag the client
+        renders next to edited messages. Idempotent on every boot:
+        a column that already exists is skipped. Works on Postgres
+        and SQLite — both accept ``ALTER TABLE ADD COLUMN``.
+
+        ``edit_count`` defaults to 0 so legacy rows backfill in a
+        single statement with no NULLs to worry about; the client
+        treats ``0`` as "never edited."
+        """
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.database_engine)
+        try:
+            existing = {col["name"] for col in inspector.get_columns("messages")}
+        except Exception as exc:
+            logger.debug(
+                "messages table not present, skipping edit columns migration: {err}",
+                err=str(exc),
+            )
+            return
+
+        columns: list[tuple[str, str]] = [
+            ("edit_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_edited_at", "TIMESTAMP WITH TIME ZONE"),
+        ]
+        added: list[str] = []
+        dialect = self.database_engine.dialect.name
+        for col_name, col_clause in columns:
+            if col_name in existing:
+                continue
+            clause = col_clause
+            if dialect == "sqlite" and "TIMESTAMP" in clause:
+                clause = clause.replace("TIMESTAMP WITH TIME ZONE", "DATETIME")
+            ddl = f"ALTER TABLE messages ADD COLUMN {col_name} {clause}"
+            try:
+                with self.database_engine.begin() as conn:
+                    conn.execute(text(ddl))
+            except Exception as exc:
+                logger.error(
+                    "Failed to add column messages.{col}: {err}",
+                    col=col_name,
+                    err=str(exc),
+                )
+                raise
+            added.append(f"messages.{col_name}")
+
+        if added:
+            logger.info(
+                "Message edit columns added to live schema: {cols}",
+                cols=", ".join(added),
+            )
+
+    def _apply_disappearing_dms_migration(self) -> None:
+        """Add the ``expires_at`` column to messages.
+
+        The companion ``dm_conversation_settings`` table is created
+        via ``create_all`` so we only need to handle the column
+        add here. Indexed for the background sweep query.
+        """
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.database_engine)
+        try:
+            existing = {col["name"] for col in inspector.get_columns("messages")}
+        except Exception as exc:
+            logger.debug(
+                "messages table not present, skipping disappearing-DMs migration: {err}",
+                err=str(exc),
+            )
+            return
+
+        if "expires_at" in existing:
+            return
+
+        dialect = self.database_engine.dialect.name
+        col_type = "TIMESTAMP WITH TIME ZONE" if dialect == "postgresql" else "DATETIME"
+        ddl = f"ALTER TABLE messages ADD COLUMN expires_at {col_type}"
+        try:
+            with self.database_engine.begin() as conn:
+                conn.execute(text(ddl))
+                if dialect == "postgresql":
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_messages_expires_at "
+                            "ON messages (expires_at) WHERE expires_at IS NOT NULL"
+                        )
+                    )
+        except Exception as exc:
+            logger.error(
+                "Failed to add messages.expires_at: {err}", err=str(exc)
+            )
+            raise
+
+        logger.info("Disappearing-DMs column added to messages")
+
+    def get_dm_conversation_settings(
+        self, conversation_id: str
+    ) -> DmConversationSettings | None:
+        """Fetch a conversation's settings row, or None when not set."""
+        with self.database_session() as session:
+            stmt = select(DmConversationSettings).where(
+                DmConversationSettings.conversation_id == conversation_id
+            )
+            row = session.execute(stmt).first()
+            return row[0] if row else None
+
+    def upsert_dm_conversation_settings(
+        self, conversation_id: str, *, disappear_after_seconds: int | None
+    ) -> DmConversationSettings:
+        """Create or update the per-conversation settings row."""
+        import datetime
+
+        with self.database_session() as session:
+            row = session.get(DmConversationSettings, conversation_id)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if row is None:
+                row = DmConversationSettings(
+                    conversation_id=conversation_id,
+                    disappear_after_seconds=disappear_after_seconds,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.disappear_after_seconds = disappear_after_seconds
+                row.updated_at = now
+            session.commit()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def delete_expired_dm_messages(self, now=None) -> int:
+        """Delete DM messages whose ``expires_at`` has passed.
+
+        Returns the count of deleted rows so the background task
+        can log throughput. Also cascade-deletes the per-message
+        encryption-key rows via the keys table (FK isn't set up
+        but the keys table is keyed on ``message_id`` + ``user_id``,
+        so we issue an explicit DELETE).
+        """
+        import datetime
+        from sqlalchemy import and_, delete
+
+        if now is None:
+            now = datetime.datetime.now(datetime.timezone.utc)
+        with self.database_session() as session:
+            # Pull the ids first so we can delete their key rows too.
+            expired_ids = [
+                row[0]
+                for row in session.execute(
+                    select(Messages.message_id).where(
+                        and_(
+                            Messages.expires_at.is_not(None),
+                            Messages.expires_at <= now,
+                        )
+                    )
+                ).all()
+            ]
+            if not expired_ids:
+                return 0
+            session.execute(
+                delete(Keys).where(
+                    Keys.message_id.in_(expired_ids),
+                    Keys.associated_to == "message",
+                )
+            )
+            session.execute(
+                delete(Messages).where(Messages.message_id.in_(expired_ids))
+            )
+            session.commit()
+            return len(expired_ids)
 
     def _apply_lqip_column_migration(self) -> None:
         """Add ``lqip_path`` to file_objects if missing.
@@ -1883,6 +2084,92 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
             session.commit()
 
         logger.debug(debug.DEBUG_NEW_DERIVED_KEY_SAVED(key=key))
+
+    def replace_message_key(self, key: Keys) -> None:
+        """Replace the encryption key row for a message id.
+
+        Used by the edit path — a re-encrypted body needs a fresh
+        key, and the old one stops being useful. Delete-then-insert
+        rather than UPDATE because the Keys table uses a composite
+        identity that gets messy to update piecemeal across
+        SQLAlchemy backends.
+        """
+        from sqlalchemy import and_, delete
+
+        with self.database_session() as session:
+            session.execute(
+                delete(Keys).where(
+                    and_(
+                        Keys.message_id == key.message_id,
+                        Keys.associated_to == "message",
+                    )
+                )
+            )
+            session.add(key)
+            session.commit()
+
+    def update_message_body(
+        self,
+        message_id: str,
+        new_hashed_message: str,
+        new_search_tokens: str | None,
+        edit_count: int,
+        last_edited_at,
+    ) -> None:
+        """Patch a message's body + edit metadata in one statement.
+
+        Touches:
+          * ``hashed_message`` — the new ciphertext
+          * ``edit_count`` — bumped by the manager before this call
+          * ``last_edited_at`` — current timestamp
+          * ``search_tokens`` — refreshed via ``to_tsvector`` on
+            Postgres so the edited body stays findable; SQLite path
+            stores the raw string and falls through to the in-Python
+            search fallback.
+        """
+        from sqlalchemy import text, update
+
+        dialect = self.database_engine.dialect.name
+        with self.database_session() as session:
+            if dialect == "postgresql":
+                # to_tsvector cast happens server-side via raw SQL —
+                # the wire format for a tsvector literal isn't
+                # plain text and the ORM column type would reject
+                # a bare string assignment.
+                session.execute(
+                    text(
+                        """
+                        UPDATE messages
+                        SET hashed_message = :hashed,
+                            edit_count = :ec,
+                            last_edited_at = :led,
+                            search_tokens = to_tsvector('simple', :st)
+                        WHERE message_id = :mid
+                        """
+                    ),
+                    {
+                        "hashed": new_hashed_message,
+                        "ec": edit_count,
+                        "led": last_edited_at,
+                        "st": new_search_tokens or "",
+                        "mid": message_id,
+                    },
+                )
+            else:
+                # SQLite: skip the tsvector cast; the column stores
+                # the raw string and the in-Python search fallback
+                # handles it.
+                session.execute(
+                    update(Messages)
+                    .where(Messages.message_id == message_id)
+                    .values(
+                        hashed_message=new_hashed_message,
+                        edit_count=edit_count,
+                        last_edited_at=last_edited_at,
+                        search_tokens=new_search_tokens,
+                    )
+                )
+            session.commit()
 
     def get_keys(
         self,
