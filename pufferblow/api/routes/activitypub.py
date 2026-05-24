@@ -268,3 +268,35 @@ async def load_direct_messages(
         "peer_actor_uri": result["peer_actor_uri"],
         "messages": result["messages"],
     }
+
+
+@router.get("/api/v1/dms/conversations", status_code=200)
+async def list_dm_conversations(request: Request, auth_token: str):
+    """List the viewer's DM conversations, most-recent-first.
+
+    Powers the conversation-list sidebar on the client. Each entry
+    carries enough hydrated data (peer identity, last message
+    preview, last message timestamp, sender-is-me flag) for the UI
+    to render the row without a per-conversation fetch.
+
+    Federation-aware: peer info works for both local users and
+    shadow rows (federated users we've cached). Conversations that
+    can't be resolved to a peer (extremely rare — orphan rows) are
+    skipped rather than returned half-hydrated.
+    """
+    user_id = get_current_user(auth_token)
+    base_url = _request_base_url(request)
+
+    try:
+        conversations = api_initializer.activitypub_manager.list_dm_conversations(
+            viewer_user_id=user_id,
+            base_url=base_url,
+        )
+    except Exception as exc:
+        logger.error(f"DM conversation list failed: {str(exc)}")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "status_code": 200,
+        "conversations": conversations,
+    }

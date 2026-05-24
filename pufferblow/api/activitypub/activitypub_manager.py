@@ -611,8 +611,21 @@ class ActivityPubManager:
         """
         Send a direct message to local or remote peer. Remote delivery uses ActivityPub Create(Note).
         """
-        if not message.strip():
-            raise ValueError("Direct message body cannot be empty")
+        # Allow attachment-only / sticker-only DMs: the route layer
+        # already enforces "at least one of body OR attachments OR
+        # sticker_ids must be present" before reaching here. Blocking
+        # empty bodies here too would reject legitimate
+        # attachment-only sends (the file/sticker IS the message,
+        # body is just an a11y hint). The strip + isinstance guard
+        # keeps us safe against None / non-string callers in case
+        # an internal call site forgets the route's pre-check.
+        if (
+            (not isinstance(message, str) or not message.strip())
+            and not (attachments or [])
+        ):
+            raise ValueError(
+                "Direct message must include a body or at least one attachment"
+            )
 
         local_actor = self.ensure_local_actor(user_id=local_user_id, base_url=base_url)
         peer_info = await self._resolve_peer(peer=peer, base_url=base_url)
@@ -947,3 +960,161 @@ class ActivityPubManager:
             "peer_actor_uri": peer_actor.actor_uri,
             "messages": messages,
         }
+
+    def list_dm_conversations(
+        self,
+        viewer_user_id: str,
+        base_url: str,
+    ) -> list[dict]:
+        """List DM conversations the viewer participates in.
+
+        Powers the conversation-list sidebar on the client. Returns
+        an ordered (most-recent-first) list of conversation entries,
+        each hydrated with the peer's identity, the last message
+        preview, and the last-message timestamp so the UI can
+        render the row without a second round-trip per conversation.
+
+        Algorithm:
+
+          1. Pull the universe of candidate conversation_ids from
+             the DB — conversations where the viewer has either
+             sent or received a message.
+          2. For each candidate, find the OTHER participant
+             (some sender_id in the conversation that isn't us).
+          3. Verify the conversation truly involves the viewer by
+             recomputing ``sha256(sorted([viewer_actor, peer_actor]))``
+             — guards against junk rows or hash collisions on
+             unrelated conversations.
+          4. Hydrate peer info from the ``users`` table (covers
+             both local users and federation shadow rows) and
+             decrypt the last message body for preview.
+
+        Returns list of dicts:
+
+            {
+              "conversation_id": str,
+              "peer_user_id": str,
+              "peer_username": str,
+              "peer_origin_server": str,
+              "peer_avatar_url": str | None,
+              "peer_status": str,
+              "last_message_at": str (ISO 8601),
+              "last_message_preview": str (truncated to 120 chars),
+              "last_message_sender_is_me": bool,
+            }
+        """
+        import base64
+
+        viewer_actor_uri = self._actor_uri_for_user(viewer_user_id, base_url)
+        candidates = self.database_handler.list_user_dm_conversation_candidates(
+            viewer_user_id
+        )
+
+        conversations: list[dict] = []
+        for candidate in candidates:
+            conv_id = candidate["conversation_id"]
+
+            # Find the peer = first sender in this conversation that
+            # isn't us. None means the only sender was the viewer
+            # (an outgoing-only conversation that never got a
+            # reply); in that case we still want to surface it but
+            # need to find the peer differently — for the v1
+            # implementation we skip these since we can't recover
+            # the peer's identity without a conversation_members
+            # table.
+            peer_user_id = self.database_handler.get_conversation_other_sender(
+                conversation_id=conv_id, viewer_user_id=viewer_user_id
+            )
+            if peer_user_id is None:
+                # Outgoing-only conversation. To surface the peer
+                # we'd need to read the original message's metadata
+                # (target peer field on the wire), which the
+                # current schema doesn't persist. Skip for v1.
+                continue
+
+            # Resolve the peer's actor_uri. Local users have a
+            # deterministic uri pattern; shadow users (federated)
+            # have a row in activitypub_actors with the remote uri.
+            peer_actor_row = self.database_handler.get_activitypub_actor_by_user_id(
+                user_id=peer_user_id
+            )
+            if peer_actor_row is not None:
+                peer_actor_uri = peer_actor_row.actor_uri
+            else:
+                peer_actor_uri = self._actor_uri_for_user(peer_user_id, base_url)
+
+            # Verify the conversation_id matches the hash of
+            # viewer + peer. Mismatches are conversations that
+            # involve OTHER users; the candidates list is broad
+            # (any conv where the viewer received a message
+            # there could also be a junk row where another user
+            # happens to be a sender). Verification protects us.
+            expected = self._conversation_id(viewer_actor_uri, peer_actor_uri)
+            if expected != conv_id:
+                continue
+
+            # Hydrate peer info from the users table.
+            peer_user = self.database_handler.get_user(user_id=peer_user_id)
+            if peer_user is None:
+                # Shouldn't happen if the actor was found above,
+                # but defensive — log and skip.
+                logger.warning(
+                    "DM conversation peer user_id={peer_id} missing from users table",
+                    peer_id=peer_user_id,
+                )
+                continue
+
+            # Decrypt the last message for the preview. Best-effort —
+            # a decryption failure shouldn't drop the whole row,
+            # we just show "[unavailable]" instead.
+            last_msg = self.database_handler.get_message_by_id(
+                message_id=candidate["last_message_id"]
+            )
+            preview = ""
+            if last_msg is not None and last_msg.hashed_message:
+                try:
+                    decoded = self.messages_manager.decrypt_message(
+                        user_id=str(last_msg.sender_id),
+                        message_id=last_msg.message_id,
+                        encrypted_message=base64.b64decode(last_msg.hashed_message),
+                    )
+                    preview = decoded.strip()
+                except Exception as exc:
+                    logger.warning(
+                        "DM preview decrypt failed for message_id={mid}: {err}",
+                        mid=candidate["last_message_id"],
+                        err=str(exc),
+                    )
+                    preview = "[message unavailable]"
+
+            # Truncate the preview so the sidebar row stays one-line.
+            # The dashboard CSS truncates with ellipsis too, but
+            # capping server-side saves bytes on huge messages.
+            if len(preview) > 120:
+                preview = preview[:117] + "…"
+
+            sender_is_me = (
+                last_msg is not None
+                and str(last_msg.sender_id) == str(viewer_user_id)
+            )
+
+            conversations.append({
+                "conversation_id": conv_id,
+                "peer_user_id": str(peer_user.user_id),
+                "peer_username": peer_user.username,
+                "peer_origin_server": peer_user.origin_server or "",
+                "peer_avatar_url": peer_user.avatar_url,
+                "peer_status": peer_user.status or "offline",
+                "last_message_at": (
+                    candidate["last_message_at"].isoformat()
+                    if candidate["last_message_at"]
+                    else None
+                ),
+                "last_message_preview": preview,
+                "last_message_sender_is_me": sender_is_me,
+            })
+
+        # Already sorted by last_message_at desc from the DB layer;
+        # keep that order so the most-recent-first conversation is
+        # at the top of the sidebar.
+        return conversations

@@ -3202,6 +3202,136 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
         )
         return annotated
 
+    def list_user_dm_conversation_candidates(self, user_id: str) -> list[dict]:
+        """List candidate DM conversations involving the viewer.
+
+        Returns a list of dicts ordered by ``last_message_at`` desc:
+
+            {
+              "conversation_id": str,
+              "last_message_id": str,
+              "last_message_at": datetime,
+              "last_sender_id": uuid,
+            }
+
+        The candidates are "conversations the viewer plausibly
+        participates in" — practically that means every DM
+        conversation_id where the viewer has either sent OR received
+        a message. The MANAGER layer must then verify by checking
+        that ``sha256(sorted([viewer_actor, peer_actor]))`` equals
+        the conversation_id (because hash collisions / stale rows
+        could otherwise leak unrelated conversations). This
+        primitive returns the universe; the manager filters.
+
+        We collapse to one row per ``conversation_id`` (the most
+        recent message). The hydration step pulls the message
+        body separately so we can decrypt it.
+        """
+        from sqlalchemy import and_, desc, func, or_, select
+
+        with self.database_session() as session:
+            # First pass: distinct conversation_ids the viewer has
+            # SENT into. Cheap — narrow filter, indexed.
+            sent_conv_subq = (
+                select(Messages.conversation_id)
+                .where(
+                    Messages.sender_id == user_id,
+                    Messages.conversation_id.isnot(None),
+                )
+                .distinct()
+            )
+            sent_conv_ids = {row[0] for row in session.execute(sent_conv_subq).all()}
+
+            # Second pass: distinct conversation_ids where the viewer
+            # has received (sender != viewer). The manager verifies
+            # which of these actually involve the viewer's actor.
+            received_conv_subq = (
+                select(Messages.conversation_id)
+                .where(
+                    Messages.sender_id != user_id,
+                    Messages.conversation_id.isnot(None),
+                )
+                .distinct()
+            )
+            received_conv_ids = {
+                row[0] for row in session.execute(received_conv_subq).all()
+            }
+
+            # Union — every conversation_id worth considering.
+            candidate_ids = sent_conv_ids | received_conv_ids
+            if not candidate_ids:
+                return []
+
+            # Fetch the most recent message per conversation in one
+            # window-function pass. We use a subquery to compute the
+            # row_number and filter to rn=1.
+            ranked = (
+                select(
+                    Messages.conversation_id,
+                    Messages.message_id,
+                    Messages.sender_id,
+                    Messages.sent_at,
+                    func.row_number()
+                    .over(
+                        partition_by=Messages.conversation_id,
+                        order_by=desc(Messages.sent_at),
+                    )
+                    .label("rn"),
+                )
+                .where(Messages.conversation_id.in_(candidate_ids))
+                .subquery()
+            )
+
+            last_messages = session.execute(
+                select(
+                    ranked.c.conversation_id,
+                    ranked.c.message_id,
+                    ranked.c.sender_id,
+                    ranked.c.sent_at,
+                )
+                .where(ranked.c.rn == 1)
+                .order_by(desc(ranked.c.sent_at))
+            ).all()
+
+            return [
+                {
+                    "conversation_id": row[0],
+                    "last_message_id": row[1],
+                    "last_sender_id": row[2],
+                    "last_message_at": row[3],
+                }
+                for row in last_messages
+            ]
+
+    def get_conversation_other_sender(
+        self, conversation_id: str, viewer_user_id: str
+    ) -> str | None:
+        """Find the OTHER participant in a DM conversation.
+
+        DMs are 1:1. The "other" participant is the first sender_id
+        in the conversation that isn't the viewer. Returns None for
+        viewer-only conversations (shouldn't happen for real DMs;
+        defensive against junk rows).
+        """
+        with self.database_session() as session:
+            stmt = (
+                select(Messages.sender_id)
+                .where(
+                    Messages.conversation_id == conversation_id,
+                    Messages.sender_id != viewer_user_id,
+                )
+                .limit(1)
+            )
+            row = session.execute(stmt).first()
+            return str(row[0]) if row else None
+
+    def get_message_by_id(self, message_id: str) -> Messages | None:
+        """Fetch a single message row by primary key."""
+        with self.database_session() as session:
+            stmt = select(Messages).where(Messages.message_id == message_id)
+            row = session.execute(stmt).first()
+            return row[0] if row else None
+
     def fetch_conversation_messages(
         self, conversation_id: str, messages_per_page: int, page: int
     ) -> list[tuple[Messages, Users | None]]:
