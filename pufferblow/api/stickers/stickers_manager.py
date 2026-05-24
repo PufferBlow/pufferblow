@@ -53,6 +53,7 @@ from fastapi import HTTPException, UploadFile
 from loguru import logger
 
 from pufferblow.api.cache.memcache import get_cache
+from pufferblow.api.errors import ApiError, ErrorCode
 
 if TYPE_CHECKING:
     from pufferblow.api.database.database_handler import DatabaseHandler
@@ -123,9 +124,9 @@ def _validate_alias(alias: str | None) -> str | None:
     if not cleaned:
         return None
     if not _ALIAS_PATTERN.match(cleaned):
-        raise StickersError(
-            "Alias must be 2–32 chars, lowercase ASCII + digits + underscore",
-            status_code=400,
+        raise ApiError(
+            ErrorCode.STICKERS_INVALID_ALIAS,
+            details={"alias": cleaned},
         )
     return cleaned
 
@@ -133,12 +134,12 @@ def _validate_alias(alias: str | None) -> str | None:
 def _validate_display_name(display_name: str) -> str:
     cleaned = display_name.strip()
     if not cleaned:
-        raise StickersError("display_name is required", status_code=400)
-    if not _DISPLAY_NAME_PATTERN.match(cleaned):
-        raise StickersError(
-            "display_name must be 1–64 printable chars",
-            status_code=400,
+        raise ApiError(
+            ErrorCode.STICKERS_INVALID_DISPLAY_NAME,
+            user_message="A name for the sticker is required.",
         )
+    if not _DISPLAY_NAME_PATTERN.match(cleaned):
+        raise ApiError(ErrorCode.STICKERS_INVALID_DISPLAY_NAME)
     return cleaned
 
 
@@ -208,9 +209,10 @@ class StickersManager:
         # clean 409 rather than letting the storage upload run and
         # then erroring on commit (which leaks a file).
         if cleaned_alias and self.database_handler.get_sticker_by_alias(cleaned_alias):
-            raise StickersError(
-                f"Alias ':{cleaned_alias}:' is already taken",
-                status_code=409,
+            raise ApiError(
+                ErrorCode.STICKERS_ALIAS_TAKEN,
+                user_message=f"The shortcode ‘:{cleaned_alias}:’ is already in use.",
+                details={"alias": cleaned_alias},
             )
 
         # Sniff content-type from the multipart header. Real MIME
@@ -219,10 +221,9 @@ class StickersManager:
         # before reading the body.
         content_type = (file.content_type or "").lower()
         if content_type and content_type not in ALLOWED_STICKER_MIME_TYPES:
-            raise StickersError(
-                f"Unsupported sticker type '{content_type}'. "
-                f"Allowed: PNG, WebP, GIF, JPEG.",
-                status_code=400,
+            raise ApiError(
+                ErrorCode.STICKERS_UNSUPPORTED_TYPE,
+                details={"received_type": content_type},
             )
 
         try:
@@ -239,7 +240,10 @@ class StickersManager:
             raise
         except Exception as exc:
             logger.error("Sticker storage upload failed: {err}", err=str(exc))
-            raise StickersError("Failed to store sticker file.", status_code=500)
+            raise ApiError(
+                ErrorCode.STORAGE_UPLOAD_FAILED,
+                message=f"Sticker storage upload failed: {exc}",
+            )
 
         # Post-upload MIME check — even if the multipart header lied,
         # the storage manager re-derives mime from magic bytes.
@@ -252,8 +256,9 @@ class StickersManager:
                 mime=mime_type,
                 filename=original_filename,
             )
-            raise StickersError(
-                f"Unsupported sticker type '{mime_type}'.", status_code=400
+            raise ApiError(
+                ErrorCode.STICKERS_UNSUPPORTED_TYPE,
+                details={"detected_type": mime_type},
             )
 
         if file_size and file_size > MAX_STICKER_BYTES:
@@ -262,9 +267,9 @@ class StickersManager:
                 size=file_size,
                 filename=original_filename,
             )
-            raise StickersError(
-                f"Sticker file must be ≤ {MAX_STICKER_BYTES // 1024} KB.",
-                status_code=413,
+            raise ApiError(
+                ErrorCode.STICKERS_TOO_LARGE,
+                details={"size_bytes": file_size, "limit_bytes": MAX_STICKER_BYTES},
             )
 
         sticker_id = self.database_handler.add_sticker_to_catalog(
@@ -357,9 +362,9 @@ class StickersManager:
         if cleaned_alias and cleaned_alias not in ("", None):
             existing = self.database_handler.get_sticker_by_alias(cleaned_alias)
             if existing and existing.sticker_id != sticker_id:
-                raise StickersError(
-                    f"Alias ':{cleaned_alias}:' is already taken",
-                    status_code=409,
+                raise ApiError(
+                    ErrorCode.STICKERS_ALIAS_TAKEN,
+                    details={"alias": cleaned_alias},
                 )
 
         updated = self.database_handler.update_sticker_metadata(
@@ -369,7 +374,10 @@ class StickersManager:
             is_active=is_active,
         )
         if updated is None:
-            raise StickersError("Sticker not found.", status_code=404)
+            raise ApiError(
+                ErrorCode.STICKERS_NOT_FOUND,
+                details={"sticker_id": sticker_id},
+            )
         self._invalidate_cache()
         return updated.to_dict()
 
@@ -446,16 +454,24 @@ class StickersManager:
         Raises ``StickersError`` on invalid keys.
         """
         if not isinstance(key, str) or not key:
-            raise StickersError("Reaction key is required.", status_code=400)
+            raise ApiError(
+                ErrorCode.VALIDATION_FIELD_REQUIRED,
+                user_message="A reaction value is required.",
+                details={"field": "emoji"},
+            )
         if len(key) > 64:
-            raise StickersError("Reaction key too long.", status_code=400)
+            raise ApiError(
+                ErrorCode.VALIDATION_FIELD_RANGE,
+                user_message="That reaction value is too long.",
+                details={"field": "emoji", "limit": 64, "actual": len(key)},
+            )
         if not self.is_sticker_reaction_key(key):
             return key  # plain emoji, no further validation
         sticker_id = key.removeprefix("sticker:")
         sticker = self.database_handler.get_sticker_by_id(sticker_id)
         if sticker is None or not sticker.is_active:
-            raise StickersError(
-                "That sticker isn't available for reactions.",
-                status_code=404,
+            raise ApiError(
+                ErrorCode.STICKERS_NOT_AVAILABLE,
+                details={"sticker_id": sticker_id},
             )
         return key

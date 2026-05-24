@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, exceptions, responses
 
+from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.schemas import RefreshTokenRequest
 from pufferblow.core.bootstrap import api_initializer
 
@@ -36,12 +37,30 @@ async def refresh_auth_token(request: RefreshTokenRequest):
             refresh_token=request.refresh_token
         )
     except ValueError as exc:
-        raise exceptions.HTTPException(status_code=401, detail=str(exc)) from exc
+        # The validator's ValueError message tells us which case
+        # we're in. ``expired`` keeps a distinct user-facing copy
+        # (the client can show "session expired" naturally), and
+        # any other rejection collapses to "invalid" — the client
+        # behaviour is the same regardless (drop both tokens,
+        # bounce to login).
+        reason_text = str(exc).lower()
+        code = (
+            ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED
+            if "expired" in reason_text
+            else ErrorCode.AUTH_REFRESH_TOKEN_INVALID
+        )
+        raise ApiError(code, message=str(exc)) from exc
 
     user_id = str(payload["uid"])
     user = api_initializer.database_handler.get_user(user_id=user_id)
     if user is None:
-        raise exceptions.HTTPException(status_code=404, detail="User not found")
+        # User row gone after a valid refresh token — same
+        # client-side outcome as an invalid token, so we report
+        # the same code.
+        raise ApiError(
+            ErrorCode.AUTH_REFRESH_TOKEN_INVALID,
+            message=f"Refresh token valid but user_id={user_id} no longer exists.",
+        )
 
     api_initializer.auth_token_manager.revoke_refresh_token(request.refresh_token)
     session_tokens = api_initializer.auth_token_manager.issue_session_tokens(

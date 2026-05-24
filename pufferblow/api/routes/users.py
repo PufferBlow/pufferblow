@@ -6,6 +6,7 @@ from loguru import logger
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.dependencies import get_current_user
+from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.logger.msgs import info
 from pufferblow.api.schemas import (
     AuthTokenQuery,
@@ -26,6 +27,73 @@ from pufferblow.api.utils.is_able_to_update import is_able_to_update
 from pufferblow.core.bootstrap import api_initializer
 
 router = APIRouter(prefix="/api/v1/users")
+
+
+# ── Credential validation rules ──────────────────────────────────
+#
+# Both rules are enforced at the route layer (rather than the
+# Pydantic schema) so we can raise a typed ``ApiError`` with the
+# right code instead of an unstructured 422 from Pydantic. Clients
+# can highlight the offending input via ``details.field``.
+#
+# Rules picked for v1:
+#
+#   * Username: 3–32 chars, ASCII letters / digits / ``._-``.
+#     Same character class GitHub, Discord, and most chat apps use.
+#     Case-insensitive uniqueness happens server-side in the
+#     manager — these rules are about format, not collision.
+#
+#   * Password: 8 chars minimum. No max because forcing a max
+#     pushes users into weaker patterns; we cap at 256 only as a
+#     denial-of-service guard. No complexity classes — NIST 800-63B
+#     deprecates the "must have a digit AND a symbol" school for
+#     length-first guidance.
+#
+# Operators that want stricter rules can layer their own auth
+# proxy / IdP in front of the instance and disable signups here.
+
+import re
+
+_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{3,32}$")
+_PASSWORD_MIN_LENGTH = 8
+_PASSWORD_MAX_LENGTH = 256
+
+
+def _validate_username_format(username: str) -> None:
+    """Raise ``auth.username_invalid`` if the username doesn't match.
+
+    Does not check uniqueness — that happens against the database
+    in a separate step.
+    """
+    if not _USERNAME_PATTERN.match(username or ""):
+        raise ApiError(
+            ErrorCode.AUTH_USERNAME_INVALID,
+            message=f"Username failed pattern check: {username!r}",
+            details={"field": "username"},
+        )
+
+
+def _validate_password_strength(password: str) -> None:
+    """Raise ``auth.password_too_weak`` when the password violates
+    one or more rules. ``details.rules`` enumerates which checks
+    failed so the client can show targeted helper text.
+    """
+    failed: list[str] = []
+    if len(password) < _PASSWORD_MIN_LENGTH:
+        failed.append("min_length")
+    if len(password) > _PASSWORD_MAX_LENGTH:
+        failed.append("max_length")
+    if failed:
+        raise ApiError(
+            ErrorCode.AUTH_PASSWORD_TOO_WEAK,
+            message=f"Password failed rules: {failed}",
+            details={
+                "field": "password",
+                "rules": failed,
+                "min_length": _PASSWORD_MIN_LENGTH,
+                "max_length": _PASSWORD_MAX_LENGTH,
+            },
+        )
 
 
 @router.get("", status_code=200)
@@ -52,19 +120,30 @@ async def signup_new_user(request: SignupRequest):
     Returns 409 if the username already exists, 503 if the
     administrator hasn't run `pufferblow setup` yet.
     """
+    # Pre-flight: instance must have completed setup before any
+    # account can be created. The friendlier user_message comes
+    # from the registry default; we keep the operator-oriented
+    # ``message`` for the audit log so the cause is unambiguous.
     if api_initializer.database_handler.get_server() is None:
-        raise exceptions.HTTPException(
-            status_code=503,
-            detail=(
-                "This instance has not been initialized. The administrator must run "
-                "`pufferblow setup` before accounts can be created."
+        raise ApiError(
+            ErrorCode.AUTH_SIGNUP_DISABLED,
+            message=(
+                "This instance has not been initialized. The administrator "
+                "must run `pufferblow setup` before accounts can be created."
             ),
         )
 
+    # Format checks happen BEFORE the uniqueness query so a clearly
+    # malformed username doesn't burn a database round-trip. Both
+    # raise typed errors with ``details.field`` so the client can
+    # highlight the input.
+    _validate_username_format(request.username)
+    _validate_password_strength(request.password)
+
     if api_initializer.user_manager.check_username(request.username):
-        raise exceptions.HTTPException(
-            status_code=409,
-            detail="username already exists. Please change it and try again later",
+        raise ApiError(
+            ErrorCode.AUTH_USERNAME_TAKEN,
+            details={"field": "username", "username": request.username},
         )
 
     user_data = api_initializer.user_manager.sign_up(
@@ -123,10 +202,16 @@ async def signin_user(query: SigninQuery = Depends()):
         to issue tokens for it.
       - 404 — username doesn't exist on this instance.
     """
+    # Enumeration resistance: "username not found" and "wrong
+    # password" must look identical on the wire. We collapse both
+    # into ``auth.invalid_credentials`` with the same user_message.
+    # The server-side ``message`` field carries the specific reason
+    # for logs so operators can still debug — only the public
+    # surface stays generic.
     if not api_initializer.user_manager.check_username(username=query.username):
-        raise exceptions.HTTPException(
-            status_code=404,
-            detail="The provided username does not exist or could not be found. Please make sure you have entered a valid username and try again.",
+        raise ApiError(
+            ErrorCode.AUTH_INVALID_CREDENTIALS,
+            message=f"Sign-in attempt for unknown username {query.username!r}",
         )
 
     user, is_signin_successful, failure_reason = api_initializer.user_manager.sign_in(
@@ -134,18 +219,20 @@ async def signin_user(query: SigninQuery = Depends()):
     )
     if not is_signin_successful:
         if failure_reason == "instance_mismatch":
-            raise exceptions.HTTPException(
-                status_code=403,
-                detail="This account belongs to a different instance and cannot sign in on this server.",
+            raise ApiError(
+                ErrorCode.AUTH_INSTANCE_MISMATCH,
+                details={"home_server": getattr(user, "origin_server", None)},
             )
         if failure_reason == "banned":
-            raise exceptions.HTTPException(
-                status_code=403,
-                detail="This account has been banned from this home instance.",
+            raise ApiError(
+                ErrorCode.AUTH_USER_BANNED,
+                details={"user_id": str(getattr(user, "user_id", "")) or None},
             )
-        raise exceptions.HTTPException(
-            status_code=401,
-            detail="The provided password is incorrect. Please try again.",
+        # Default branch: wrong password. Collapsed to the same
+        # generic shape as "unknown username" above.
+        raise ApiError(
+            ErrorCode.AUTH_INVALID_CREDENTIALS,
+            message=f"Sign-in attempt with wrong password for {query.username!r}",
         )
 
     api_initializer.database_handler.create_activity_audit_entry(
@@ -200,10 +287,13 @@ async def edit_users_profile_route(request: EditProfileRequest):
     user_id = get_current_user(request.auth_token)
 
     if request.new_username is not None:
+        # Format check before uniqueness query — same cost-saving
+        # ordering as the signup route.
+        _validate_username_format(request.new_username)
         if api_initializer.user_manager.check_username(username=request.new_username):
-            raise exceptions.HTTPException(
-                detail="username already exists. Please change it and try again later",
-                status_code=409,
+            raise ApiError(
+                ErrorCode.AUTH_USERNAME_TAKEN,
+                details={"field": "new_username", "username": request.new_username},
             )
         api_initializer.user_manager.update_username(
             user_id=user_id, new_username=request.new_username
@@ -380,20 +470,26 @@ async def update_profile_appearance_route(
 async def reset_users_auth_token_route(request: ResetTokenRequest):
     """Reset users auth token route."""
     user_id = get_current_user(request.auth_token)
+    # Reset endpoint deliberately uses a SPECIFIC "wrong password"
+    # code rather than the enumeration-safe ``invalid_credentials``
+    # used by /signin. The user is authenticated and on a settings
+    # page; they just typed their current password and a vague
+    # message would be a UX failure here.
     if not api_initializer.user_manager.check_user_password(
         user_id=user_id, password=request.password
     ):
         logger.info(info.INFO_RESET_USER_AUTH_TOKEN_FAILED(user_id=user_id))
-        raise exceptions.HTTPException(
-            detail="Incorrect password. Please try again", status_code=404
+        raise ApiError(
+            ErrorCode.AUTH_RESET_PASSWORD_WRONG,
+            details={"field": "password"},
         )
 
     updated_at = api_initializer.database_handler.get_auth_tokens_updated_at(user_id=user_id)
     if updated_at is not None and not is_able_to_update(updated_at=updated_at, suspend_time=2):
         logger.info(info.INFO_AUTH_TOKEN_SUSPENSION_TIME(user_id=user_id))
-        raise exceptions.HTTPException(
-            detail="Cannot reset authentication token. Suspension time has not elapsed.",
-            status_code=403,
+        raise ApiError(
+            ErrorCode.AUTH_RESET_COOLDOWN,
+            retry_after_seconds=2,
         )
 
     user = api_initializer.database_handler.get_user(user_id=user_id)

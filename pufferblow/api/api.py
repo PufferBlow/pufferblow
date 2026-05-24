@@ -14,6 +14,7 @@ from pufferblow.api.background_tasks.background_tasks_manager import (
     lifespan_background_tasks,
 )
 from pufferblow.api.config.config_handler import ConfigHandler
+from pufferblow.api.errors import register_error_handlers
 from pufferblow.api.routes.register import register_routers
 from pufferblow.api.routes.system_routes.server_runtime import (
     build_instance_health_payload,
@@ -125,6 +126,11 @@ else:
     )
 api.add_middleware(PrivateNetworkAccessMiddleware)
 
+# Register the global error handlers BEFORE the routers so any
+# exception raised during route registration (e.g. an import-time
+# bug in a route module) goes through the envelope path too. Idempotent
+# either way — FastAPI replaces handlers on re-registration.
+register_error_handlers(api)
 register_routers(api)
 
 
@@ -161,6 +167,13 @@ async def request_logging_middleware(request: Request, call_next):
     """
     request_id = str(uuid.uuid4())
     started_at = perf_counter()
+
+    # Stash on request.state so the global exception handlers can
+    # include the same id in the error envelope they emit. Both the
+    # response header (set further down) and the envelope field
+    # carry the same value, so a user reporting a problem can paste
+    # either one for support correlation.
+    request.state.request_id = request_id
 
     client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
     if not client_ip and request.client:

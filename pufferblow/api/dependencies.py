@@ -8,6 +8,7 @@ such as authentication checks and permission validators.
 from fastapi import HTTPException
 from loguru import logger
 
+from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.core.bootstrap import api_initializer
 
@@ -42,7 +43,12 @@ def get_current_user(auth_token: str) -> str:
     )
     user_id = extract_user_id(auth_token=auth_token)
 
-    # Verify user exists
+    # Verify user exists. Note: we report this as
+    # ``auth.invalid_token`` (HTTP 401) rather than the legacy 404
+    # — "user not found" was a leak in disguise (it confirmed that a
+    # given user_id wasn't a member of THIS instance). The new
+    # status is the correct REST signal: the request lacked valid
+    # credentials, regardless of whether the user exists.
     if not api_initializer.user_manager.check_user(
         user_id=user_id, auth_token=auth_token
     ):
@@ -51,9 +57,9 @@ def get_current_user(auth_token: str) -> str:
             user_id=user_id,
             token_preview=_token_preview(auth_token),
         )
-        raise HTTPException(
-            status_code=404,
-            detail="User not found or authentication token is invalid.",
+        raise ApiError(
+            ErrorCode.AUTH_INVALID_TOKEN,
+            message=f"Auth token rejected (user_id={user_id})",
         )
 
     logger.info(
@@ -65,12 +71,12 @@ def get_current_user(auth_token: str) -> str:
     moderation_state = api_initializer.user_manager.get_user_moderation_state(
         user_id=user_id
     )
-    
+
     if moderation_state.get("is_banned"):
         logger.warning("AUTH_VALIDATE_BANNED user_id={user_id}", user_id=user_id)
-        raise HTTPException(
-            status_code=403,
-            detail="This account has been banned from this home instance.",
+        raise ApiError(
+            ErrorCode.AUTH_USER_BANNED,
+            details={"user_id": user_id},
         )
 
     return user_id
@@ -93,9 +99,10 @@ def require_server_owner(auth_token: str) -> str:
 
     if not api_initializer.user_manager.is_server_owner(user_id=user_id):
         logger.warning("AUTHZ_OWNER_DENIED user_id={user_id}", user_id=user_id)
-        raise HTTPException(
-            status_code=403,
-            detail="Access forbidden. Only the server owner can perform this action.",
+        raise ApiError(
+            ErrorCode.AUTH_PRIVILEGE_DENIED,
+            user_message="Only the server owner can do that.",
+            details={"required_role": "owner"},
         )
 
     logger.info("AUTHZ_OWNER_GRANTED user_id={user_id}", user_id=user_id)
@@ -127,9 +134,10 @@ def require_admin(auth_token: str) -> str:
             is_admin=is_admin,
             is_owner=is_owner,
         )
-        raise HTTPException(
-            status_code=403,
-            detail="Access forbidden. Only admins and server owners can perform this action.",
+        raise ApiError(
+            ErrorCode.AUTH_PRIVILEGE_DENIED,
+            user_message="Only admins or the server owner can do that.",
+            details={"required_role": "admin"},
         )
 
     logger.info(
@@ -162,9 +170,9 @@ def require_privilege(auth_token: str, privilege_id: str) -> str:
             user_id=user_id,
             privilege_id=privilege_id,
         )
-        raise HTTPException(
-            status_code=403,
-            detail=f"Access forbidden. Missing required privilege: {privilege_id}.",
+        raise ApiError(
+            ErrorCode.AUTH_PRIVILEGE_DENIED,
+            details={"privilege": privilege_id},
         )
 
     logger.info(
@@ -189,9 +197,13 @@ def ensure_user_not_timed_out(user_id: str, action: str = "perform this action")
         action=action,
         timeout_until=timeout_until.isoformat(),
     )
-    raise HTTPException(
-        status_code=403,
-        detail=f"You are timed out until {timeout_until.isoformat()} and cannot {action}.",
+    raise ApiError(
+        ErrorCode.MESSAGES_TIMED_OUT,
+        user_message=f"You are timed out until {timeout_until.isoformat()} and cannot {action}.",
+        details={
+            "action": action,
+            "until": timeout_until.isoformat(),
+        },
     )
 
 
@@ -213,9 +225,9 @@ def check_channel_access(user_id: str, channel_id: str) -> None:
             user_id=user_id,
             channel_id=channel_id,
         )
-        raise HTTPException(
-            status_code=404,
-            detail="The provided channel ID does not exist or could not be found.",
+        raise ApiError(
+            ErrorCode.CHANNELS_NOT_FOUND,
+            details={"channel_id": channel_id},
         )
 
     # Check if channel is private
@@ -230,10 +242,12 @@ def check_channel_access(user_id: str, channel_id: str) -> None:
                 user_id=user_id,
                 channel_id=channel_id,
             )
-            # Return 404 instead of 403 to avoid revealing private channel existence
-            raise HTTPException(
-                status_code=404,
-                detail="The provided channel ID does not exist or could not be found.",
+            # Return the same NOT_FOUND code as a missing channel — the
+            # two cases are deliberately indistinguishable from outside,
+            # so the API doesn't leak private channel existence.
+            raise ApiError(
+                ErrorCode.CHANNELS_NOT_FOUND,
+                details={"channel_id": channel_id},
             )
 
     logger.debug(
