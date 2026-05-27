@@ -9,7 +9,7 @@ This module handles all message-related operations including:
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
+from fastapi import APIRouter, Body, Depends, Form, UploadFile, exceptions
 from loguru import logger
 
 from pufferblow.api.schemas import (
