@@ -87,7 +87,12 @@ async def send_friend_request_route(
             await api_initializer.activitypub_manager.resolve_user_id_for_handle(
                 username=target_username,
                 origin_server=target_origin_server,
-                base_url=api_initializer.activitypub_manager._base_url(),
+                # Canonical base-URL builder. The earlier `_base_url`
+                # private helper was renamed to `build_base_url`;
+                # without the request's own base URL handy here we
+                # let the builder fall back to the config-derived
+                # canonical URL.
+                base_url=api_initializer.activitypub_manager.build_base_url(),
             )
         )
         if not resolved_target_user_id:
