@@ -206,5 +206,5 @@ remote instances had in your local actors:
   side — Mastodon retries failed inbox POSTs for ~24h. If your downtime
   is shorter, deliveries resume automatically after the restore.
 
-See [FEDERATION.md](FEDERATION.md) for the operator side of the
+See [Federation](federation.md) for the operator side of the
 federation surface.

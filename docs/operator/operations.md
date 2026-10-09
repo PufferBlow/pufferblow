@@ -3,8 +3,8 @@
 Day-to-day operations for someone running a Pufferblow instance. Covers the
 CLI tool, runtime config, secret rotation, the IP blocklist, audit logs, and
 the storage backend. For first-time setup see
-[DOCKER_PRODUCTION.md](DOCKER_PRODUCTION.md); for what v1.0 actually
-ships see [V1_0_CAVEATS.md](V1_0_CAVEATS.md).
+[Docker](docker.md); for what v1.0 actually
+ships see [V1_0_CAVEATS.md](../../V1_0_CAVEATS.md).
 
 ---
 
@@ -122,7 +122,7 @@ mode in lean containers is a missing client — the command translates
 rather than a raw stack trace.
 
 For policy on what to back up, frequency, and disaster-recovery
-restore paths, see [BACKUP.md](BACKUP.md).
+restore paths, see [Backup & Restore](backup.md).
 
 ---
 
@@ -213,7 +213,7 @@ picks them up.
 S3 paths are SSE-encrypted at rest (server-side). The decryption key
 material lives in `config.toml`, NOT in S3 — losing the toml means the
 on-disk ciphertext is unrecoverable. Back it up (see
-[BACKUP.md](BACKUP.md)).
+[Backup & Restore](backup.md)).
 
 ---
 

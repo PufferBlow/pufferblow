@@ -28,6 +28,6 @@ operate.
 
 Operator docs were promoted out of root-level `*.md` files in
 the repo (`ADMIN.md`, `BACKUP.md`, etc.) into this site so they
-have proper navigation, search, and a stable URL. The originals
-still exist at the repo root for backwards-compatible links;
+have proper navigation, search, and a stable URL. The root files
+are now short redirect stubs kept for backwards-compatible links;
 this site is the canonical place to read them.

@@ -64,7 +64,7 @@ Out of scope:
   through Pufferblow code paths (please report those upstream).
 - Misconfigurations of self-hosted instances (e.g. running with
   `DEBUG=true`, missing TLS) where the fix is "configure it
-  correctly per `ADMIN.md` / the docs."
+  correctly per `docs/operator/operations.md` / the docs."
 - Social-engineering attacks against instance operators.
 
 Thanks for taking the time to report responsibly.

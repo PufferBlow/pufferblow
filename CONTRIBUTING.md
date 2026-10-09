@@ -40,7 +40,7 @@ poetry run pufferblow serve    # starts the API server
 The server expects a Postgres database, a memcached instance, and
 (optionally) S3-compatible object storage. The fastest path to a
 working dev environment is the Docker Compose stack — see
-[`DOCKER_PRODUCTION.md`](./DOCKER_PRODUCTION.md) for the full
+[Docker](./docs/operator/docker.md) for the full
 config; for dev you only need the `postgres` and `memcached`
 services.
 
@@ -82,8 +82,8 @@ not just **what** — the diff already shows the what.
 - Include tests for new behavior. For bug fixes, add a regression
   test that fails on the parent commit and passes on yours.
 - Update relevant docs in the same PR. If you change a CLI
-  command, update `ADMIN.md`; if you change federation behavior,
-  update `FEDERATION.md`.
+  command, update `docs/operator/operations.md`; if you change federation
+  behavior, update `docs/operator/federation.md`.
 - Link the issue you're closing in the PR description
   (`Closes #123`).
 - Don't squash commits in your PR branch — we squash on merge if

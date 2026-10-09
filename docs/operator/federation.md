@@ -6,8 +6,8 @@ cross-instance DMs and the follow/accept social graph. It does NOT do
 real-time channel federation at scale — see "Latency expectations"
 below for the honest version of what users will see.
 
-For the user-facing contract see [V1_0_CAVEATS.md](V1_0_CAVEATS.md).
-For deployment basics see [DOCKER_PRODUCTION.md](DOCKER_PRODUCTION.md).
+For the user-facing contract see [V1_0_CAVEATS.md](../../V1_0_CAVEATS.md).
+For deployment basics see [Docker](docker.md).
 
 ---
 

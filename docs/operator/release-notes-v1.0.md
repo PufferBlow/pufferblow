@@ -59,7 +59,7 @@ plan on it; don't tell users they have it.
 
 - ✅ One-command Docker Compose stack
   (`docker-compose.prod.server.yml`) covering API + SFU + coturn +
-  Postgres. See [DOCKER_PRODUCTION.md](DOCKER_PRODUCTION.md) for the
+  Postgres. See [Docker](docker.md) for the
   flow and `.env.server.example` for the variables you must set.
 - ✅ Healthchecked startup order: media-sfu waits on the API's
   `/readyz` so the bootstrap handshake doesn't race.

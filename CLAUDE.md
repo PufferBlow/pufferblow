@@ -39,12 +39,12 @@ poetry run pufferblow serve --dev   # uvicorn auto-reload, development only
 
 Dev environment needs a reachable Postgres + memcached; the fastest path is
 the Docker Compose stack (`docker-compose.prod.server.yml`, see
-`DOCKER_PRODUCTION.md`) — for local dev you only need its `postgres` and
+`docs/operator/docker.md`) — for local dev you only need its `postgres` and
 `memcached` services running.
 
 Other CLI subcommands: `pufferblow migrate [--check]`, `pufferblow doctor`,
 `pufferblow backup now|mirror`, `pufferblow storage setup|test|migrate`. Full
-reference in `ADMIN.md`. Note `migrate` (DB schema) and `storage migrate`
+reference in `docs/operator/operations.md`. Note `migrate` (DB schema) and `storage migrate`
 (moving uploaded files between backends) are unrelated commands despite the
 shared verb.
 
@@ -148,7 +148,7 @@ state, internal callback handling). The actual WebRTC media forwarding lives
 in the separate Go `media-sfu` repo. Public voice routes are versioned
 differently from the rest of the API (`/api/v2/voice/*` vs `/api/v1/*`
 elsewhere) because voice was redesigned after v1 shipped — don't "fix" that
-inconsistency without checking `FEDERATION.md`/`V1_0_CAVEATS.md` first.
+inconsistency without checking `docs/operator/federation.md`/`V1_0_CAVEATS.md` first.
 
 ### Encryption model — server-at-rest, not E2EE
 
@@ -195,8 +195,13 @@ pufferblow/
 
 - `V1_0_CAVEATS.md` — what's real in v1.0 (search, voice, federation) vs
   explicitly deferred (E2EE, simulcast, FTS).
-- `ADMIN.md` — full CLI/operator reference.
-- `DOCKER_PRODUCTION.md` — Compose stack (server, Postgres, memcached,
+- `docs/operator/operations.md` — full CLI/operator reference.
+- `docs/operator/docker.md` — Compose stack (server, Postgres, memcached,
   optional media-sfu).
-- `BACKUP.md` — what to back up and how to restore.
-- `FEDERATION.md` — what federates, TURN setup, debugging stuck deliveries.
+- `docs/operator/backup.md` — what to back up and how to restore.
+- `docs/operator/federation.md` — what federates, TURN setup, debugging
+  stuck deliveries.
+- `ADMIN.md`/`BACKUP.md`/`FEDERATION.md`/`DOCKER_PRODUCTION.md` at the repo
+  root are now just redirect stubs (same pattern as `WIKI.md`) kept for
+  backwards-compatible external links — don't edit their bodies, edit the
+  `docs/operator/` canonical versions instead.

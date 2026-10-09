@@ -83,7 +83,7 @@ pip install .
 
 A published PyPI release will land alongside the v1.0 tag. For
 the most stable deploy path today, see
-[`DOCKER_PRODUCTION.md`](DOCKER_PRODUCTION.md) — the Compose stack
+[Docker](docs/operator/docker.md) — the Compose stack
 boots the server, Postgres, memcached, and (optionally) media-sfu
 in one command.
 
@@ -166,7 +166,7 @@ pufferblow storage migrate ...        Move file objects between backends.
 
 `migrate` is the *database schema* migration; `storage migrate` moves
 uploaded *files* between backends. They're independent — see
-[ADMIN.md](ADMIN.md#cli-quick-reference) for the full operator guide.
+[Operations & CLI](docs/operator/operations.md#cli-quick-reference) for the full operator guide.
 
 ---
 
@@ -247,7 +247,7 @@ Pufferblow implements a subset of ActivityPub so instances can talk to each othe
 Relevant endpoints: `/.well-known/webfinger`, `/ap/users/{id}`, `/api/v1/federation/*`
 
 For operating a federated instance — TURN setup, latency expectations,
-debugging stuck deliveries — see [FEDERATION.md](FEDERATION.md).
+debugging stuck deliveries — see [Federation](docs/operator/federation.md).
 
 ---
 
@@ -256,10 +256,10 @@ debugging stuck deliveries — see [FEDERATION.md](FEDERATION.md).
 | Doc                                          | Purpose                                                            |
 | -------------------------------------------- | ------------------------------------------------------------------ |
 | [V1_0_CAVEATS.md](V1_0_CAVEATS.md)           | What ships in v1.0 and what's deferred.                            |
-| [DOCKER_PRODUCTION.md](DOCKER_PRODUCTION.md) | One-command Compose stack: services, ports, env vars.              |
-| [ADMIN.md](ADMIN.md)                         | CLI reference, secret rotation, storage, audit log, blocked IPs.   |
-| [BACKUP.md](BACKUP.md)                       | What to back up, how often, and how to restore on a fresh host.    |
-| [FEDERATION.md](FEDERATION.md)               | What federates, TURN setup, latency, debugging stuck deliveries.   |
+| [Docker](docs/operator/docker.md)            | One-command Compose stack: services, ports, env vars.              |
+| [Operations & CLI](docs/operator/operations.md) | CLI reference, secret rotation, storage, audit log, blocked IPs. |
+| [Backup & Restore](docs/operator/backup.md)  | What to back up, how often, and how to restore on a fresh host.    |
+| [Federation](docs/operator/federation.md)    | What federates, TURN setup, latency, debugging stuck deliveries.   |
 | [SECURITY.md](SECURITY.md)                   | Security model, threat boundaries, vulnerability reporting.        |
 
 ---
