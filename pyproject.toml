@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pufferblow"
-version = "0.0.1-beta"
+version = "1.0.0"
 description = "Self-hosted, open-source community server with encrypted messaging, ActivityPub federation, voice channels, and role-based access control"
 authors = ["ramsy0dev <ramsy0dev@gmail.com>"]
 license = "GPL-3.0"

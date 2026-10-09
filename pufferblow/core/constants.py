@@ -4,7 +4,7 @@ import os
 import platform
 
 PACKAGE_NAME = "pufferblow"
-VERSION = "0.0.1-beta"
+VERSION = "1.0.0"
 AUTHOR = "ramsy0dev"
 ORG_GITHUB = "https://github.com/pufferblow"
 REPO_GITHUB = "https://github.com/pufferblow/pufferblow"
@@ -18,12 +18,11 @@ BANNER = f"""[bold cyan]
               \\   |   /
                \\  |  /
                 \\ | /
-       --------( * )--------
+        --------( * )--------
                 / | \\
                /  |  \\
               /   |   \\
-[/bold cyan][bold]                Pufferblow[/bold]  [dim]v{VERSION}[/dim]
-[dim]              Escape surveillance, gain anonymity.[/dim]
+[/bold cyan][bold]      Pufferblow[/bold]  [dim]v{VERSION}[/dim]
 """
 
 
