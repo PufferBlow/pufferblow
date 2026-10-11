@@ -1,0 +1,17 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "event",
+    "version": 1,
+    "id": "evt_05",
+    "name": "channel.updated",
+    "channel_id": "c_general",
+    "seq": 45,
+    "epoch": "ep_1",
+    "data": {
+      "channel_id": "c_general",
+      "channel_name": "general",
+      "is_private": true
+    }
+  }
+}

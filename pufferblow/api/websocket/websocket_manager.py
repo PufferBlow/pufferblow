@@ -20,6 +20,8 @@ class WebSocketsManager:
         """Initialize the instance."""
         self.active_connections: dict[WebSocket, dict] = {}
         self.user_manager = user_manager
+        #: Set during bootstrap; used to keep private-channel events away from unauthorised sockets.
+        self.channels_manager = None
 
     @staticmethod
     def _connection_context(connection_info) -> tuple[str, str]:
@@ -57,19 +59,31 @@ class WebSocketsManager:
         }
 
     async def _broadcast_presence_message(self, message: dict) -> None:
-        """Broadcast a presence update message to all active websocket clients."""
-        active_connections_copy = self.active_connections.copy()
-        total_recipients = len(active_connections_copy)
+        """Broadcast a presence update to every client, in the shape each one understands."""
+        from pufferblow.api.protocol.envelopes import build_event
+        from pufferblow.api.protocol.events import PRESENCE_CHANGED
 
-        if total_recipients == 0:
+        active_connections_copy = self.active_connections.copy()
+        if not active_connections_copy:
             return
+
+        v1_frame = build_event(
+            PRESENCE_CHANGED,
+            {
+                "user_id": message.get("user_id"),
+                "status": message.get("status"),
+                "source": message.get("source"),
+                "at": message.get("timestamp"),
+            },
+        )
 
         sent_count = 0
         failed_count = 0
 
-        for websocket in active_connections_copy:
+        for websocket, info in active_connections_copy.items():
+            frame = v1_frame if isinstance(info, dict) and info.get("protocol", 0) >= 1 else message
             try:
-                await websocket.send_json(message)
+                await websocket.send_json(frame)
                 sent_count += 1
             except Exception as exc:
                 failed_count += 1
@@ -208,7 +222,12 @@ class WebSocketsManager:
             raise
 
     async def connect_global(
-        self, websocket: WebSocket, auth_token: str, accessible_channels: list[str]
+        self,
+        websocket: WebSocket,
+        auth_token: str,
+        accessible_channels: list[str],
+        *,
+        context=None,
     ) -> None:
         """
         Accept global WebSocket connections from a client that can receive updates
@@ -236,6 +255,10 @@ class WebSocketsManager:
                 "scope": "global",
                 "channel_id": None,
                 "accessible_channels": accessible_channels,
+                # Command/event protocol sessions carry a ConnectionContext (principal,
+                # subscriptions). Legacy sessions leave it None and keep the old frames.
+                "protocol": 1 if context is not None else 0,
+                "context": context,
             }
 
             logger.info(
@@ -604,6 +627,139 @@ class WebSocketsManager:
         logger.info(
             f"Global broadcast completed | Channel: {channel_id} | Sent: {sent_count} | Failed: {failed_count} | Total recipients: {total_recipients}"
         )
+
+    # ── command/event protocol delivery ───────────────────────
+
+    def count_v1_connections(self) -> int:
+        return sum(
+            1
+            for info in self.active_connections.values()
+            if isinstance(info, dict) and info.get("protocol", 0) >= 1
+        )
+
+    def _channel_is_private(self, channel_id: str) -> bool:
+        if self.channels_manager is None:
+            return False
+        try:
+            return bool(self.channels_manager.is_private(channel_id=channel_id))
+        except Exception:
+            return True  # when unsure, do not leak
+
+    def _may_view_private(self, user_id: str) -> bool:
+        if self.user_manager is None:
+            return False
+        try:
+            return bool(
+                self.user_manager.has_privilege(user_id=user_id, privilege_id="view_private_channels")
+            )
+        except Exception:
+            return False
+
+    async def deliver_channel_event(
+        self, channel_id: str, v1_frame: dict, legacy_frame: dict | None
+    ) -> None:
+        """Send one committed channel event to every authorised connection.
+
+        v1 sessions get ``v1_frame`` when subscribed to the channel; older sessions get
+        ``legacy_frame`` (if the event ever had one). Private channels are re-checked at
+        delivery time so a revoked privilege stops events immediately.
+        """
+        from pufferblow.api.commands.metrics import metrics
+
+        is_private = self._channel_is_private(channel_id)
+        sent = failed = 0
+
+        for websocket, info in list(self.active_connections.items()):
+            if not isinstance(info, dict) or "user_id" not in info:
+                continue
+
+            if info.get("protocol", 0) >= 1:
+                context = info.get("context")
+                if context is None or channel_id not in context.subscriptions:
+                    continue
+                frame = v1_frame
+            else:
+                if legacy_frame is None:
+                    continue
+                if info.get("scope") == "global":
+                    if channel_id not in info.get("accessible_channels", []):
+                        continue
+                elif info.get("channel_id") != channel_id:
+                    continue
+                frame = legacy_frame
+
+            if is_private and not self._may_view_private(str(info["user_id"])):
+                continue
+
+            try:
+                await websocket.send_json(frame)
+                sent += 1
+            except Exception as exc:
+                failed += 1
+                metrics.incr("delivery_failures")
+                logger.warning(f"Event delivery failed for one client in channel {channel_id}: {exc}")
+
+        metrics.incr("events_delivered", sent)
+        logger.debug(f"Channel event delivered | channel={channel_id} sent={sent} failed={failed}")
+
+    async def deliver_user_event(
+        self, user_id: str, v1_frame: dict, legacy_frame: dict | None
+    ) -> None:
+        """Send an event addressed to one user to every connection that user has open."""
+        target = str(user_id)
+        for websocket, info in list(self.active_connections.items()):
+            if not isinstance(info, dict) or str(info.get("user_id")) != target:
+                continue
+            frame = v1_frame if info.get("protocol", 0) >= 1 else legacy_frame
+            if frame is None:
+                continue
+            try:
+                await websocket.send_json(frame)
+            except Exception as exc:
+                logger.warning(f"User event delivery failed for {target}: {exc}")
+
+    async def revalidate_subscriptions(self, authorizer, channel_id: str | None = None) -> int:
+        """Drop subscriptions a connection is no longer allowed to hold.
+
+        Call after anything that can change access (a channel made private, a role change).
+        Returns how many subscriptions were removed. A connection whose credential no
+        longer validates loses all of them.
+        """
+        from pufferblow.api.protocol.envelopes import build_event
+        from pufferblow.api.protocol.events import CHANNEL_UPDATED
+
+        removed = 0
+        for websocket, info in list(self.active_connections.items()):
+            context = info.get("context") if isinstance(info, dict) else None
+            if context is None:
+                continue
+
+            credential_ok = True
+            try:
+                if context.revalidate is not None:
+                    context.principal = context.revalidate()
+            except Exception:
+                credential_ok = False
+
+            targets = [channel_id] if channel_id else list(context.subscriptions)
+            for target in targets:
+                if target not in context.subscriptions:
+                    continue
+                if credential_ok and authorizer.can_subscribe(context.principal, target):
+                    continue
+                context.subscriptions.discard(target)
+                removed += 1
+                try:
+                    await websocket.send_json(
+                        build_event(
+                            CHANNEL_UPDATED,
+                            {"channel_id": target, "access": "revoked"},
+                            channel_id=target,
+                        )
+                    )
+                except Exception:
+                    pass
+        return removed
 
     def get_user_accessible_channels(self, user_id: str, database_handler) -> list[str]:
         """

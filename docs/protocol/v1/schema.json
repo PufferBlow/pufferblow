@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "commands": {
+    "channel.subscribe": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id"
+      ],
+      "title": "ChannelRef",
+      "type": "object"
+    },
+    "channel.unsubscribe": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id"
+      ],
+      "title": "ChannelRef",
+      "type": "object"
+    },
+    "events.resync": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "channel_id"
+      ],
+      "title": "EventsResync",
+      "type": "object"
+    },
+    "message.create": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        },
+        "content": {
+          "default": "",
+          "maxLength": 20000,
+          "title": "Content",
+          "type": "string"
+        },
+        "nonce": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nonce"
+        },
+        "sticker_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Sticker Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "channel_id"
+      ],
+      "title": "MessageCreate",
+      "type": "object"
+    },
+    "message.delete": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Message Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "message_id"
+      ],
+      "title": "MessageDelete",
+      "type": "object"
+    },
+    "message.edit": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Message Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "message_id",
+        "content"
+      ],
+      "title": "MessageEdit",
+      "type": "object"
+    },
+    "reaction.add": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        },
+        "emoji": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Emoji",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Message Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "message_id",
+        "emoji"
+      ],
+      "title": "ReactionChange",
+      "type": "object"
+    },
+    "reaction.remove": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Channel Id",
+          "type": "string"
+        },
+        "emoji": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Emoji",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Message Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "message_id",
+        "emoji"
+      ],
+      "title": "ReactionChange",
+      "type": "object"
+    }
+  },
+  "error_codes": [
+    "MALFORMED",
+    "UNSUPPORTED_VERSION",
+    "UNKNOWN_COMMAND",
+    "UNAUTHENTICATED",
+    "PERMISSION_DENIED",
+    "NOT_FOUND",
+    "CONFLICT",
+    "RATE_LIMITED",
+    "PAYLOAD_TOO_LARGE",
+    "VALIDATION_FAILED",
+    "INTERNAL"
+  ],
+  "frames": {
+    "ack": {
+      "$defs": {
+        "AckData": {
+          "properties": {
+            "duplicate": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Duplicate"
+            },
+            "result": {
+              "additionalProperties": true,
+              "title": "Result",
+              "type": "object"
+            },
+            "status": {
+              "const": "completed",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "AckData",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/AckData"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "ack",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "id",
+        "data"
+      ],
+      "title": "AckEnvelope",
+      "type": "object"
+    },
+    "command": {
+      "additionalProperties": false,
+      "description": "A client request. ``id`` is chosen by the client and echoed in the reply.",
+      "properties": {
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "command",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "id",
+        "name"
+      ],
+      "title": "CommandEnvelope",
+      "type": "object"
+    },
+    "error": {
+      "$defs": {
+        "ErrorBody": {
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "retry_after": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Retry After"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ErrorBody",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ErrorBody"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "type": {
+          "const": "error",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "id",
+        "error"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "event": {
+      "properties": {
+        "channel_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel Id"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Epoch"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seq"
+        },
+        "type": {
+          "const": "event",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "id",
+        "name",
+        "data"
+      ],
+      "title": "EventEnvelope",
+      "type": "object"
+    },
+    "hello": {
+      "properties": {
+        "epoch": {
+          "title": "Epoch",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "supported": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Supported",
+          "type": "array"
+        },
+        "type": {
+          "const": "hello",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "supported",
+        "session_id",
+        "epoch"
+      ],
+      "title": "HelloEnvelope",
+      "type": "object"
+    }
+  },
+  "title": "Pufferblow command/event protocol",
+  "x-protocol-version": 1
+}

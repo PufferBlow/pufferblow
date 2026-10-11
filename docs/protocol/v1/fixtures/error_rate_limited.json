@@ -1,0 +1,14 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "error",
+    "version": 1,
+    "id": "cmd_1",
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "You are sending commands too quickly.",
+      "retryable": true,
+      "retry_after": 0.4
+    }
+  }
+}

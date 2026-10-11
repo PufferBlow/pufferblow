@@ -1,0 +1,14 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_1",
+    "name": "message.create",
+    "data": {
+      "channel_id": "c_general",
+      "content": "Hello!",
+      "nonce": "n_7d1"
+    }
+  }
+}

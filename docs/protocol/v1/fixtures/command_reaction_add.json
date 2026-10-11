@@ -1,0 +1,14 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_4",
+    "name": "reaction.add",
+    "data": {
+      "channel_id": "c_general",
+      "message_id": "m_8f2a",
+      "emoji": "👍"
+    }
+  }
+}

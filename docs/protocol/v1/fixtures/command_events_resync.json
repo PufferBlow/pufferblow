@@ -1,0 +1,13 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_6",
+    "name": "events.resync",
+    "data": {
+      "channel_id": "c_general",
+      "limit": 50
+    }
+  }
+}

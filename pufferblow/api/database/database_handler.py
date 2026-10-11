@@ -15,6 +15,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from pufferblow.api.database.metrics_files_mixin import DatabaseMetricsFilesMixin
 from pufferblow.api.database.runtime_config_mixin import DatabaseRuntimeConfigMixin
+from pufferblow.api.database.protocol_mixin import DatabaseProtocolMixin
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.database.tables.activity_metrics import ActivityMetrics
 from pufferblow.api.database.tables.activitypub import (
@@ -25,6 +26,8 @@ from pufferblow.api.database.tables.activitypub import (
 )
 from pufferblow.api.database.tables.auth_tokens import AuthTokens
 from pufferblow.api.database.tables.blocked_ips import BlockedIPS
+from pufferblow.api.database.tables.bots import Bots  # noqa: F401  (registers the table)
+from pufferblow.api.database.tables.command_idempotency import CommandIdempotency  # noqa: F401  (registers the table)
 from pufferblow.api.database.tables.channels import Channels
 from pufferblow.api.database.tables.chart_data import ChartData
 from pufferblow.api.database.tables.decentralized_sessions import (
@@ -102,7 +105,7 @@ def _retry_on_disconnect(
     raise last_exc
 
 
-class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin):
+class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin):
     """Database handler for PufferBlow's API"""
     def __init__(
         self, database_engine: sqlalchemy.create_engine, encrypt_manager: Encrypt, config: Config

@@ -1,0 +1,19 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "event",
+    "version": 1,
+    "id": "evt_02",
+    "name": "message.updated",
+    "channel_id": "c_general",
+    "seq": 42,
+    "epoch": "ep_1",
+    "data": {
+      "id": "m_8f2a",
+      "channel_id": "c_general",
+      "content": "Hello, world!",
+      "edit_count": 1,
+      "last_edited_at": "2030-01-01T10:05:00+00:00"
+    }
+  }
+}

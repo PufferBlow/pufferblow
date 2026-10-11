@@ -1,0 +1,16 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "event",
+    "version": 1,
+    "id": "evt_06",
+    "name": "presence.changed",
+    "epoch": "ep_1",
+    "data": {
+      "user_id": "u_ada",
+      "status": "idle",
+      "source": "ws_client_update",
+      "at": "2030-01-01T10:06:00+00:00"
+    }
+  }
+}

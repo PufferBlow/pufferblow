@@ -1,0 +1,27 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "event",
+    "version": 1,
+    "id": "evt_04",
+    "name": "reaction.added",
+    "channel_id": "c_general",
+    "seq": 44,
+    "epoch": "ep_1",
+    "data": {
+      "message_id": "m_8f2a",
+      "channel_id": "c_general",
+      "user_id": "u_ada",
+      "emoji": "👍",
+      "reactions": [
+        {
+          "emoji": "👍",
+          "count": 1,
+          "user_ids": [
+            "u_ada"
+          ]
+        }
+      ]
+    }
+  }
+}
