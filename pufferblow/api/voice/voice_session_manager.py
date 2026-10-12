@@ -11,11 +11,12 @@ from urllib.parse import urlsplit, urlunsplit
 import uuid
 from typing import Any
 
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, select, update
 
 from pufferblow.api.auth.auth_token_manager import AuthTokenManager
 from pufferblow.api.channels.channels_manager import ChannelsManager
 from pufferblow.api.database.database_handler import DatabaseHandler
+from pufferblow.api.database.tables.media_sfu_instances import MediaSFUInstance
 from pufferblow.api.database.tables.voice_sessions import (
     VoiceJoinToken,
     VoiceSession,
@@ -61,6 +62,11 @@ class VoiceSessionManager:
         self._bootstrap_seen_nonces: dict[str, int] = {}
         self.signaling_url = self._normalize_signaling_url(
             getattr(cfg, "RTC_SIGNALING_URL", None) or self._default_signaling_url()
+        )
+        # How long a media-sfu instance can go without a heartbeat before
+        # it's treated as dead and excluded from selection/picked around.
+        self.instance_heartbeat_stale_seconds = int(
+            getattr(cfg, "RTC_SFU_INSTANCE_STALE_SECONDS", 30)
         )
 
     def _instance_id(self) -> str:
@@ -362,12 +368,104 @@ class VoiceSessionManager:
         )
         return db_session.execute(stmt).scalar_one_or_none()
 
+    def _mark_stale_instances_dead(self, db_session) -> None:
+        """Flip any instance whose heartbeat has lapsed to 'dead'."""
+        stale_cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+            seconds=self.instance_heartbeat_stale_seconds
+        )
+        db_session.execute(
+            update(MediaSFUInstance)
+            .where(
+                and_(
+                    MediaSFUInstance.status != "dead",
+                    MediaSFUInstance.last_heartbeat_at < stale_cutoff,
+                )
+            )
+            .values(status="dead")
+            # Skip the ORM's in-session "evaluate" sync strategy: on SQLite,
+            # a `DateTime(timezone=True)` column round-trips as a naive
+            # datetime, and comparing it in-Python against the tz-aware
+            # `stale_cutoff` here raises TypeError. Fetching fresh rows
+            # instead (any already-loaded MediaSFUInstance objects get
+            # expired, not compared) sidesteps that entirely; nothing here
+            # relies on in-memory objects reflecting this update immediately.
+            .execution_options(synchronize_session="fetch")
+        )
+
+    def _select_sfu_instance(
+        self, db_session, *, region_hint: str | None = None
+    ) -> MediaSFUInstance | None:
+        """Pick the least-loaded active instance, preferring a region match."""
+        self._mark_stale_instances_dead(db_session)
+
+        candidates = list(
+            db_session.execute(
+                select(MediaSFUInstance).where(MediaSFUInstance.status == "active")
+            )
+            .scalars()
+            .all()
+        )
+        if not candidates:
+            return None
+
+        if region_hint:
+            regional = [c for c in candidates if c.region == region_hint]
+            if regional:
+                candidates = regional
+
+        def load_fraction(instance: MediaSFUInstance) -> float:
+            if instance.max_total_peers <= 0:
+                return float(instance.current_peers)
+            return instance.current_peers / instance.max_total_peers
+
+        candidates.sort(key=load_fraction)
+        return candidates[0]
+
+    def record_instance_heartbeat(
+        self,
+        *,
+        instance_id: str,
+        region: str,
+        signaling_url: str,
+        internal_api_base: str,
+        current_peers: int,
+        max_total_peers: int,
+    ) -> None:
+        """Upsert a media-sfu instance's registry row from its periodic heartbeat."""
+        normalized_signaling_url = self._normalize_signaling_url(signaling_url)
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        with self.database_handler.database_session() as db_session:
+            row = db_session.get(MediaSFUInstance, instance_id)
+            if row is None:
+                row = MediaSFUInstance(
+                    instance_id=instance_id,
+                    region=region or "default",
+                    signaling_url=normalized_signaling_url,
+                    internal_api_base=internal_api_base,
+                    max_total_peers=max_total_peers,
+                    current_peers=current_peers,
+                    status="active",
+                    last_heartbeat_at=now,
+                )
+                db_session.add(row)
+            else:
+                row.region = region or row.region
+                row.signaling_url = normalized_signaling_url
+                row.internal_api_base = internal_api_base
+                row.max_total_peers = max_total_peers
+                row.current_peers = current_peers
+                row.status = "active"
+                row.last_heartbeat_at = now
+            db_session.commit()
+
     def create_or_join_session(
         self,
         *,
         user_id: str,
         channel_id: str,
         quality_profile: str = "balanced",
+        region_hint: str | None = None,
     ) -> dict[str, Any]:
         """Create or join active voice session for a channel and issue one-time join token."""
         channel = self.database_handler.get_channel_data(channel_id=channel_id)
@@ -377,6 +475,55 @@ class VoiceSessionManager:
         if channel.channel_type not in {"voice", "mixed"}:
             raise ValueError("Channel does not support voice sessions")
 
+        return self._create_or_join_session_core(
+            user_id=user_id,
+            scope_id=channel_id,
+            quality_profile=quality_profile,
+            region_hint=region_hint,
+            backend="sfu_v2",
+        )
+
+    def create_or_join_dm_fallback_session(
+        self,
+        *,
+        user_id: str,
+        call_id: str,
+        quality_profile: str = "balanced",
+        region_hint: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or join the SFU fallback session for a 1:1 DM call.
+
+        Used when `DmCallManager`'s direct P2P path didn't connect in time.
+        `call_id` is never a real channel — it's a `DmCallManager`-issued id
+        shared by exactly the two call participants — so this skips the
+        `Channel` lookup/type-check `create_or_join_session` does and reuses
+        everything else (instance selection, join tokens, ICE servers).
+        """
+        return self._create_or_join_session_core(
+            user_id=user_id,
+            scope_id=call_id,
+            quality_profile=quality_profile,
+            region_hint=region_hint,
+            backend="sfu_v2_dm_fallback",
+        )
+
+    def _create_or_join_session_core(
+        self,
+        *,
+        user_id: str,
+        scope_id: str,
+        quality_profile: str,
+        region_hint: str | None,
+        backend: str,
+    ) -> dict[str, Any]:
+        """Shared session create-or-join body for both channel voice and DM fallback.
+
+        `scope_id` is stored as `VoiceSession.channel_id` either way — for the
+        DM fallback path it's a `DmCallManager` call id rather than a real
+        channel, which is fine since that column is just an indexed string
+        key, not FK'd to `Channels`.
+        """
+        channel_id = scope_id
         media_quality = self._build_media_quality_payload()
         default_profile = media_quality["default_profile"]
         profile = (
@@ -397,24 +544,61 @@ class VoiceSessionManager:
             session_row = self._active_session_by_channel(db_session, channel_id)
 
             if session_row is None:
+                chosen_instance = self._select_sfu_instance(
+                    db_session, region_hint=region_hint
+                )
                 session_row = VoiceSession(
                     session_id=str(uuid.uuid4()),
                     channel_id=channel_id,
                     server_id=str(server_id),
-                    backend="sfu_v2",
+                    backend=backend,
                     quality_profile=profile,
-                    signaling_url=self.signaling_url,
+                    signaling_url=(
+                        chosen_instance.signaling_url
+                        if chosen_instance is not None
+                        else self.signaling_url
+                    ),
+                    sfu_instance_id=(
+                        chosen_instance.instance_id if chosen_instance is not None else None
+                    ),
                     is_active=True,
                     created_by=str(user_id),
                 )
                 db_session.add(session_row)
                 db_session.flush()
             else:
-                normalized_signaling_url = self._normalize_signaling_url(
-                    session_row.signaling_url or self.signaling_url
+                # If the instance this session was placed on has gone dark
+                # (missed heartbeats -> "dead", or explicitly "draining"),
+                # pick a new one instead of handing out a signaling_url that
+                # no longer accepts joins. This is the session-migration path.
+                current_instance = (
+                    db_session.get(MediaSFUInstance, session_row.sfu_instance_id)
+                    if session_row.sfu_instance_id
+                    else None
                 )
-                if session_row.signaling_url != normalized_signaling_url:
-                    session_row.signaling_url = normalized_signaling_url
+                instance_unusable = (
+                    session_row.sfu_instance_id is not None
+                    and (current_instance is None or current_instance.status != "active")
+                )
+
+                if instance_unusable:
+                    chosen_instance = self._select_sfu_instance(
+                        db_session, region_hint=region_hint
+                    )
+                    session_row.signaling_url = self._normalize_signaling_url(
+                        chosen_instance.signaling_url
+                        if chosen_instance is not None
+                        else self.signaling_url
+                    )
+                    session_row.sfu_instance_id = (
+                        chosen_instance.instance_id if chosen_instance is not None else None
+                    )
+                else:
+                    normalized_signaling_url = self._normalize_signaling_url(
+                        session_row.signaling_url or self.signaling_url
+                    )
+                    if session_row.signaling_url != normalized_signaling_url:
+                        session_row.signaling_url = normalized_signaling_url
 
             participant_stmt = select(VoiceSessionParticipant).where(
                 and_(
@@ -490,7 +674,7 @@ class VoiceSessionManager:
             "participant_count": participant_count,
             "quality_profile": session_row.quality_profile,
             "media_quality": media_quality,
-            "backend": "sfu_v2",
+            "backend": backend,
         }
 
     def consume_join_token(self, join_token: str) -> dict[str, Any]:

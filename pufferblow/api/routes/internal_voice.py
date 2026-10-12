@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pufferblow.api.schemas import (
     InternalVoiceBootstrapRequest,
     InternalVoiceEventRequest,
+    InternalVoiceHeartbeatRequest,
     VoiceJoinTokenConsumeRequest,
 )
 from pufferblow.core.bootstrap import api_initializer
@@ -125,3 +126,29 @@ async def get_sfu_bootstrap_config(request: Request):
         "status_code": 200,
         "config": api_initializer.voice_session_manager.build_sfu_bootstrap_config(),
     }
+
+
+@router.post("/instances/heartbeat", status_code=202)
+async def record_instance_heartbeat(request: Request):
+    """Upsert a media-sfu instance's load/health row from its periodic heartbeat."""
+    body = await request.body()
+    signature = request.headers.get("X-Pufferblow-Signature")
+    _verify_signature_or_fail(body=body, signature=signature)
+
+    try:
+        payload = InternalVoiceHeartbeatRequest.model_validate(
+            json.loads(body.decode("utf-8"))
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid heartbeat payload") from exc
+
+    api_initializer.voice_session_manager.record_instance_heartbeat(
+        instance_id=payload.instance_id,
+        region=payload.region,
+        signaling_url=payload.signaling_url,
+        internal_api_base=payload.internal_api_base,
+        current_peers=payload.current_peers,
+        max_total_peers=payload.max_total_peers,
+    )
+
+    return {"status_code": 202, "message": "Heartbeat recorded"}

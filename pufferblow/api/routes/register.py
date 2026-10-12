@@ -8,6 +8,7 @@ from pufferblow.api.routes.admin import (
 from pufferblow.api.routes.auth import router as decentralized_auth_router
 from pufferblow.api.routes.channels import router as channels_router
 from pufferblow.api.routes.core import router as core_router
+from pufferblow.api.routes.dm_calls import router as dm_calls_router
 from pufferblow.api.routes.friends import router as friends_router
 from pufferblow.api.routes.internal_voice import router as internal_voice_router
 from pufferblow.api.routes.messages import router as messages_router
@@ -51,6 +52,7 @@ def register_routers(api: FastAPI) -> None:
     # New SFU voice control plane and internal callbacks
     api.include_router(voice_v2_router, tags=["voice-v2"])
     api.include_router(internal_voice_router, tags=["voice-internal"])
+    api.include_router(dm_calls_router, tags=["dm-calls"])
 
     # Ping system (local, federated, instance)
     api.include_router(ping_router, tags=["ping"])

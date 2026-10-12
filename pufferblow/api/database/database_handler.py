@@ -43,6 +43,7 @@ from pufferblow.api.database.tables.friend_request_blocks import FriendRequestBl
 from pufferblow.api.database.tables.friendships import Friendships
 from pufferblow.api.database.tables.instance_runtime_config import InstanceRuntimeConfig
 from pufferblow.api.database.tables.keys import Keys
+from pufferblow.api.database.tables.media_sfu_instances import MediaSFUInstance  # noqa: F401  (registers the table)
 from pufferblow.api.database.tables.message_reactions import MessageReactions
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
 from pufferblow.api.database.tables.messages import Messages

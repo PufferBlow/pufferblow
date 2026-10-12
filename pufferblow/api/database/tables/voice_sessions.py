@@ -25,6 +25,12 @@ class VoiceSession(Base):
     backend: Mapped[str] = mapped_column(String(24), default="sfu_v2", nullable=False)
     quality_profile: Mapped[str] = mapped_column(String(24), default="balanced", nullable=False)
     signaling_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    # Which MediaSFUInstance.instance_id this session was placed on, so a
+    # reconnect sticks to the same instance until it's marked draining/dead.
+    # Nullable because sessions created before the instance registry existed
+    # (or on a deployment with no registered instances at all, falling back
+    # to the single-instance config value) never set it.
+    sfu_instance_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     created_by: Mapped[str] = mapped_column(String(64), nullable=False)
 

@@ -36,7 +36,7 @@ from pufferblow.api.security.security_checks_handler import SecurityChecksHandle
 from pufferblow.api.server.server_manager import ServerManager
 from pufferblow.api.stickers.stickers_manager import StickersManager
 from pufferblow.api.user.user_manager import UserManager
-from pufferblow.api.voice import VoiceSessionManager
+from pufferblow.api.voice import DmCallManager, VoiceSessionManager
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
 try:
@@ -86,6 +86,7 @@ class APIInitializer:
         self.security_checks_handler: SecurityChecksHandler | None = None
         self.notifications_manager: NotificationsManager | None = None
         self.friends_manager: FriendsManager | None = None
+        self.dm_call_manager: DmCallManager | None = None
         self.stickers_manager: StickersManager | None = None
         self.decentralized_auth_manager: DecentralizedAuthManager | None = None
         self.activitypub_manager: ActivityPubManager | None = None
@@ -226,6 +227,10 @@ class APIInitializer:
         )
         self.friends_manager = FriendsManager(
             database_handler=self.database_handler,
+        )
+        self.dm_call_manager = DmCallManager(
+            friends_manager=self.friends_manager,
+            voice_session_manager=self.voice_session_manager,
         )
         # Stickers manager — depends on storage_manager + database_handler.
         # If storage isn't available on this instance, sticker writes will

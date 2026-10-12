@@ -269,6 +269,45 @@ class InternalVoiceBootstrapRequest(BaseModel):
     nonce: str = Field(min_length=1)
 
 
+class DmCallInviteRequest(BaseModel):
+    """Start a 1:1 DM voice call."""
+
+    auth_token: str = Field(min_length=1)
+    callee_id: str = Field(min_length=1)
+
+
+class DmCallActionRequest(BaseModel):
+    """Accept/reject/end a DM call (no extra payload needed)."""
+
+    auth_token: str = Field(min_length=1)
+
+
+class DmCallSignalRequest(BaseModel):
+    """Relay one P2P SDP offer/answer/ICE candidate to the other participant."""
+
+    auth_token: str = Field(min_length=1)
+    signal_type: str = Field(pattern="^(offer|answer|candidate)$")
+    payload: dict = Field(default_factory=dict)
+
+
+class DmCallFallbackRequest(BaseModel):
+    """Request the SFU fallback session after a failed P2P attempt."""
+
+    auth_token: str = Field(min_length=1)
+    quality_profile: str = Field(default="balanced", pattern="^(low|balanced|high)$")
+
+
+class InternalVoiceHeartbeatRequest(BaseModel):
+    """Periodic signed heartbeat from one media-sfu instance into the registry."""
+
+    instance_id: str = Field(min_length=1, max_length=64)
+    region: str = Field(default="default", max_length=64)
+    signaling_url: str = Field(min_length=1)
+    internal_api_base: str | None = Field(default=None)
+    current_peers: int = Field(default=0, ge=0)
+    max_total_peers: int = Field(default=0, ge=0)
+
+
 # ============================================================================
 # Message Schemas
 # ============================================================================
