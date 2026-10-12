@@ -158,3 +158,16 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# --- Project-specific, not part of the PyPA template above ---------------
+
+# Local state for the two-instance federation test harness
+# (devp.federation.toml) — isolated ~/.pufferblow dirs per instance.
+.devp-federation/
+
+# virtualenv's own pip/setuptools/wheel seed cache (normally lives under the
+# user's app-data dir) lands here instead if a HOME/USERPROFILE override
+# active in the shell confuses its cache-dir resolution — e.g. while
+# iterating on the PUFFERBLOW_HOME isolation the federation test harness
+# uses. Pure build byproduct, never intentional.
+/pypa/
