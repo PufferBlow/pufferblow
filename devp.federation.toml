@@ -1,0 +1,109 @@
+[devp]
+version = "0.3.0"
+config-version = "1.2"
+
+[defaults]
+shell = "bash"
+
+# Two fully isolated Pufferblow instances (own Postgres, own memcached, own
+# ~/.pufferblow config dir via PUFFERBLOW_HOME — deliberately not
+# USERPROFILE/HOME, which Poetry itself also reads for its cache/venv
+# location) federating with each other over plain HTTP on localhost. Run
+# with:
+#
+#   devp -c devp.federation.toml
+#
+# Then either drive it by hand against the ports below, or start the
+# `federation-driver` process (autostart = false) once both instances show
+# ready: `devp ctl start federation-driver`. See pufferblow/tests/federation_test/
+# and docs/operator/federation.md ("Local two-instance test harness").
+
+# --- instance A: postgres + memcached ---------------------------------------
+
+[[process]]
+name = "postgres-a"
+command = [
+  "docker", "run", "--rm", "--name", "pufferblow-federation-postgres-a",
+  "-e", "POSTGRES_USER=pufferblow",
+  "-e", "POSTGRES_PASSWORD=pufferblow",
+  "-e", "POSTGRES_DB=pufferblow",
+  "-p", "5541:5432",
+  "postgres:16-alpine",
+]
+ready_port = 5541
+
+[[process]]
+name = "memcached-a"
+command = [
+  "docker", "run", "--rm", "--name", "pufferblow-federation-memcached-a",
+  "-p", "11311:11211",
+  "memcached:1.6-alpine",
+  "-m", "32",
+]
+ready_port = 11311
+
+# --- instance B: postgres + memcached ---------------------------------------
+
+[[process]]
+name = "postgres-b"
+command = [
+  "docker", "run", "--rm", "--name", "pufferblow-federation-postgres-b",
+  "-e", "POSTGRES_USER=pufferblow",
+  "-e", "POSTGRES_PASSWORD=pufferblow",
+  "-e", "POSTGRES_DB=pufferblow",
+  "-p", "5542:5432",
+  "postgres:16-alpine",
+]
+ready_port = 5542
+
+[[process]]
+name = "memcached-b"
+command = [
+  "docker", "run", "--rm", "--name", "pufferblow-federation-memcached-b",
+  "-p", "11312:11211",
+  "memcached:1.6-alpine",
+  "-m", "32",
+]
+ready_port = 11312
+
+# --- instance A: bootstrap (one-shot) + server ------------------------------
+
+[[process]]
+name = "bootstrap-a"
+command = "poetry run python pufferblow/tests/federation_test/bootstrap_instance.py"
+depends_on = ["postgres-a"]
+ready_when = "BOOTSTRAP_COMPLETE"
+env = { PUFFERBLOW_DATABASE_URI = "postgresql+psycopg2://pufferblow:pufferblow@127.0.0.1:5541/pufferblow", FEDERATION_TEST_SERVER_NAME = "Federation Test A", FEDERATION_TEST_ADMIN_USERNAME = "fed_admin_a", PUFFERBLOW_HOME = ".devp-federation/home-a" }
+
+[[process]]
+name = "pufferblow-a"
+command = "poetry run pufferblow serve --dev"
+depends_on = ["bootstrap-a", "memcached-a"]
+ready_port = 7001
+autorestart = true
+env = { PUFFERBLOW_DATABASE_URI = "postgresql+psycopg2://pufferblow:pufferblow@127.0.0.1:5541/pufferblow", PUFFERBLOW_API_HOST = "127.0.0.1", PUFFERBLOW_API_PORT = "7001", PUFFERBLOW_MEMCACHE_HOST = "127.0.0.1", PUFFERBLOW_MEMCACHE_PORT = "11311", PUFFERBLOW_WORKERS = "1", PUFFERBLOW_HOME = ".devp-federation/home-a" }
+
+# --- instance B: bootstrap (one-shot) + server ------------------------------
+
+[[process]]
+name = "bootstrap-b"
+command = "poetry run python pufferblow/tests/federation_test/bootstrap_instance.py"
+depends_on = ["postgres-b"]
+ready_when = "BOOTSTRAP_COMPLETE"
+env = { PUFFERBLOW_DATABASE_URI = "postgresql+psycopg2://pufferblow:pufferblow@127.0.0.1:5542/pufferblow", FEDERATION_TEST_SERVER_NAME = "Federation Test B", FEDERATION_TEST_ADMIN_USERNAME = "fed_admin_b", PUFFERBLOW_HOME = ".devp-federation/home-b" }
+
+[[process]]
+name = "pufferblow-b"
+command = "poetry run pufferblow serve --dev"
+depends_on = ["bootstrap-b", "memcached-b"]
+ready_port = 7002
+autorestart = true
+env = { PUFFERBLOW_DATABASE_URI = "postgresql+psycopg2://pufferblow:pufferblow@127.0.0.1:5542/pufferblow", PUFFERBLOW_API_HOST = "127.0.0.1", PUFFERBLOW_API_PORT = "7002", PUFFERBLOW_MEMCACHE_HOST = "127.0.0.1", PUFFERBLOW_MEMCACHE_PORT = "11312", PUFFERBLOW_WORKERS = "1", PUFFERBLOW_HOME = ".devp-federation/home-b" }
+
+# --- driver: runs the actual interop test on demand -------------------------
+
+[[process]]
+name = "federation-driver"
+command = "poetry run python pufferblow/tests/federation_test/run_all.py"
+depends_on = ["pufferblow-a", "pufferblow-b"]
+autostart = false

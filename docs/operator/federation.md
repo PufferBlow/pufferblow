@@ -117,6 +117,73 @@ curl -s https://your-instance.tld/api/v1/federation/resolve?handle=test@mastodon
 
 ---
 
+## Local two-instance test harness
+
+`devp.federation.toml` (repo root, run with [devp](https://github.com/thefr0gg/devp))
+brings up two fully isolated Pufferblow instances — own Postgres, own
+memcached, own `~/.pufferblow` config dir — federating with each other over
+plain HTTP on `127.0.0.1:7001` and `127.0.0.1:7002`. This is the thing to
+reach for when changing anything in `pufferblow/api/activitypub/`: it
+exercises HTTP Signatures, WebFinger, NodeInfo, Follow/Accept/Undo/Reject,
+and DM Create/Update/Delete against a genuinely separate process and RSA
+keypair, not a mock — the gap unit tests can't close (see
+`test_26_activitypub_reliability.py`'s and `test_28_activitypub_signatures_and_collections.py`'s
+own docstrings on why they stop short of that).
+
+```bash
+devp -c devp.federation.toml
+# once both pufferblow-a and pufferblow-b show ready:
+devp ctl start federation-driver
+```
+
+### Layout
+
+```
+pufferblow/tests/federation_test/
+  bootstrap_instance.py   -- one-shot: server row, owner-privileged admin
+                             account, a seed channel+message (used by the
+                             channel-to-DM forwarding scenario)
+  common.py               -- Reporter (PASS/FAIL accumulation), HTTP
+                             helpers (signup/signin, health wait, JWT decode)
+  topology.py             -- the user roster: ALICE/BOB (cross-instance
+                             pair), CAROL/DAVE (second pair, + CAROL shares
+                             an instance with ALICE for local-delivery
+                             coverage), ADMIN_A/ADMIN_B
+  scenarios/
+    identity.py            -- NodeInfo + WebFinger
+    follow.py               -- Follow/Accept/collections/Undo, two pairs
+    dm_basic.py              -- send/edit/delete, federated AND local-delivery
+    dm_attachments.py       -- DM with an attachment, federated
+    dm_replies.py            -- reply threading, federated both directions
+    dm_reactions.py          -- Like/Undo(Like) reactions on a DM message
+    forwarding.py            -- DM-to-DM and channel-to-DM forwarding
+  run_all.py               -- entry point: runs every scenario in order
+                               against a shared Reporter, exits non-zero
+                               on any failure
+```
+
+Each scenario module is a plain `run(reporter)` function and can be run on
+its own for faster iteration while working on one feature — add a `sys.path`
+entry for `pufferblow/tests/federation_test/` (same as `run_all.py` does) and call
+`scenarios.dm_reactions.run(Reporter())` directly after `topology.sign_in_all()`.
+
+Two things this harness deliberately does NOT assert, because they're
+known, documented gaps rather than bugs (see the relevant
+`activitypub_manager.py` docstrings):
+
+  * An inbound Update/Delete/Like can only ever target a message that WE
+    (this instance) originally sent — never something the peer authored.
+    `scenarios/dm_reactions.py` only exercises the direction that resolves.
+  * Forwarding and replies both work end-to-end — including the trickier
+    "reply to something the peer sent you" direction, now that
+    `remote_object_uri` is tracked on inbound Creates.
+
+To point the harness at a real third-party server instead of your own
+second instance, skip `devp.federation.toml` and follow the "resolve a
+remote actor" smoke test above against that server's handle directly.
+
+---
+
 ## Debugging a stuck outbox
 
 Cross-instance delivery state lives in `activitypub_outbox_activities`.
