@@ -262,6 +262,28 @@ mirrors SFU state into:
 - `GET /readyz`
 - `GET /api/v1/system/instance-health`
 
+A deployment can run more than one `media-sfu` instance behind one
+Pufferblow API. Each instance heartbeats its id/region/load into the
+`media_sfu_instances` table (`POST
+/api/internal/v1/voice/instances/heartbeat`); `VoiceSessionManager`
+picks the least-loaded `active` instance for each new session
+(region-hinted when available) and migrates a session off one that
+goes dark (missed heartbeats) or is explicitly drained. A single
+hardcoded `RTC_SIGNALING_URL` remains the fallback when no instance
+has registered.
+
+### DM voice calls
+
+1:1 DM voice calls (`/api/v1/dm-calls/*`, `DmCallManager`) are
+P2P-first: the control plane only relays `call_invite`/`accept`/
+`reject`/`offer`/`answer`/`candidate`/`end` between the two
+participants over the existing global WebSocket stream — no media
+touches the server in the happy path. If direct negotiation fails,
+either side can request `/api/v1/dm-calls/{call_id}/fallback`, which
+joins a normal SFU session (same instance-selection path as channel
+voice) scoped to the call id rather than a channel. Calling a user who
+has blocked you (or whom you've blocked) is refused.
+
 ## Storage and encryption
 
 `StorageManager` supports local + S3 backends with optional
