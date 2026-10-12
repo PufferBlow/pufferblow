@@ -124,6 +124,26 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         """Return True when the active engine is SQLite."""
         return str(self.database_engine.url).startswith("sqlite://")
 
+    def check_connection(self) -> tuple[bool, str | None]:
+        """Live connectivity probe: can we actually reach the database right now?
+
+        Unlike `is_ready("database_handler")` (which only checks that this
+        object was constructed at boot), this opens a real connection and
+        runs `SELECT 1` — so it correctly reports a DB that went down
+        *after* a successful boot (crash, network partition, connection
+        drop). Used by `/healthz` and `/readyz` so an offline database is
+        actually surfaced instead of masked by a non-None object.
+
+        Never raises: returns `(False, "<reason>")` on any failure so a
+        health-check route can report it rather than 500.
+        """
+        try:
+            with self.database_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+
     def _invalidate_user_cache(self, user_id: str) -> None:
         """Drop a cached `Users` row after a mutation.
 

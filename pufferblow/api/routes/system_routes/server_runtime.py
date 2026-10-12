@@ -116,6 +116,21 @@ def _fetch_media_sfu_health() -> dict:
         }
 
 
+def _check_database_health() -> dict:
+    """Live DB connectivity probe for the health payload.
+
+    `components["database_handler"]` below only reflects whether the
+    object was constructed at boot — it stays `True` even if Postgres
+    goes down afterwards (crash, network partition, connection drop).
+    This actually opens a connection and runs `SELECT 1`, so an offline
+    database is surfaced instead of masked. Never raises.
+    """
+    if not api_initializer.is_ready("database_handler"):
+        return {"connected": False, "error": "database_handler is not initialized."}
+    connected, error = api_initializer.database_handler.check_connection()
+    return {"connected": connected, "error": error}
+
+
 def build_instance_health_payload() -> dict:
     """Build a stable instance health payload including mirrored media-sfu health."""
     component_names = (
@@ -135,9 +150,12 @@ def build_instance_health_payload() -> dict:
     }
     server_state = get_server_state()
     media_sfu = _fetch_media_sfu_health()
+    database = _check_database_health()
 
     overall_status = "ok"
     if not api_initializer.is_loaded or not components.get("database_handler", False):
+        overall_status = "degraded"
+    if not database["connected"]:
         overall_status = "degraded"
     if media_sfu["enabled"] and media_sfu["status"] != "ok":
         overall_status = "degraded"
@@ -147,6 +165,7 @@ def build_instance_health_payload() -> dict:
         "api_loaded": api_initializer.is_loaded,
         "server_initialized": server_state.server is not None,
         "components": components,
+        "database": database,
         "media_sfu": media_sfu,
         "realtime": {
             "protocol_versions": [1],
