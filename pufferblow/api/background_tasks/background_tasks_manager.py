@@ -57,6 +57,15 @@ class BackgroundTasksManager(BackgroundTaskSchedulerMixin, BackgroundTaskAnalyti
         except Exception as exc:
             logger.warning(f"Disappearing-DM sweep failed: {exc}")
 
+    async def purge_command_idempotency_keys(self):
+        """Forget remembered command results older than 24 hours (the retry window)."""
+        try:
+            count = self.database_handler.purge_idempotency_keys()
+            if count > 0:
+                logger.info(f"Idempotency purge removed {count} expired command records")
+        except Exception as exc:
+            logger.warning(f"Idempotency purge failed: {exc}")
+
     async def cleanup_storage_orphaned_files(self):
         """Clean up orphaned files in storage."""
         logger.info("Starting storage cleanup task")

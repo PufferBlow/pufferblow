@@ -1,0 +1,12 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "hello",
+    "version": 1,
+    "supported": [
+      1
+    ],
+    "session_id": "ses_abc123",
+    "epoch": "ep_1"
+  }
+}

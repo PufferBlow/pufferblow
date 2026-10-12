@@ -241,11 +241,13 @@ def _run_full_setup(
 
     logger.success("Setup complete.")
     logger.warning("Store this owner auth token safely — it will not be shown again:")
-    logger.info("  auth_token={token}", token=auth_token)
+    # Printed, not logged: this is the one place a secret is meant to be seen, and it must
+    # never pass through the log pipeline (which redacts tokens) or reach a log file.
+    print(f"  auth_token={auth_token}")
     logger.info(
         "RTC bootstrap secret (saved to ~/.pufferblow/config.toml):",
     )
-    logger.info("  bootstrap_secret={secret}", secret=bootstrap_secret)
+    print(f"  bootstrap_secret={bootstrap_secret}")
 
 
 def _is_default_secret(value: str | None) -> bool:

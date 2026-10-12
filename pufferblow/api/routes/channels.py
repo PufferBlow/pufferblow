@@ -29,6 +29,7 @@ from pufferblow.api.dependencies import (
     check_channel_access,
     ensure_user_not_timed_out,
 )
+from pufferblow.api.protocol.events import CHANNEL_UPDATED, DomainEvent
 from pufferblow.core.bootstrap import api_initializer
 from pufferblow.api.logger.msgs import info
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
@@ -298,6 +299,25 @@ async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
         f"(name={updated.channel_name!r}, is_private={updated.is_private})"
     )
 
+    # Privacy may have changed: drop subscriptions that no longer qualify *before* announcing,
+    # so people who just lost access do not receive the announcement.
+    await api_initializer.websockets_manager.revalidate_subscriptions(
+        api_initializer.authorizer, channel_id
+    )
+    await api_initializer.event_publisher.publish_all(
+        [
+            DomainEvent(
+                name=CHANNEL_UPDATED,
+                data={
+                    "channel_id": channel_id,
+                    "channel_name": updated.channel_name,
+                    "is_private": bool(updated.is_private),
+                },
+                channel_id=channel_id,
+            )
+        ]
+    )
+
     return {
         "status_code": 200,
         "message": "Channel updated successfully",
@@ -325,6 +345,16 @@ async def delete_channel_route(auth_token: str, channel_id: str):
     api_initializer.channels_manager.delete_channel(channel_id=channel_id)
 
     logger.info(info.INFO_CHANNEL_DELETED(user_id=user_id, channel_id=channel_id))
+
+    await api_initializer.event_publisher.publish_all(
+        [
+            DomainEvent(
+                name=CHANNEL_UPDATED,
+                data={"channel_id": channel_id, "deleted": True},
+                channel_id=channel_id,
+            )
+        ]
+    )
 
     return {
         "status_code": 200,

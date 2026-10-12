@@ -1,0 +1,13 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "error",
+    "version": 1,
+    "id": null,
+    "error": {
+      "code": "MALFORMED",
+      "message": "Frame is not valid JSON.",
+      "retryable": false
+    }
+  }
+}

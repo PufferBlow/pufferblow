@@ -1,0 +1,17 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "event",
+    "version": 1,
+    "id": "evt_03",
+    "name": "message.deleted",
+    "channel_id": "c_general",
+    "seq": 43,
+    "epoch": "ep_1",
+    "data": {
+      "id": "m_8f2a",
+      "channel_id": "c_general",
+      "deleted_by": "u_ada"
+    }
+  }
+}

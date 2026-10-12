@@ -38,9 +38,7 @@ SEARCH_MAX_SCAN_LIMIT = 5000
 REACTION_EMOJI_MAX_LENGTH = 64
 from pufferblow.api.dependencies import (
     check_channel_access,
-    ensure_user_not_timed_out,
     get_current_user,
-    require_privilege,
 )
 from pufferblow.core.bootstrap import api_initializer
 
@@ -49,19 +47,12 @@ router = APIRouter(prefix="/api/v1/channels/{channel_id}")
 
 
 def _get_message_and_attachment_policy() -> tuple[int, int]:
-    """Return instance-defined message and attachment limits."""
-    settings = api_initializer.database_handler.get_server_settings()
-    storage_manager = api_initializer.storage_manager
-    storage_manager.update_server_limits()
+    """Return instance-defined message and attachment limits (shared with the command protocol)."""
+    from pufferblow.api.services.policy import message_policy
 
-    max_message_length = getattr(settings, "max_message_length", None)
-    if not max_message_length:
-        max_message_length = api_initializer.config.MAX_MESSAGE_SIZE
-
-    max_total_attachment_mb = getattr(
-        storage_manager, "MAX_TOTAL_ATTACHMENT_SIZE_MB", 50
-    )
-    return int(max_message_length), int(max_total_attachment_mb)
+    return message_policy(
+        api_initializer.database_handler, api_initializer.storage_manager, api_initializer.config
+    )()
 
 
 def _measure_upload_size(file: UploadFile) -> int:
@@ -351,13 +342,16 @@ async def channel_send_message(
             detail="Either a message or attachments must be provided.", status_code=400
         )
 
-    user_id = require_privilege(auth_token, "send_messages")
-
-    # Check channel access
-    check_channel_access(user_id, channel_id)
-    ensure_user_not_timed_out(user_id, "send messages")
+    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    # Fail before any upload work if the sender could not post here anyway.
+    api_initializer.authorizer.require_send(principal, channel_id)
 
     attachment_objects: list[dict] = []
+    if attachments and api_initializer.storage_manager is None:
+        raise exceptions.HTTPException(
+            status_code=503,
+            detail="File uploads are disabled on this server.",
+        )
     if attachments:
         total_attachment_bytes = sum(_measure_upload_size(file) for file in attachments)
         if total_attachment_bytes > max_total_attachment_mb * 1024 * 1024:
@@ -427,108 +421,24 @@ async def channel_send_message(
                         detail=f"Failed to upload attachment '{file.filename}'. Please try again.",
                     )
 
-    # Resolve sticker_id references into attachment dicts. Sticker
-    # bytes are already in storage so no upload is needed — we just
-    # look up each row, validate it's active, and append the
-    # `type: "sticker"` attachment shape that the client renderer
-    # routes through the inline StickerRenderer branch. Missing or
-    # deactivated stickers raise 400 so the client can surface a
-    # clean error to the user (rather than silently dropping the
-    # reference and sending an empty message).
-    if sticker_ids and api_initializer.stickers_manager is not None:
-        for sid in sticker_ids:
-            sticker_row = api_initializer.database_handler.get_sticker_by_id(sid)
-            if sticker_row is None or not sticker_row.is_active:
-                raise exceptions.HTTPException(
-                    status_code=400,
-                    detail=f"Sticker '{sid}' isn't available.",
-                )
-            attachment_objects.append({
-                "url": sticker_row.sticker_url,
-                "filename": sticker_row.filename,
-                # The marker the client renderer checks to route this
-                # attachment through the inline StickerRenderer.
-                "type": "sticker",
-                "size": 0,
-                # Carry the sticker_id through so the manager's
-                # usage_count bump (and any future analytics) can key
-                # off the canonical id rather than parsing the URL.
-                "sticker_id": sticker_row.sticker_id,
-                "display_name": sticker_row.display_name,
-                "alias": sticker_row.alias,
-            })
-
-    message_obj = api_initializer.messages_manager.send_message(
-        channel_id=channel_id,
-        user_id=user_id,
-        message=message,
+    # Persisting, sticker resolution, mention notifications and the real-time event all live in
+    # the shared MessageService, so this route and the WebSocket `message.create` command behave
+    # identically.
+    outcome = api_initializer.message_service.create(
+        principal,
+        channel_id,
+        message,
+        sticker_ids=sticker_ids,
         attachments=attachment_objects,
-        sent_at=sent_at if sent_at.strip() else None,
+        sent_at=sent_at,
     )
+    await api_initializer.event_publisher.publish_all(outcome.events)
 
-    sender_user = api_initializer.user_manager.user_profile(user_id=user_id)
-
-    sent_at_value = message_obj.sent_at
-    if sent_at_value is not None and not isinstance(sent_at_value, str):
-        sent_at_value = sent_at_value.isoformat()
-
-    message_dict = {
-        "message_id": str(message_obj.message_id),
-        "sender_user_id": str(user_id),
-        "channel_id": channel_id,
-        "message": message,
-        "hashed_message": message_obj.hashed_message,
-        "username": sender_user["username"],
-        "sender_avatar_url": sender_user.get("avatar_url"),
-        "sender_banner_url": sender_user.get("banner_url"),
-        "sender_status": sender_user.get("status", "offline"),
-        "sender_roles": sender_user.get("roles_ids", []),
-        "sender_about": sender_user.get("about"),
-        "sender_last_seen": sender_user.get("last_seen"),
-        "sender_created_at": sender_user.get("created_at"),
-        "sent_at": sent_at_value,
-        "attachments": attachment_objects,
-    }
-
-    await api_initializer.websockets_manager.broadcast_to_eligible_users(
-        channel_id, message_dict
-    )
-
-    # Mention notifications: record one per resolved recipient and push a
-    # `notification_created` event to each one's WebSocket so badges update
-    # in real time. Failure here must not fail the send.
-    try:
-        notifications = (
-            api_initializer.notifications_manager.record_mentions_for_message(
-                content=message,
-                sender_user_id=user_id,
-                channel_id=channel_id,
-                message_id=str(message_obj.message_id),
-            )
-        )
-        for notification in notifications:
-            try:
-                await api_initializer.websockets_manager.broadcast_to_user(
-                    str(notification.user_id),
-                    api_initializer.notifications_manager.serialize_for_broadcast(
-                        notification
-                    ),
-                )
-            except Exception:
-                logger.exception(
-                    f"Failed to broadcast notification_created to "
-                    f"user_id={notification.user_id}"
-                )
-    except Exception:
-        logger.exception(
-            f"Mention-notification recording failed for "
-            f"message_id={message_obj.message_id}"
-        )
-
+    message_dict = outcome.value["legacy"]
     return {
         "status_code": 201,
         "message": "message sent successfully",
-        "message_id": str(message_obj.message_id),
+        "message_id": message_dict["message_id"],
         "attachments": attachment_objects,
         "message_data": message_dict,
     }
@@ -572,61 +482,18 @@ async def channel_edit_message(
 ):
     """Edit a channel message's body.
 
-    Only the original sender may edit. Edits bump ``edit_count`` +
-    stamp ``last_edited_at`` so the client can render an
-    "edited" / "edited N times" badge. The body is re-encrypted
-    through the same pipeline as a fresh send and replaces the
-    existing ciphertext; the search index is refreshed alongside.
+    Only the original sender may edit. Edits bump ``edit_count`` and stamp
+    ``last_edited_at``. The work is done by the shared MessageService.
     """
-    cleaned = (message or "").strip()
-    if not cleaned:
-        raise exceptions.HTTPException(
-            status_code=400, detail="Edited message cannot be empty."
-        )
-    max_message_length, _ = _get_message_and_attachment_policy()
-    if len(cleaned) > max_message_length:
-        raise exceptions.HTTPException(
-            status_code=400,
-            detail=f"Message exceeds the instance limit of {max_message_length} characters.",
-        )
+    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    outcome = api_initializer.message_service.edit(principal, channel_id, message_id, message)
+    await api_initializer.event_publisher.publish_all(outcome.events)
 
-    user_id = require_privilege(auth_token, "send_messages")
-    check_channel_access(user_id, channel_id)
-    ensure_user_not_timed_out(user_id, "edit messages")
-
-    try:
-        result = api_initializer.messages_manager.edit_message(
-            message_id=message_id,
-            editor_user_id=user_id,
-            new_body=cleaned,
-        )
-    except PermissionError as exc:
-        raise exceptions.HTTPException(status_code=403, detail=str(exc))
-    except ValueError as exc:
-        raise exceptions.HTTPException(status_code=404, detail=str(exc))
-
-    # Broadcast the edit so other viewers see it without polling.
-    try:
-        await api_initializer.websockets_manager.broadcast_to_eligible_users(
-            channel_id,
-            {
-                "type": "message_edited",
-                "message_id": message_id,
-                "channel_id": channel_id,
-                "message": result["message"],
-                "edit_count": result["edit_count"],
-                "last_edited_at": result["last_edited_at"],
-            },
-        )
-    except Exception:
-        logger.exception(
-            f"Failed to broadcast message_edited for message_id={message_id}"
-        )
-
+    result = outcome.value
     return {
         "status_code": 200,
-        "message_id": result["message_id"],
-        "message": result["message"],
+        "message_id": result["id"],
+        "message": result["content"],
         "edit_count": result["edit_count"],
         "last_edited_at": result["last_edited_at"],
     }
@@ -646,71 +513,19 @@ async def channel_add_message_reaction(
     ``already_present: true``). Adding a different emoji from the same user
     is allowed.
     """
-    emoji_value = (emoji or "").strip()
-    if not emoji_value:
-        raise exceptions.HTTPException(
-            detail="`emoji` cannot be empty.", status_code=400
-        )
-    if len(emoji_value) > REACTION_EMOJI_MAX_LENGTH:
-        raise exceptions.HTTPException(
-            detail=f"`emoji` exceeds the {REACTION_EMOJI_MAX_LENGTH}-character maximum.",
-            status_code=400,
-        )
+    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    outcome = api_initializer.message_service.add_reaction(principal, channel_id, message_id, emoji)
+    await api_initializer.event_publisher.publish_all(outcome.events)
 
-    # Sticker reactions go through the same column but require the
-    # referenced sticker to exist + be active. The manager's
-    # validator returns the key unchanged on success; raises a
-    # StickersError on miss which we map to the proper HTTP status.
-    if api_initializer.stickers_manager is not None and emoji_value.startswith("sticker:"):
-        from pufferblow.api.stickers.stickers_manager import StickersError
-        try:
-            emoji_value = api_initializer.stickers_manager.validate_reaction_key(emoji_value)
-        except StickersError as exc:
-            raise exceptions.HTTPException(status_code=exc.status_code, detail=str(exc))
-
-    user_id = require_privilege(auth_token, "send_messages")
-    check_channel_access(user_id, channel_id)
-    ensure_user_not_timed_out(user_id, "react to messages")
-
-    newly_added = api_initializer.messages_manager.add_reaction(
-        message_id=message_id, user_id=user_id, emoji=emoji_value
-    )
-
-    summary = api_initializer.messages_manager.get_reaction_summary(
-        message_id=message_id, viewer_user_id=user_id
-    )
-
-    payload = {
-        "status_code": 201 if newly_added else 200,
-        "already_present": not newly_added,
+    value = outcome.value
+    return {
+        "status_code": 201 if value["changed"] else 200,
+        "already_present": not value["changed"],
         "message_id": message_id,
         "channel_id": channel_id,
-        "emoji": emoji_value,
-        "reactions": summary,
+        "emoji": value["emoji"],
+        "reactions": value["reactions"],
     }
-
-    try:
-        await api_initializer.websockets_manager.broadcast_to_eligible_users(
-            channel_id,
-            {
-                "type": "message_reaction_added",
-                "message_id": message_id,
-                "channel_id": channel_id,
-                "user_id": str(user_id),
-                "emoji": emoji_value,
-                "reactions": [
-                    {k: v for k, v in entry.items() if k != "viewer_reacted"}
-                    for entry in summary
-                ],
-            },
-        )
-    except Exception:
-        logger.exception(
-            "Failed to broadcast message_reaction_added for "
-            f"message_id={message_id}"
-        )
-
-    return payload
 
 
 @router.delete("/messages/{message_id}/reactions", status_code=200)
@@ -726,90 +541,33 @@ async def channel_remove_message_reaction(
     Idempotent: removing a reaction the viewer never applied returns 200
     with ``already_absent: true``.
     """
-    emoji_value = (emoji or "").strip()
-    if not emoji_value:
-        raise exceptions.HTTPException(
-            detail="`emoji` cannot be empty.", status_code=400
-        )
+    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    outcome = api_initializer.message_service.remove_reaction(principal, channel_id, message_id, emoji)
+    await api_initializer.event_publisher.publish_all(outcome.events)
 
-    user_id = get_current_user(auth_token)
-    check_channel_access(user_id, channel_id)
-
-    removed = api_initializer.messages_manager.remove_reaction(
-        message_id=message_id, user_id=user_id, emoji=emoji_value
-    )
-
-    summary = api_initializer.messages_manager.get_reaction_summary(
-        message_id=message_id, viewer_user_id=user_id
-    )
-
-    payload = {
+    value = outcome.value
+    return {
         "status_code": 200,
-        "already_absent": not removed,
+        "already_absent": not value["changed"],
         "message_id": message_id,
         "channel_id": channel_id,
-        "emoji": emoji_value,
-        "reactions": summary,
+        "emoji": value["emoji"],
+        "reactions": value["reactions"],
     }
-
-    try:
-        await api_initializer.websockets_manager.broadcast_to_eligible_users(
-            channel_id,
-            {
-                "type": "message_reaction_removed",
-                "message_id": message_id,
-                "channel_id": channel_id,
-                "user_id": str(user_id),
-                "emoji": emoji_value,
-                "reactions": [
-                    {k: v for k, v in entry.items() if k != "viewer_reacted"}
-                    for entry in summary
-                ],
-            },
-        )
-    except Exception:
-        logger.exception(
-            "Failed to broadcast message_reaction_removed for "
-            f"message_id={message_id}"
-        )
-
-    return payload
 
 
 @router.delete("/delete_message")
 async def channel_delete_message(auth_token: str, channel_id: str, message_id: str):
     """
-    Delete a message from a channel.
-
-    Args:
-        auth_token: User's authentication token
-        channel_id: Channel ID
-        message_id: Message ID to delete
+    Delete a message from a channel (its sender, or anyone with ``delete_messages``).
 
     Returns:
-        204 NO CONTENT: Message deleted successfully
-        401 UNAUTHORIZED: Not authorized to delete message
+        200 OK: Message deleted (also when it was already gone)
+        403 FORBIDDEN: Not authorized to delete this message
         404 NOT FOUND: Channel or message not found
     """
-    user_id = get_current_user(auth_token)
-    check_channel_access(user_id=user_id, channel_id=channel_id)
-
-    is_message_sender = (
-        api_initializer.messages_manager.check_message_sender(message_id=message_id)
-        == user_id
-    )
-    can_delete_messages = api_initializer.user_manager.has_privilege(
-        user_id=user_id, privilege_id="delete_messages"
-    )
-
-    if not is_message_sender and not can_delete_messages:
-        raise exceptions.HTTPException(
-            detail="You are not authorized to delete this message", status_code=401
-        )
-
-    # Delete the message
-    api_initializer.messages_manager.delete_message(
-        message_id=message_id, channel_id=channel_id
-    )
+    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    outcome = api_initializer.message_service.delete(principal, channel_id, message_id)
+    await api_initializer.event_publisher.publish_all(outcome.events)
 
     return {"status_code": 204, "message": "The message have been deleted successfully"}

@@ -1,0 +1,13 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_3",
+    "name": "message.delete",
+    "data": {
+      "channel_id": "c_general",
+      "message_id": "m_8f2a"
+    }
+  }
+}

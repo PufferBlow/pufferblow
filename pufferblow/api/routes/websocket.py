@@ -58,7 +58,9 @@ async def _handle_presence_update_message(
 
 
 @router.websocket("/ws")
-async def global_messages_websocket(websocket: WebSocket, auth_token: str):
+async def global_messages_websocket(
+    websocket: WebSocket, auth_token: str, protocol: int | None = None
+):
     """
     Global WebSocket endpoint handles real-time messaging for all accessible channels.
     It establishes a single WebSocket connection that receives updates from all channels
@@ -75,6 +77,13 @@ async def global_messages_websocket(websocket: WebSocket, auth_token: str):
             - The user doesn't exist or authentication fails.
             - Access restrictions apply.
     """
+    if protocol is not None:
+        # Opt-in command/event protocol (docs/protocol/v1.md). Everything below is the legacy loop.
+        from pufferblow.api.routes.ws_protocol import run_protocol_session
+
+        await run_protocol_session(websocket, auth_token, protocol)
+        return
+
     user_id = (
         extract_user_id(auth_token=auth_token)
         if "auth_token" in locals()

@@ -21,6 +21,7 @@ from pufferblow.api.utils.appearance import (
 )
 from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 from pufferblow.api.utils.extract_user_id import extract_user_id
+from pufferblow.api.commands.metrics import metrics
 from pufferblow.core.bootstrap import api_initializer
 
 from .shared import (
@@ -147,6 +148,13 @@ def build_instance_health_payload() -> dict:
         "server_initialized": server_state.server is not None,
         "components": components,
         "media_sfu": media_sfu,
+        "realtime": {
+            "protocol_versions": [1],
+            "connections": len(api_initializer.websockets_manager.active_connections)
+            if api_initializer.is_ready("websockets_manager")
+            else 0,
+            "counters": metrics.snapshot(),
+        },
     }
 
 

@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from pufferblow.api.logger.redact import redact
+
 LOG_LEVEL_MAP = {
     0: "INFO",
     1: "DEBUG",
@@ -142,6 +144,10 @@ def enrich_log_record(record: dict) -> None:
     request id — so the console format can render a compact handle
     without recomputing it inside every formatter call.
     """
+    # Every sink (console and file) sees the same scrubbed text, whatever logged it:
+    # our own code, uvicorn's access log, or a third-party library.
+    record["message"] = redact(record["message"])
+
     extra = record["extra"]
     extra.setdefault("request_id", "-")
     extra.setdefault("method", "-")

@@ -12,7 +12,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-import magic  # python-magic for MIME detection
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException, UploadFile
 from loguru import logger
@@ -23,6 +22,7 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.database.tables.file_objects import FileObjects
 
 from .local_storage import LocalStorageBackend
+from .mime import create_mime_detector
 from .path_utils import normalize_storage_relative_path
 from .s3_storage import S3StorageBackend
 from .storage_backend import StorageBackend
@@ -45,7 +45,7 @@ class StorageManager:
         self.sse_key = self._load_sse_key() if self.sse_enabled else None
 
         self.backend = self._create_backend()
-        self.mime_detector = magic.Magic(mime=True)
+        self.mime_detector = create_mime_detector()
 
         # File type validation - defaults, updated from server settings
         self.IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"]

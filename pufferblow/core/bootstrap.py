@@ -15,7 +15,15 @@ from pufferblow.api.database.database import Database
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.friends import FriendsManager
+from pufferblow.api.bots.bot_manager import BotManager
+from pufferblow.api.commands.dispatcher import CommandDispatcher
+from pufferblow.api.commands.handlers import build_registry
+from pufferblow.api.events.publisher import InProcessPublisher
 from pufferblow.api.messages.messages_manager import MessagesManager
+from pufferblow.api.principals.authorizer import Authorizer
+from pufferblow.api.principals.resolver import BotPrincipalResolver, UserPrincipalResolver
+from pufferblow.api.services.messages import MessageService
+from pufferblow.api.services.policy import message_policy
 from pufferblow.api.models.config_model import Config
 from pufferblow.api.notifications import NotificationsManager
 from pufferblow.api.security.security_checks_handler import SecurityChecksHandler
@@ -29,9 +37,11 @@ try:
     from pufferblow.api.storage.storage_manager import StorageManager
 
     STORAGE_AVAILABLE = True
-except ImportError:
+    STORAGE_IMPORT_ERROR = None
+except ImportError as storage_import_error:
     STORAGE_AVAILABLE = False
     StorageManager = None
+    STORAGE_IMPORT_ERROR = storage_import_error
 
 
 class APIInitializer:
@@ -54,6 +64,14 @@ class APIInitializer:
         self.channels_manager: ChannelsManager | None = None
         self.messages_manager: MessagesManager | None = None
         self.websockets_manager: WebSocketsManager | None = None
+        # Command/event protocol (see docs/protocol/v1.md)
+        self.authorizer: Authorizer | None = None
+        self.user_principal_resolver: UserPrincipalResolver | None = None
+        self.bot_principal_resolver: BotPrincipalResolver | None = None
+        self.bot_manager: BotManager | None = None
+        self.event_publisher: InProcessPublisher | None = None
+        self.message_service: MessageService | None = None
+        self.command_dispatcher: CommandDispatcher | None = None
         self.voice_session_manager: VoiceSessionManager | None = None
         self.storage_manager: StorageManager | None = None
         self.background_tasks_manager: BackgroundTasksManager | None = None
@@ -176,7 +194,7 @@ class APIInitializer:
         else:
             self.storage_manager = None
             logger.warning(
-                "Storage manager not available - file upload features are disabled."
+                f"Storage manager not available ({STORAGE_IMPORT_ERROR!r}) - file upload features are disabled."
             )
 
         self.background_tasks_manager = BackgroundTasksManager(
@@ -229,7 +247,42 @@ class APIInitializer:
         # Cross-wire so ActivityPubManager can dispatch Ping/PingAck to PingManager
         self.activitypub_manager.ping_manager = self.ping_manager
 
+        self._wire_command_protocol()
+
         self.is_loaded = True
+
+    def _wire_command_protocol(self) -> None:
+        """Build the transport-independent application layer used by /ws commands and HTTP routes."""
+        self.websockets_manager.channels_manager = self.channels_manager
+
+        self.authorizer = Authorizer(user_manager=self.user_manager, channels_manager=self.channels_manager)
+        self.user_principal_resolver = UserPrincipalResolver(
+            user_manager=self.user_manager, auth_token_manager=self.auth_token_manager
+        )
+        self.bot_manager = BotManager(database_handler=self.database_handler)
+        self.bot_principal_resolver = BotPrincipalResolver(
+            bot_manager=self.bot_manager, user_manager=self.user_manager
+        )
+
+        self.event_publisher = InProcessPublisher(self.websockets_manager)
+        self.message_service = MessageService(
+            messages_manager=self.messages_manager,
+            channels_manager=self.channels_manager,
+            database_handler=self.database_handler,
+            user_manager=self.user_manager,
+            authorizer=self.authorizer,
+            policy=message_policy(self.database_handler, self.storage_manager, self.config),
+            stickers_manager=self.stickers_manager,
+            notifications_manager=self.notifications_manager,
+        )
+        self.command_dispatcher = CommandDispatcher(
+            build_registry(
+                messages=self.message_service,
+                authorizer=self.authorizer,
+                publisher=self.event_publisher,
+            ),
+            idempotency_store=self.database_handler,
+        )
 
     def _register_background_tasks(self) -> None:
         """Register periodic background tasks for scheduler startup."""
@@ -296,6 +349,12 @@ class APIInitializer:
         # latency between "expires_at" and "actually gone" is at
         # most this interval, which is well inside the user's
         # mental model of "disappears around the 24h mark."
+        self.background_tasks_manager.register_task(
+            task_id="command_idempotency_purge",
+            task_func=self.background_tasks_manager.purge_command_idempotency_keys,
+            interval_hours=6,
+            enabled=True,
+        )
         self.background_tasks_manager.register_task(
             task_id="dm_disappearing_sweep",
             task_func=self.background_tasks_manager.sweep_expired_dms,

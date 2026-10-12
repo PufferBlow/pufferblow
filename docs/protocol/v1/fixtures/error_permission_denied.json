@@ -1,0 +1,13 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "error",
+    "version": 1,
+    "id": "cmd_1",
+    "error": {
+      "code": "PERMISSION_DENIED",
+      "message": "You cannot send messages in this channel.",
+      "retryable": false
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "ack",
+    "version": 1,
+    "id": "cmd_1",
+    "data": {
+      "status": "completed",
+      "result": {
+        "message": {
+          "id": "m_8f2a",
+          "channel_id": "c_general",
+          "author_id": "u_ada",
+          "author_name": "ada",
+          "author_avatar_url": null,
+          "content": "Hello!",
+          "attachments": [],
+          "reactions": [],
+          "created_at": "2030-01-01T10:00:00+00:00",
+          "edit_count": 0,
+          "last_edited_at": null
+        }
+      }
+    }
+  }
+}
