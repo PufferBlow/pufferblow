@@ -57,6 +57,13 @@ class ActivityPubFollow(Base):
     remote_actor_uri: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     follow_activity_uri: Mapped[str | None] = mapped_column(String(512), nullable=True, unique=True)
     accepted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    # "outgoing" (the local actor follows the remote one, via send_follow) or
+    # "incoming" (the remote actor follows the local one, via _handle_follow).
+    # Without this, both directions produce the same (local_actor_uri,
+    # remote_actor_uri) row shape and a followers/following split is
+    # impossible to tell apart. See migrations/versions/0002_* for the
+    # upgrade path on instances that predate this column.
+    direction: Mapped[str] = mapped_column(String(16), default="incoming", server_default="incoming", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

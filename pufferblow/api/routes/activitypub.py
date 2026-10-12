@@ -111,6 +111,12 @@ async def get_actor_outbox(
 ):
     """
     ActivityPub outbox for a local actor.
+
+    The bare collection URL (no ``page`` query param) returns the top-level
+    ``OrderedCollection`` wrapper — ``totalItems`` plus a ``first`` link —
+    which a real AP crawler expects before it'll follow into a page at all.
+    Passing ``?page=N`` returns that page directly (unchanged shape from
+    before), which is also what ``first``/``next`` point at.
     """
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
@@ -125,6 +131,19 @@ async def get_actor_outbox(
     except Exception:
         raise HTTPException(status_code=404, detail="Local actor not found")
 
+    if "page" not in request.query_params:
+        total = api_initializer.database_handler.count_activitypub_outbox_activities(
+            actor_uri=actor.actor_uri
+        )
+        return {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": actor.outbox_uri,
+            "type": "OrderedCollection",
+            "totalItems": total,
+            "first": f"{actor.outbox_uri}?page=1&limit={limit}",
+            "last": f"{actor.outbox_uri}?page={max(1, -(-total // limit))}&limit={limit}",
+        }
+
     offset = (page - 1) * limit
     rows = api_initializer.database_handler.get_activitypub_outbox_activities(
         actor_uri=actor.actor_uri, limit=limit, offset=offset
@@ -136,13 +155,103 @@ async def get_actor_outbox(
         except Exception:
             continue
 
-    return {
+    page_doc = {
         "@context": "https://www.w3.org/ns/activitystreams",
         "id": f"{actor.outbox_uri}?page={page}&limit={limit}",
         "type": "OrderedCollectionPage",
         "partOf": actor.outbox_uri,
         "orderedItems": ordered_items,
     }
+    if len(ordered_items) == limit:
+        page_doc["next"] = f"{actor.outbox_uri}?page={page + 1}&limit={limit}"
+    return page_doc
+
+
+def _ordered_collection_or_page(
+    *, collection_uri: str, items: list[str], request: Request, page: int, limit: int
+) -> dict:
+    """Shared OrderedCollection/OrderedCollectionPage builder for followers/following.
+
+    ``items`` is the full (already-fetched) list of remote actor URIs — these
+    collections aren't expected to be large enough to need DB-level paging
+    the way the outbox does, so this paginates in memory over one query.
+    """
+    if "page" not in request.query_params:
+        total = len(items)
+        return {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": collection_uri,
+            "type": "OrderedCollection",
+            "totalItems": total,
+            "first": f"{collection_uri}?page=1&limit={limit}",
+        }
+
+    start = (page - 1) * limit
+    page_items = items[start : start + limit]
+    page_doc = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{collection_uri}?page={page}&limit={limit}",
+        "type": "OrderedCollectionPage",
+        "partOf": collection_uri,
+        "orderedItems": page_items,
+    }
+    if start + limit < len(items):
+        page_doc["next"] = f"{collection_uri}?page={page + 1}&limit={limit}"
+    return page_doc
+
+
+@router.get("/ap/users/{user_id}/followers", status_code=200)
+async def get_actor_followers(
+    user_id: str, request: Request, page: int = 1, limit: int = 20
+):
+    """ActivityPub followers collection for a local actor."""
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be >= 1")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+
+    base_url = _request_base_url(request)
+    try:
+        actor = api_initializer.activitypub_manager.ensure_local_actor(
+            user_id=user_id, base_url=base_url
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Local actor not found")
+
+    rows = api_initializer.database_handler.list_activitypub_followers(
+        local_actor_uri=actor.actor_uri
+    )
+    items = [row.remote_actor_uri for row in rows]
+    return _ordered_collection_or_page(
+        collection_uri=f"{actor.actor_uri}/followers", items=items, request=request, page=page, limit=limit
+    )
+
+
+@router.get("/ap/users/{user_id}/following", status_code=200)
+async def get_actor_following(
+    user_id: str, request: Request, page: int = 1, limit: int = 20
+):
+    """ActivityPub following collection for a local actor."""
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be >= 1")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+
+    base_url = _request_base_url(request)
+    try:
+        actor = api_initializer.activitypub_manager.ensure_local_actor(
+            user_id=user_id, base_url=base_url
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Local actor not found")
+
+    rows = api_initializer.database_handler.list_activitypub_following(
+        local_actor_uri=actor.actor_uri
+    )
+    items = [row.remote_actor_uri for row in rows]
+    return _ordered_collection_or_page(
+        collection_uri=f"{actor.actor_uri}/following", items=items, request=request, page=page, limit=limit
+    )
 
 
 async def _verify_and_parse_inbox_request(request: Request) -> dict:
@@ -245,6 +354,31 @@ async def follow_remote_actor(request_body: ActivityPubFollowRequest, request: R
     return {
         "status_code": 200,
         "message": "Follow activity delivered",
+        "result": result,
+    }
+
+
+@router.post("/api/v1/federation/unfollow", status_code=200)
+async def unfollow_remote_actor(request_body: ActivityPubFollowRequest, request: Request):
+    """
+    Unfollow a remote ActivityPub account from a local user — sends
+    Undo(Follow) and drops the local follow row.
+    """
+    user_id = get_current_user(request_body.auth_token)
+    base_url = _request_base_url(request)
+    try:
+        result = await api_initializer.activitypub_manager.send_undo_follow(
+            local_user_id=user_id,
+            remote_handle=request_body.remote_handle,
+            base_url=base_url,
+        )
+    except Exception as exc:
+        logger.error(f"Federation unfollow failed: {str(exc)}")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "status_code": 200,
+        "message": "Undo(Follow) activity delivered",
         "result": result,
     }
 
@@ -385,6 +519,7 @@ async def load_direct_messages(
 @router.patch("/api/v1/dms/messages/{message_id}", status_code=200)
 async def edit_direct_message(
     message_id: str,
+    request: Request,
     auth_token: str = Body(..., embed=True),
     message: str = Body(..., embed=True),
 ):
@@ -392,9 +527,10 @@ async def edit_direct_message(
 
     Same constraints as the channel edit route — only the original
     sender may edit, edit metadata is bumped server-side, body is
-    re-encrypted through the existing pipeline. Federation: the
-    edit is local-only for now (no AP Update activity emitted yet);
-    a follow-up will propagate edits to remote peers.
+    re-encrypted through the existing pipeline. If the peer is remote,
+    federates the edit as an ActivityPub Update(Note) after the local edit
+    succeeds; a federation hiccup here is logged but never fails the
+    request — the local edit already happened and is the source of truth.
     """
     cleaned = (message or "").strip()
     if not cleaned:
@@ -412,6 +548,17 @@ async def edit_direct_message(
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+    try:
+        await api_initializer.activitypub_manager.send_update(
+            local_user_id=user_id,
+            message_id=message_id,
+            new_content=result["message"],
+            base_url=_request_base_url(request),
+        )
+    except Exception as exc:
+        logger.warning(f"Federation Update for DM edit failed: {exc}")
+
     return {
         "status_code": 200,
         "message_id": result["message_id"],
@@ -419,6 +566,35 @@ async def edit_direct_message(
         "edit_count": result["edit_count"],
         "last_edited_at": result["last_edited_at"],
     }
+
+
+@router.delete("/api/v1/dms/messages/{message_id}", status_code=200)
+async def delete_direct_message(message_id: str, request: Request, auth_token: str):
+    """Delete a DM message.
+
+    Only the original sender may delete their own DM — there's no
+    moderator-override concept for a private 1:1 conversation the way
+    there is for channel messages. Federates as an ActivityPub Delete
+    *before* removing the local row (needs the row's conversation_id to
+    resolve the peer); a federation hiccup is logged but never blocks the
+    local delete.
+    """
+    user_id = get_current_user(auth_token)
+    row = api_initializer.database_handler.get_message_by_id(message_id=message_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if str(row.sender_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the original sender can delete this message.")
+
+    try:
+        await api_initializer.activitypub_manager.send_delete(
+            local_user_id=user_id, message_id=message_id, base_url=_request_base_url(request)
+        )
+    except Exception as exc:
+        logger.warning(f"Federation Delete for DM failed: {exc}")
+
+    api_initializer.messages_manager.delete_message(message_id=message_id, channel_id=row.channel_id)
+    return {"status_code": 200, "message_id": message_id, "deleted": True}
 
 
 @router.get("/api/v1/dms/conversations/{conversation_id}/settings", status_code=200)

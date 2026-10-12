@@ -235,6 +235,8 @@ class ActivityPubManager:
             "preferredUsername": actor.preferred_username,
             "inbox": actor.inbox_uri,
             "outbox": actor.outbox_uri,
+            "followers": f"{actor.actor_uri}/followers",
+            "following": f"{actor.actor_uri}/following",
             "publicKey": {
                 "id": key_id,
                 "owner": actor.actor_uri,
@@ -622,6 +624,7 @@ class ActivityPubManager:
             remote_actor_uri=remote_peer.actor_uri,
             follow_activity_uri=activity_uri,
             accepted=False,
+            direction="outgoing",
         )
         self.database_handler.store_activitypub_outbox_activity(
             activity_uri=activity_uri,
@@ -712,7 +715,10 @@ class ActivityPubManager:
             if sent_at
             else datetime.datetime.now(datetime.timezone.utc).isoformat()
         )
-        object_uri = f"{base_url}/ap/objects/{uuid.uuid4()}"
+        # Deterministic from message_id (not a random uuid) so a later edit
+        # or delete can federate an Update/Delete against the SAME object
+        # without needing a message_id -> object_uri lookup table.
+        object_uri = f"{base_url}/ap/objects/{local_message.message_id}"
         note_object = {
             "id": object_uri,
             "type": "Note",
@@ -764,6 +770,179 @@ class ActivityPubManager:
             "delivered_remote": True,
             "delivery_target": delivery_target,
         }
+
+    async def _resolve_dm_peer_actor(
+        self, *, conversation_id: str, viewer_user_id: str, base_url: str
+    ) -> "ActivityPubPeer | None":
+        """Resolve the other participant in a DM conversation.
+
+        Same approach `list_dm_conversations` already uses. Returns `None`
+        for an outgoing-only conversation (no reply yet) — same known
+        limitation noted there: recovering the peer without a
+        conversation_members table isn't possible when the viewer is the
+        only sender so far.
+        """
+        peer_user_id = self.database_handler.get_conversation_other_sender(
+            conversation_id=conversation_id, viewer_user_id=viewer_user_id
+        )
+        if peer_user_id is None:
+            return None
+
+        peer_actor_row = self.database_handler.get_activitypub_actor_by_user_id(user_id=peer_user_id)
+        if peer_actor_row is not None:
+            return ActivityPubPeer(
+                actor_uri=peer_actor_row.actor_uri,
+                preferred_username=peer_actor_row.preferred_username,
+                is_local=peer_actor_row.is_local,
+                user_id=peer_user_id,
+                inbox_uri=peer_actor_row.inbox_uri,
+                outbox_uri=peer_actor_row.outbox_uri,
+                shared_inbox_uri=peer_actor_row.shared_inbox_uri,
+            )
+        local_peer_actor = self.ensure_local_actor(user_id=peer_user_id, base_url=base_url)
+        return ActivityPubPeer(
+            actor_uri=local_peer_actor.actor_uri,
+            preferred_username=local_peer_actor.preferred_username,
+            is_local=True,
+            user_id=peer_user_id,
+            inbox_uri=local_peer_actor.inbox_uri,
+            outbox_uri=local_peer_actor.outbox_uri,
+            shared_inbox_uri=local_peer_actor.shared_inbox_uri,
+        )
+
+    async def send_update(
+        self, local_user_id: str, message_id: str, new_content: str, base_url: str
+    ) -> dict | None:
+        """Federate a DM edit as an ActivityPub Update(Note).
+
+        Returns `None` (nothing to federate) when the message isn't a DM,
+        the peer is local, or the peer can't be resolved (see
+        `_resolve_dm_peer_actor`) — the edit itself already happened via the
+        existing local edit path before this is called; this only handles
+        telling a remote peer about it.
+        """
+        message_row = self.database_handler.get_message_by_id(message_id=message_id)
+        if message_row is None or not message_row.conversation_id:
+            return None
+
+        local_actor = self.ensure_local_actor(user_id=local_user_id, base_url=base_url)
+        peer = await self._resolve_dm_peer_actor(
+            conversation_id=message_row.conversation_id, viewer_user_id=local_user_id, base_url=base_url
+        )
+        if peer is None or peer.is_local:
+            return None
+
+        object_uri = f"{base_url}/ap/objects/{message_id}"
+        activity_uri = f"{base_url}/ap/activities/{uuid.uuid4()}"
+        activity = {
+            "@context": self.ACTIVITYSTREAMS_CONTEXT,
+            "id": activity_uri,
+            "type": "Update",
+            "actor": local_actor.actor_uri,
+            "to": [peer.actor_uri],
+            "object": {
+                "id": object_uri,
+                "type": "Note",
+                "attributedTo": local_actor.actor_uri,
+                "to": [peer.actor_uri],
+                "content": new_content,
+                "conversation": message_row.conversation_id,
+            },
+        }
+        self.database_handler.store_activitypub_outbox_activity(
+            activity_uri=activity_uri,
+            activity_type="Update",
+            actor_uri=local_actor.actor_uri,
+            payload_json=json.dumps(activity),
+            object_uri=object_uri,
+        )
+        delivery_target = peer.shared_inbox_uri or peer.inbox_uri
+        await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
+        return {"activity_id": activity_uri, "delivery_target": delivery_target}
+
+    async def send_delete(self, local_user_id: str, message_id: str, base_url: str) -> dict | None:
+        """Federate a DM deletion as an ActivityPub Delete.
+
+        Same "nothing to federate" cases as `send_update`. Must be called
+        BEFORE the local row is actually deleted — it needs the message's
+        `conversation_id` to resolve the peer.
+        """
+        message_row = self.database_handler.get_message_by_id(message_id=message_id)
+        if message_row is None or not message_row.conversation_id:
+            return None
+
+        local_actor = self.ensure_local_actor(user_id=local_user_id, base_url=base_url)
+        peer = await self._resolve_dm_peer_actor(
+            conversation_id=message_row.conversation_id, viewer_user_id=local_user_id, base_url=base_url
+        )
+        if peer is None or peer.is_local:
+            return None
+
+        object_uri = f"{base_url}/ap/objects/{message_id}"
+        activity_uri = f"{base_url}/ap/activities/{uuid.uuid4()}"
+        activity = {
+            "@context": self.ACTIVITYSTREAMS_CONTEXT,
+            "id": activity_uri,
+            "type": "Delete",
+            "actor": local_actor.actor_uri,
+            "to": [peer.actor_uri],
+            "object": object_uri,
+        }
+        self.database_handler.store_activitypub_outbox_activity(
+            activity_uri=activity_uri,
+            activity_type="Delete",
+            actor_uri=local_actor.actor_uri,
+            payload_json=json.dumps(activity),
+            object_uri=object_uri,
+        )
+        delivery_target = peer.shared_inbox_uri or peer.inbox_uri
+        await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
+        return {"activity_id": activity_uri, "delivery_target": delivery_target}
+
+    async def send_undo_follow(self, local_user_id: str, remote_handle: str, base_url: str) -> dict:
+        """Unfollow: send Undo(Follow) and drop the local follow row.
+
+        Mirrors `send_follow`'s peer resolution. Raises if there's no
+        existing follow row for this pair — mirroring `send_follow`'s own
+        "target must be remote" guard, there's nothing sensible to undo.
+        """
+        local_actor = self.ensure_local_actor(user_id=local_user_id, base_url=base_url)
+        remote_peer = await self._resolve_peer(peer=remote_handle, base_url=base_url)
+        if remote_peer.is_local:
+            raise ValueError("Unfollow target must be remote for federation follow flow")
+
+        existing = self.database_handler.get_activitypub_follow(
+            local_actor_uri=local_actor.actor_uri, remote_actor_uri=remote_peer.actor_uri
+        )
+        if existing is None or existing.direction != "outgoing":
+            raise ValueError("No outgoing follow found for this peer to undo")
+
+        activity_uri = f"{base_url}/ap/activities/{uuid.uuid4()}"
+        activity = {
+            "@context": self.ACTIVITYSTREAMS_CONTEXT,
+            "id": activity_uri,
+            "type": "Undo",
+            "actor": local_actor.actor_uri,
+            "object": {
+                "id": existing.follow_activity_uri,
+                "type": "Follow",
+                "actor": local_actor.actor_uri,
+                "object": remote_peer.actor_uri,
+            },
+        }
+        self.database_handler.store_activitypub_outbox_activity(
+            activity_uri=activity_uri,
+            activity_type="Undo",
+            actor_uri=local_actor.actor_uri,
+            payload_json=json.dumps(activity),
+            object_uri=existing.follow_activity_uri,
+        )
+        self.database_handler.delete_activitypub_follow(
+            local_actor_uri=local_actor.actor_uri, remote_actor_uri=remote_peer.actor_uri
+        )
+        delivery_target = remote_peer.shared_inbox_uri or remote_peer.inbox_uri
+        await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
+        return {"activity_id": activity_uri, "target_actor": remote_peer.actor_uri, "delivery_target": delivery_target}
 
     async def verify_inbox_signature(
         self, *, method: str, path: str, headers, raw_body: bytes, claimed_actor_uri: str
@@ -862,6 +1041,18 @@ class ActivityPubManager:
         if activity_type == "PingAck":
             return await self._handle_ping_ack(activity=activity, base_url=base_url)
 
+        if activity_type == "Undo":
+            return self._handle_undo(activity=activity)
+
+        if activity_type == "Delete":
+            return self._handle_delete(activity=activity)
+
+        if activity_type == "Update":
+            return self._handle_update(activity=activity)
+
+        if activity_type == "Reject":
+            return self._handle_reject(activity=activity)
+
         return {"processed": True, "activity_type": activity_type, "action": "stored_only"}
 
     async def _handle_follow(self, activity: dict, base_url: str, target_actor_uri: str | None) -> dict:
@@ -881,6 +1072,7 @@ class ActivityPubManager:
             remote_actor_uri=remote_actor.actor_uri,
             follow_activity_uri=str(activity.get("id") or ""),
             accepted=True,
+            direction="incoming",
         )
 
         accept_id = f"{base_url}/ap/activities/{uuid.uuid4()}"
@@ -920,6 +1112,69 @@ class ActivityPubManager:
                 remote_actor_uri=actor_uri,
             )
         return {"processed": True, "activity_type": "Accept", "action": "follow_marked_accepted"}
+
+    def _handle_undo(self, activity: dict) -> dict:
+        """Handle Undo. Currently only `Undo(Follow)` (an unfollow)."""
+        obj = activity.get("object", {})
+        if not isinstance(obj, dict) or str(obj.get("type", "")) != "Follow":
+            return {"processed": True, "activity_type": "Undo", "action": "stored_only"}
+
+        remote_actor_uri = str(activity.get("actor", "")).strip()
+        local_actor_uri = str(obj.get("object", "")).strip()
+        if not local_actor_uri or not remote_actor_uri:
+            return {"processed": True, "activity_type": "Undo", "action": "stored_only"}
+
+        removed = self.database_handler.delete_activitypub_follow(
+            local_actor_uri=local_actor_uri, remote_actor_uri=remote_actor_uri
+        )
+        return {
+            "processed": True,
+            "activity_type": "Undo",
+            "action": "follow_removed" if removed else "follow_not_found",
+        }
+
+    def _handle_reject(self, activity: dict) -> dict:
+        """Handle Reject. Currently only `Reject(Follow)` — a remote peer
+        declined a Follow we sent. Removes our outgoing follow row.
+        Pufferblow still auto-accepts every inbound follow (no
+        pending-approval UX yet), so there's nothing to reciprocate here.
+        """
+        obj = activity.get("object", {})
+        if not isinstance(obj, dict) or str(obj.get("type", "")) != "Follow":
+            return {"processed": True, "activity_type": "Reject", "action": "stored_only"}
+
+        remote_actor_uri = str(activity.get("actor", "")).strip()  # who rejected us
+        local_actor_uri = str(obj.get("actor", "")).strip()  # us, the original follower
+        if not local_actor_uri or not remote_actor_uri:
+            return {"processed": True, "activity_type": "Reject", "action": "stored_only"}
+
+        removed = self.database_handler.delete_activitypub_follow(
+            local_actor_uri=local_actor_uri, remote_actor_uri=remote_actor_uri
+        )
+        return {
+            "processed": True,
+            "activity_type": "Reject",
+            "action": "follow_removed" if removed else "follow_not_found",
+        }
+
+    def _handle_delete(self, activity: dict) -> dict:
+        """Handle Delete.
+
+        Acknowledged (already persisted to the inbox activities table by
+        `process_inbox_activity` before dispatch) but not applied to a
+        specific local row: `_handle_create` gives an inbound DM its own
+        locally-generated `message_id`, with no stored mapping back to the
+        remote object's uri this Delete references. Tracking that mapping
+        at Create time is a reasonable follow-up, not done here.
+        """
+        return {"processed": True, "activity_type": "Delete", "action": "acknowledged_unmapped"}
+
+    def _handle_update(self, activity: dict) -> dict:
+        """Handle Update. Same local-row mapping gap as `_handle_delete`."""
+        obj = activity.get("object", {})
+        if not isinstance(obj, dict) or str(obj.get("type", "")) != "Note":
+            return {"processed": True, "activity_type": "Update", "action": "stored_only"}
+        return {"processed": True, "activity_type": "Update", "action": "acknowledged_unmapped"}
 
     async def _handle_create(self, activity: dict, base_url: str) -> dict:
         """Handle create."""

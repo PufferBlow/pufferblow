@@ -2573,8 +2573,19 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         remote_actor_uri: str,
         follow_activity_uri: str | None = None,
         accepted: bool = False,
+        direction: str = "incoming",
     ) -> ActivityPubFollow:
-        """Create or update activitypub follow."""
+        """Create or update activitypub follow.
+
+        ``direction`` is ``"outgoing"`` (the local actor follows the remote
+        one) or ``"incoming"`` (the reverse). Note the dedup key below is
+        still just the actor pair, not `(pair, direction)` — a mutual follow
+        between the same two actors still collides into one row, now at
+        least correctly labelled with whichever direction was written last,
+        rather than silently indistinguishable. Splitting that fully is a
+        separate, larger change (would need the unique constraint itself to
+        include direction).
+        """
         with self.database_session() as session:
             stmt = select(ActivityPubFollow).where(
                 ActivityPubFollow.local_actor_uri == local_actor_uri,
@@ -2589,10 +2600,12 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     remote_actor_uri=remote_actor_uri,
                     follow_activity_uri=follow_activity_uri,
                     accepted=accepted,
+                    direction=direction,
                 )
                 session.add(follow)
             else:
                 follow.accepted = accepted
+                follow.direction = direction
                 if follow_activity_uri:
                     follow.follow_activity_uri = follow_activity_uri
                 session.merge(follow)
@@ -2600,6 +2613,29 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             session.commit()
             session.refresh(follow)
             return follow
+
+    def get_activitypub_follow(
+        self, local_actor_uri: str, remote_actor_uri: str
+    ) -> ActivityPubFollow | None:
+        """Fetch a single follow row by actor pair, if one exists."""
+        with self.database_session() as session:
+            stmt = select(ActivityPubFollow).where(
+                ActivityPubFollow.local_actor_uri == local_actor_uri,
+                ActivityPubFollow.remote_actor_uri == remote_actor_uri,
+            )
+            row = session.execute(stmt).fetchone()
+            return row[0] if row else None
+
+    def delete_activitypub_follow(self, local_actor_uri: str, remote_actor_uri: str) -> bool:
+        """Remove a follow row by actor pair (unfollow). Returns whether a row was removed."""
+        with self.database_session() as session:
+            stmt = delete(ActivityPubFollow).where(
+                ActivityPubFollow.local_actor_uri == local_actor_uri,
+                ActivityPubFollow.remote_actor_uri == remote_actor_uri,
+            )
+            result = session.execute(stmt)
+            session.commit()
+            return (result.rowcount or 0) > 0
 
     def accept_activitypub_follow(
         self, local_actor_uri: str, remote_actor_uri: str
@@ -2621,22 +2657,28 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
     def list_activitypub_followers(
         self, local_actor_uri: str, accepted_only: bool = True
     ) -> list[ActivityPubFollow]:
-        """List activitypub followers."""
+        """List remote actors following ``local_actor_uri`` (direction='incoming')."""
         with self.database_session() as session:
             stmt = select(ActivityPubFollow).where(
-                ActivityPubFollow.local_actor_uri == local_actor_uri
+                ActivityPubFollow.local_actor_uri == local_actor_uri,
+                ActivityPubFollow.direction == "incoming",
             )
             if accepted_only:
                 stmt = stmt.where(ActivityPubFollow.accepted.is_(True))
             result = session.execute(stmt).fetchall()
             return [row[0] for row in result]
 
-    def list_activitypub_following(self, remote_actor_uri: str) -> list[ActivityPubFollow]:
-        """List activitypub following."""
+    def list_activitypub_following(
+        self, local_actor_uri: str, accepted_only: bool = True
+    ) -> list[ActivityPubFollow]:
+        """List remote actors ``local_actor_uri`` follows (direction='outgoing')."""
         with self.database_session() as session:
             stmt = select(ActivityPubFollow).where(
-                ActivityPubFollow.remote_actor_uri == remote_actor_uri
+                ActivityPubFollow.local_actor_uri == local_actor_uri,
+                ActivityPubFollow.direction == "outgoing",
             )
+            if accepted_only:
+                stmt = stmt.where(ActivityPubFollow.accepted.is_(True))
             result = session.execute(stmt).fetchall()
             return [row[0] for row in result]
 
@@ -2730,6 +2772,14 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             )
             result = session.execute(stmt).fetchall()
             return [row[0] for row in result]
+
+    def count_activitypub_outbox_activities(self, actor_uri: str) -> int:
+        """Count an actor's outbox activities, for the OrderedCollection wrapper's totalItems."""
+        with self.database_session() as session:
+            stmt = select(func.count()).where(
+                ActivityPubOutboxActivity.actor_uri == actor_uri
+            )
+            return int(session.execute(stmt).scalar() or 0)
 
     def update_user_origin_server(self, user_id: str, origin_server: str) -> None:
         """
