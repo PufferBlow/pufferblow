@@ -59,7 +59,7 @@ markdown_extensions:
 
 plugins:
   - search
-  # Renders the OpenAPI schema dropped by scripts/export_openapi.py as
+  # Renders the OpenAPI schema dropped by scripts/export/export_openapi.py as
   # Swagger UI inside docs/developer/api-reference.md (look for `!!swagger`).
   - render_swagger:
       allow_arbitrary_locations: true

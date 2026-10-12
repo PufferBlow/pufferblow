@@ -8,16 +8,15 @@ import sys
 from pathlib import Path
 
 # Add the project root to Python path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
 
 
 def test_storage_imports():
     """Test that storage modules can be imported"""
     try:
         # Import storage modules directly
-        sys.path.insert(
-            0, str(Path(__file__).parent.parent / "pufferblow" / "api" / "storage")
-        )
+        sys.path.insert(0, str(_REPO_ROOT / "pufferblow" / "api" / "storage"))
 
         from pufferblow.api.storage.local_storage import LocalStorageBackend
         from pufferblow.api.storage.s3_storage import S3StorageBackend
@@ -35,9 +34,7 @@ async def test_storage_manager():
     """Test storage manager initialization"""
     try:
         # Import storage modules directly
-        sys.path.insert(
-            0, str(Path(__file__).parent.parent / "pufferblow" / "api" / "storage")
-        )
+        sys.path.insert(0, str(_REPO_ROOT / "pufferblow" / "api" / "storage"))
 
         from storage_manager import StorageManager
 

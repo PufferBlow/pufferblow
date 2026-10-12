@@ -183,7 +183,7 @@ def test_json_schema_export_is_current_and_complete():
     assert set(exported["frames"]) == {"command", "hello", "ack", "error", "event"}
     committed = PROJECT_ROOT / "docs" / "protocol" / "v1" / "schema.json"
     assert json.loads(committed.read_text(encoding="utf-8")) == json.loads(json.dumps(exported)), (
-        "docs/protocol/v1/schema.json is stale; run scripts/export_protocol_schema.py"
+        "docs/protocol/v1/schema.json is stale; run scripts/export/export_protocol_schema.py"
     )
 
 

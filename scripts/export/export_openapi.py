@@ -7,9 +7,9 @@ auto-generated ``app.openapi()`` payload as JSON.
 
 Usage::
 
-    poetry run python scripts/export_openapi.py
-    poetry run python scripts/export_openapi.py docs/developer/openapi.json
-    poetry run python scripts/export_openapi.py --pretty
+    poetry run python scripts/export/export_openapi.py
+    poetry run python scripts/export/export_openapi.py docs/developer/openapi.json
+    poetry run python scripts/export/export_openapi.py --pretty
 
 The default output path is ``docs/developer/openapi.json``. The docs build
 (MkDocs + mkdocs-render-swagger-plugin) loads this file and renders Swagger
