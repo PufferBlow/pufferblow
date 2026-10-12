@@ -34,6 +34,7 @@ def _build_app(*, cors_origin: str = "http://localhost:5173") -> Starlette:
         allow_methods=["*"],
         allow_headers=["*"],
         allow_credentials=False,
+        allow_private_network=True,
     )
     app.add_middleware(PrivateNetworkAccessMiddleware)
     return app

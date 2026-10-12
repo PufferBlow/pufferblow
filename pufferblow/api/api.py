@@ -119,6 +119,9 @@ if cors_origins or cors_origin_regex:
         allow_credentials=cors_allow_credentials,
         allow_methods=cors_allow_methods,
         allow_headers=cors_allow_headers,
+        # Starlette >= 0.49 answers Private Network Access preflights itself and
+        # rejects them (400) unless this is set. Keep the pre-upgrade behaviour.
+        allow_private_network=True,
     )
 else:
     logger.warning(
