@@ -1,11 +1,15 @@
 """Database schema migration command.
 
-Pufferblow does not use Alembic. Schema is shipped via SQLAlchemy
-declarative tables plus a small set of idempotent ALTER scripts in
+Schema history up to this point was shipped via SQLAlchemy declarative
+tables plus a small set of idempotent ALTER scripts in
 `database_handler.setup_tables` (the appearance-column migration, the
-blocked_ips counter migration, etc.). Every `pufferblow serve` run
-calls `setup_tables` during boot, so a single-process deploy with
-restart-on-upgrade already gets the migration "for free".
+blocked_ips counter migration, etc.) — those stay exactly as they are.
+New schema changes from here on are added as Alembic revisions under
+`pufferblow/migrations/versions/` and applied by
+`pufferblow.api.database.migrations.run_migrations`. Both run
+automatically during `load_database()` (see `core/bootstrap.py`), so
+every `pufferblow serve` run gets the full migration "for free" —
+nobody runs `alembic upgrade head` by hand.
 
 This command exists for the cases where boot-time migration is not
 what you want:
