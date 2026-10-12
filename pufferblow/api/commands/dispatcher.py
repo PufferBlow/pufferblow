@@ -19,7 +19,7 @@ from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 from pufferblow.api.commands.metrics import metrics
-from pufferblow.api.commands.ratelimit import RateLimiter
+from pufferblow.api.commands.ratelimit import MemcacheRateLimiter, RateLimiter
 from pufferblow.api.principals.principal import Principal
 from pufferblow.api.protocol.envelopes import (
     MAX_FRAME_BYTES,
@@ -77,8 +77,8 @@ class CommandDispatcher:
         registry: dict[str, CommandSpec],
         *,
         idempotency_store=None,
-        principal_limiter: RateLimiter | None = None,
-        connection_limiter: RateLimiter | None = None,
+        principal_limiter: RateLimiter | MemcacheRateLimiter | None = None,
+        connection_limiter: RateLimiter | MemcacheRateLimiter | None = None,
     ) -> None:
         self._registry = registry
         self._store = idempotency_store

@@ -215,6 +215,20 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
 
         get_cache(self.config).delete(channel_key(str(channel_id)))
 
+    def _invalidate_role_cache(self, role_id: str) -> None:
+        """Drop the cached `Roles` row after a mutation.
+
+        Unlike the derived per-user privilege cache (which deliberately
+        accepts a TTL-bound staleness window rather than scanning every
+        user — see `update_role`), the role_id here is already known
+        exactly, so invalidating it is a single cheap delete.
+        """
+        if self._is_sqlite():
+            return
+        from pufferblow.api.cache.memcache import get_cache, role_key
+
+        get_cache(self.config).delete(role_key(str(role_id)))
+
     def _invalidate_user_privileges_cache(self, user_id: str) -> None:
         """Drop the cached privilege set for a user.
 
@@ -2796,11 +2810,41 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             return [row[0] for row in session.execute(stmt).fetchall()]
 
     def get_role(self, role_id: str) -> Roles | None:
-        """Return a role by id."""
+        """Return a role by id.
+
+        Cached for ~5 minutes per role_id (same tier as `get_channel_data`).
+        `UserManager.get_user_roles` calls this once per role a user holds,
+        on every `user_profile()` call — message sends, profile views,
+        mention notifications — even though the derived privilege set from
+        the same data is already cached. Roles are few and near-static, so
+        one entry per role_id serves every user holding that role.
+        """
+        if not self._is_sqlite():
+            from pufferblow.api.cache.memcache import get_cache, role_key
+
+            cache = get_cache(self.config)
+            key = role_key(str(role_id))
+            cached = cache.get(key)
+            if cached is not None:
+                # Sentinel `False` => "we tried, the role does not exist".
+                return None if cached is False else cached
+        else:
+            cache = None
+            key = None
+
         with self.database_session() as session:
             stmt = select(Roles).where(Roles.role_id == role_id)
             row = session.execute(stmt).fetchone()
-            return row[0] if row else None
+            role = row[0] if row else None
+            if role is not None:
+                session.expunge(role)
+
+        if cache is not None and key is not None:
+            from pufferblow.api.cache.memcache import jittered_ttl
+
+            cache.set(key, role if role is not None else False, ttl=jittered_ttl(300))
+
+        return role
 
     def role_exists(self, role_id: str) -> bool:
         """Return whether a role exists."""
@@ -2863,6 +2907,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             session.add(role)
             session.commit()
             session.refresh(role)
+            self._invalidate_role_cache(role_id)
             return role
 
     def delete_role(self, role_id: str) -> bool:
@@ -2871,7 +2916,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             stmt = delete(Roles).where(Roles.role_id == role_id)
             result = session.execute(stmt)
             session.commit()
-            return bool(result.rowcount)
+            deleted = bool(result.rowcount)
+        if deleted:
+            self._invalidate_role_cache(role_id)
+        return deleted
 
     def count_users_for_role(self, role_id: str) -> int:
         """Count how many users currently have a role assigned."""

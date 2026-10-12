@@ -54,3 +54,65 @@ class RateLimiter:
         full_after = self.capacity / self.refill_per_second
         for key in [k for k, b in self._buckets.items() if now - b.updated > full_after]:
             del self._buckets[key]
+
+
+class MemcacheRateLimiter:
+    """Shared, memcache-backed counterpart to :class:`RateLimiter`.
+
+    A WS *connection* never leaves the worker that accepted it, so a
+    per-connection :class:`RateLimiter` is fine staying in-process. A
+    *principal* can open several connections that land on different
+    workers, though, and each worker's private token bucket would
+    otherwise multiply their effective command budget by however many
+    workers they spread across — the same scale-out bug
+    `RateLimitingMiddleware` was rewritten to fix for HTTP (see
+    `pufferblow/core/middlewares.py`). This mirrors that fix: an atomic
+    fixed-window counter shared via memcache, in place of a private
+    in-process bucket.
+
+    This approximates the token bucket's long-run throughput (`capacity`
+    requests per `capacity / refill_per_second` seconds) with a fixed
+    window rather than a true leaky bucket — the same tradeoff the HTTP
+    limiter already accepts in exchange for a primitive (`incr`) memcache
+    actually offers atomically. `incr` returning `None` (memcache
+    unreachable) fails open, per this cache layer's standing contract —
+    a flaky daemon must slow enforcement, never take the server down.
+    """
+
+    def __init__(
+        self,
+        config,
+        capacity: float = 30,
+        refill_per_second: float = 10,
+        *,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self.capacity = capacity
+        self.refill_per_second = refill_per_second
+        self._config = config
+        self._clock = clock
+        self._window_seconds = max(1, int(capacity / refill_per_second)) if refill_per_second > 0 else 1
+
+    def check(self, key: str, cost: float = 1) -> float | None:
+        from pufferblow.api.cache.memcache import command_rate_limit_key, get_cache
+
+        window = self._window_seconds
+        now = self._clock()
+        bucket = int(now // window)
+        count = get_cache(self._config).incr(
+            command_rate_limit_key(key, bucket), delta=int(cost), initial=0, ttl=window * 2
+        )
+        if count is None:
+            return None  # memcache unreachable — fail open
+
+        if count <= self.capacity:
+            return None
+
+        seconds_into_window = now - bucket * window
+        return max(0.01, window - seconds_into_window)
+
+    def forget(self, key: str) -> None:
+        from pufferblow.api.cache.memcache import command_rate_limit_key, get_cache
+
+        bucket = int(self._clock() // self._window_seconds)
+        get_cache(self._config).delete(command_rate_limit_key(key, bucket))

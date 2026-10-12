@@ -423,6 +423,30 @@ def user_privileges_key(user_id: str) -> str:
     return f"pb:user_privs:{user_id}"
 
 
+def role_key(role_id: str) -> str:
+    """Cache key for a `Roles` row by id.
+
+    Read by `UserManager.get_user_roles` (and, through it,
+    `get_user_privileges`'s uncached refill path) on every
+    `user_profile()` call — message sends, profile views, mention
+    notifications. Roles are few per instance and only change on a
+    deliberate admin action, so one cache entry per role_id is shared
+    across every user holding that role — a much higher hit ratio
+    than caching per-user.
+    """
+    return f"pb:role:{role_id}"
+
+
+def command_rate_limit_key(principal_id: str, window_bucket: int) -> str:
+    """Cache key for the per-principal WS command rate-limit counter.
+
+    `window_bucket` is `epoch_seconds // window_seconds`, so the key
+    naturally rolls over without explicit cleanup — same shape as
+    `rate_limit_counter_key` for the HTTP middleware.
+    """
+    return f"pb:cmdrl:{principal_id}:{window_bucket}"
+
+
 def rate_limit_counter_key(ip: str, minute_bucket: int) -> str:
     """Cache key for the per-IP per-minute request counter.
 

@@ -22,7 +22,7 @@ from pufferblow.api.commands.dispatcher import (
     HandlerOutput,
 )
 from pufferblow.api.commands.metrics import metrics
-from pufferblow.api.commands.ratelimit import RateLimiter
+from pufferblow.api.commands.ratelimit import MemcacheRateLimiter, RateLimiter
 from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.principals.principal import Principal
 from pufferblow.api.protocol import commands as schema
@@ -217,6 +217,55 @@ def test_rate_limiter_allows_a_burst_then_reports_the_wait():
     assert limiter.check("b") is None  # other keys are independent
     now[0] += 1.5
     assert limiter.check("a") is None
+
+
+class FakeMemcache:
+    """Stands in for `MemcacheCache`: a plain dict with atomic-enough `incr`."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, int] = {}
+
+    def incr(self, key, delta=1, initial=0, ttl=None):
+        self.rows[key] = self.rows.get(key, initial) + delta
+        return self.rows[key]
+
+    def delete(self, key) -> None:
+        self.rows.pop(key, None)
+
+
+class UnreachableMemcache:
+    """Stands in for a memcache daemon that is down: `incr` always fails open."""
+
+    def incr(self, key, delta=1, initial=0, ttl=None):
+        return None
+
+    def delete(self, key) -> None:
+        pass
+
+
+def test_memcache_rate_limiter_allows_a_burst_then_denies_with_a_positive_retry(monkeypatch):
+    import pufferblow.api.cache.memcache as memcache_module
+
+    fake = FakeMemcache()
+    monkeypatch.setattr(memcache_module, "get_cache", lambda config: fake)
+
+    now = [1_000.0]
+    limiter = MemcacheRateLimiter(config=None, capacity=2, refill_per_second=1, clock=lambda: now[0])
+    assert limiter.check("principal-a") is None
+    assert limiter.check("principal-a") is None
+    wait = limiter.check("principal-a")
+    assert wait is not None and wait > 0
+    assert limiter.check("principal-b") is None  # other keys are independent
+
+
+def test_memcache_rate_limiter_fails_open_when_memcache_is_unreachable(monkeypatch):
+    import pufferblow.api.cache.memcache as memcache_module
+
+    monkeypatch.setattr(memcache_module, "get_cache", lambda config: UnreachableMemcache())
+
+    limiter = MemcacheRateLimiter(config=None, capacity=1, refill_per_second=1)
+    for _ in range(10):
+        assert limiter.check("principal-a") is None
 
 
 # ── dispatcher without a database ────────────────────────────────

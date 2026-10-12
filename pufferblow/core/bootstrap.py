@@ -13,11 +13,13 @@ from pufferblow.api.channels.channels_manager import ChannelsManager
 from pufferblow.api.config.config_handler import ConfigHandler
 from pufferblow.api.database.database import Database
 from pufferblow.api.database.database_handler import DatabaseHandler
+from pufferblow.api.database.migrations import run_migrations
 from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.friends import FriendsManager
 from pufferblow.api.bots.bot_manager import BotManager
 from pufferblow.api.commands.dispatcher import CommandDispatcher
 from pufferblow.api.commands.handlers import build_registry
+from pufferblow.api.commands.ratelimit import MemcacheRateLimiter
 from pufferblow.api.events.publisher import InProcessPublisher
 from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.api.principals.authorizer import Authorizer
@@ -282,6 +284,16 @@ class APIInitializer:
             stickers_manager=self.stickers_manager,
             notifications_manager=self.notifications_manager,
         )
+        # The per-connection bucket stays in-process (a connection never leaves
+        # the worker that accepted it); the per-principal bucket moves to a
+        # memcache-backed counter so a principal spread across workers can't
+        # multiply its command budget — same fix `RateLimitingMiddleware`
+        # already applies to HTTP. SQLite (test harness) keeps the in-process
+        # default so existing tests stay deterministic without a memcached
+        # daemon.
+        is_sqlite = str(self.database_handler.database_engine.url).startswith("sqlite://")
+        principal_limiter = None if is_sqlite else MemcacheRateLimiter(self.config)
+
         self.command_dispatcher = CommandDispatcher(
             build_registry(
                 messages=self.message_service,
@@ -289,6 +301,7 @@ class APIInitializer:
                 publisher=self.event_publisher,
             ),
             idempotency_store=self.database_handler,
+            principal_limiter=principal_limiter,
         )
 
     def _register_background_tasks(self) -> None:
@@ -396,6 +409,12 @@ class APIInitializer:
             encrypt_manager=self.encrypt_manager,
             config=self.config,
         )
+        # DatabaseHandler.__init__ (above) already ran create_all + the
+        # hand-rolled `_apply_*_migration` methods, so the schema is at its
+        # pre-Alembic "current" state by this point. Alembic takes over for
+        # schema changes from here on — this runs it automatically against
+        # that same engine, so nobody ever types `alembic upgrade head`.
+        run_migrations(database_engine)
         if self.config_handler is not None:
             self.config_handler.hydrate_config_from_database(
                 database_handler=self.database_handler,
