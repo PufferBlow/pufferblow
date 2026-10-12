@@ -33,8 +33,11 @@ _SENSITIVE_KEYS = (
 _PARAM = re.compile(r"(?i)\b(" + "|".join(_SENSITIVE_KEYS) + r")=([^&\s\"'<>#]+)")
 # "Authorization: Bearer xxx"
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
-# A JSON Web Token anywhere in the text (these are the session tokens).
-_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}")
+# A JSON Web Token anywhere in the text (these are the session tokens). One character class
+# with a greedy tail means a match never backtracks, so scanning stays linear even for hostile
+# input such as a megabyte of "eyJ-eyJ-eyJ-...". It may swallow a few trailing dots or dashes,
+# which is fine for a log line.
+_JWT = re.compile(r"\beyJ[A-Za-z0-9_.-]{10,}")
 # Bot tokens: pbb_<prefix>.<secret>
 _BOT_TOKEN = re.compile(r"\bpbb_[0-9a-f]{6,}\.[A-Za-z0-9_-]{16,}")
 

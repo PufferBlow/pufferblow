@@ -62,3 +62,17 @@ def test_the_logging_patcher_redacts_every_sink():
 
     assert captured and JWT not in captured[0]
     assert "auth_token=" + REDACTED in captured[0]
+
+
+def test_hostile_input_is_scanned_in_linear_time():
+    import time
+
+    for payload in ("eyJ-" * 40_000, "pbb_" + "a" * 100_000, "bearer " + " " * 100_000 + "x", "token=" * 20_000):
+        started = time.perf_counter()
+        redact(payload)
+        assert time.perf_counter() - started < 1.0, payload[:12]
+
+
+def test_a_jwt_with_unusually_long_segments_is_still_removed():
+    long_jwt = "eyJ" + "A" * 3000 + "." + "B" * 5000 + "." + "C" * 200
+    assert "AAAA" not in redact(f"GET /x?other={long_jwt}")
