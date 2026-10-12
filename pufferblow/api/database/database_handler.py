@@ -394,6 +394,16 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 err=str(exc),
             )
 
+        # Bot message authoring: adds messages.sender_bot_id.
+        # Idempotent — skipped when the column already exists.
+        try:
+            self._apply_bot_message_authoring_migration()
+        except Exception as exc:
+            logger.warning(
+                "bot-authoring column migration skipped due to error: {err}",
+                err=str(exc),
+            )
+
         # Disappearing-DMs migration: adds messages.expires_at and
         # ensures the dm_conversation_settings table is in place
         # (the SQLAlchemy create_all run above handles fresh
@@ -755,6 +765,36 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 "Message edit columns added to live schema: {cols}",
                 cols=", ".join(added),
             )
+
+    def _apply_bot_message_authoring_migration(self) -> None:
+        """Add ``sender_bot_id`` to messages.
+
+        Lets a message be attributed to the bot that sent it, on top of the
+        existing ``sender_id`` (which keeps pointing at the bot's owner — bots
+        have no row that `sender_id`'s FK could target). Idempotent: skipped
+        when the column already exists.
+        """
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.database_engine)
+        try:
+            existing = {col["name"] for col in inspector.get_columns("messages")}
+        except Exception as exc:
+            logger.debug(
+                "messages table not present, skipping bot-authoring migration: {err}",
+                err=str(exc),
+            )
+            return
+
+        if "sender_bot_id" in existing:
+            return
+        try:
+            with self.database_engine.begin() as conn:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN sender_bot_id VARCHAR"))
+        except Exception as exc:
+            logger.error("Failed to add column messages.sender_bot_id: {err}", err=str(exc))
+            raise
+        logger.info("Bot-authoring column added to live schema: messages.sender_bot_id")
 
     def _apply_disappearing_dms_migration(self) -> None:
         """Add the ``expires_at`` column to messages.

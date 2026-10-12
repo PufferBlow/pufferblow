@@ -77,10 +77,23 @@ class MessageService:
     # ── helpers ────────────────────────────────────────────────
 
     def _require_user_principal(self, principal: Principal) -> None:
-        # Messages reference a user row as their author. Bots cannot author messages until
-        # the schema can represent them, so say so plainly instead of failing on a constraint.
+        # Reactions reference a user row directly (no bot-authored column, unlike
+        # messages), so a bot cannot react yet — only post, edit and delete.
         if principal.is_bot:
-            raise ApiError(ErrorCode.AUTH_PRIVILEGE_DENIED, user_message="Bots cannot post messages yet.")
+            raise ApiError(ErrorCode.AUTH_PRIVILEGE_DENIED, user_message="Bots cannot react to messages yet.")
+
+    def _bot_sender_profile(self, bot_id: str) -> dict[str, Any]:
+        bot_row = self._db.get_bot(bot_id)
+        return {
+            "username": bot_row.name if bot_row else "Unknown Bot",
+            "avatar_url": None,
+            "banner_url": None,
+            "status": "online",
+            "roles_ids": [],
+            "about": None,
+            "last_seen": None,
+            "created_at": None,
+        }
 
     def _load_message(self, channel_id: str, message_id: str):
         row = self._db.get_message_by_id(message_id=message_id)
@@ -100,8 +113,6 @@ class MessageService:
         attachments: Sequence[dict] = (),
         sent_at: str | None = None,
     ) -> ServiceResult:
-        self._require_user_principal(principal)
-
         max_length, _ = self._policy()
         if len(content) > max_length:
             raise ApiError(
@@ -118,15 +129,20 @@ class MessageService:
 
         attachment_objects = list(attachments) + self._resolve_stickers(sticker_ids)
 
+        # ``sender_id`` on the row is always the owning user (bots have no row of
+        # their own for that FK to target); ``sender_bot_id`` records which bot, if
+        # any, actually sent it.
+        bot_id = principal.id.split(":", 1)[1] if principal.is_bot else None
         message_obj = self._messages.send_message(
             channel_id=channel_id,
-            user_id=principal.id,
+            user_id=principal.accountable_user_id,
             message=content,
             attachments=attachment_objects,
             sent_at=sent_at if sent_at and sent_at.strip() else None,
+            sender_bot_id=bot_id,
         )
 
-        sender = self._users.user_profile(user_id=principal.id)
+        sender = self._bot_sender_profile(bot_id) if principal.is_bot else self._users.user_profile(user_id=principal.id)
         message_dict = {
             "message_id": str(message_obj.message_id),
             "sender_user_id": principal.id,
@@ -153,7 +169,7 @@ class MessageService:
                 legacy=message_dict,
             )
         ]
-        events.extend(self._mention_events(content, principal.id, channel_id, str(message_obj.message_id)))
+        events.extend(self._mention_events(content, principal.accountable_user_id, channel_id, str(message_obj.message_id)))
 
         return ServiceResult(
             value={"message": message_view(message_dict), "legacy": message_dict},
@@ -210,8 +226,6 @@ class MessageService:
     # ── edit ───────────────────────────────────────────────────
 
     def edit(self, principal: Principal, channel_id: str, message_id: str, content: str) -> ServiceResult:
-        self._require_user_principal(principal)
-
         cleaned = (content or "").strip()
         if not cleaned:
             raise ApiError(ErrorCode.MESSAGES_EMPTY, user_message="Edited message cannot be empty.")
@@ -226,7 +240,9 @@ class MessageService:
         row = self._load_message(channel_id, message_id)
         self._authz.require_edit(principal, channel_id, str(row.sender_id))
 
-        result = self._messages.edit_message(message_id=message_id, editor_user_id=principal.id, new_body=cleaned)
+        result = self._messages.edit_message(
+            message_id=message_id, editor_user_id=principal.accountable_user_id, new_body=cleaned
+        )
 
         data = {
             "id": message_id,

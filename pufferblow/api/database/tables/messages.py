@@ -47,6 +47,16 @@ class Messages(Base):
         index=True,
         nullable=False,
     )
+    # Set when a bot sent this message. ``sender_id`` above always stays the
+    # bot's owner (bots have no row of their own to satisfy the FK, and the
+    # owner is who's accountable for the content), so this column is what
+    # tells a bot-authored message apart from the owner's own messages.
+    sender_bot_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("bots.bot_id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
     channel_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("channels.channel_id", ondelete="CASCADE"),
@@ -109,6 +119,7 @@ class Messages(Base):
             "hashed_message": self.hashed_message,
             "raw_message": self.raw_message,
             "sender_user_id": str(self.sender_id),
+            "sender_bot_id": self.sender_bot_id,
             "channel_id": self.channel_id,
             "conversation_id": self.conversation_id,
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,

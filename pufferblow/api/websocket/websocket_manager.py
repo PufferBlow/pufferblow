@@ -244,10 +244,15 @@ class WebSocketsManager:
         try:
             await websocket.accept()
 
-            try:
-                user_id = extract_user_id(auth_token)
-            except Exception:
-                user_id = auth_token[:8]
+            if context is not None:
+                # Protocol v1 already knows who this is (user or bot) — no need to
+                # guess from the token, which fails for bot tokens anyway.
+                user_id = context.principal.id
+            else:
+                try:
+                    user_id = extract_user_id(auth_token)
+                except Exception:
+                    user_id = auth_token[:8]
 
             self.active_connections[websocket] = {
                 "user_id": user_id,

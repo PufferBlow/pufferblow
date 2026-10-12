@@ -21,7 +21,11 @@ from pufferblow.api.commands.handlers import build_registry
 from pufferblow.api.events.publisher import InProcessPublisher
 from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.api.principals.authorizer import Authorizer
-from pufferblow.api.principals.resolver import BotPrincipalResolver, UserPrincipalResolver
+from pufferblow.api.principals.resolver import (
+    AnyPrincipalResolver,
+    BotPrincipalResolver,
+    UserPrincipalResolver,
+)
 from pufferblow.api.services.messages import MessageService
 from pufferblow.api.services.policy import message_policy
 from pufferblow.api.models.config_model import Config
@@ -68,6 +72,8 @@ class APIInitializer:
         self.authorizer: Authorizer | None = None
         self.user_principal_resolver: UserPrincipalResolver | None = None
         self.bot_principal_resolver: BotPrincipalResolver | None = None
+        #: Routes a /ws credential to whichever of the above resolvers understands it.
+        self.principal_resolver: AnyPrincipalResolver | None = None
         self.bot_manager: BotManager | None = None
         self.event_publisher: InProcessPublisher | None = None
         self.message_service: MessageService | None = None
@@ -263,6 +269,7 @@ class APIInitializer:
         self.bot_principal_resolver = BotPrincipalResolver(
             bot_manager=self.bot_manager, user_manager=self.user_manager
         )
+        self.principal_resolver = AnyPrincipalResolver(self.user_principal_resolver, self.bot_principal_resolver)
 
         self.event_publisher = InProcessPublisher(self.websockets_manager)
         self.message_service = MessageService(

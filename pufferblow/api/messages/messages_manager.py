@@ -321,16 +321,18 @@ class MessagesManager:
         message: str,
         attachments: list[dict] | None = None,
         sent_at: str | None = None,
+        sender_bot_id: str | None = None,
     ) -> Messages:
         """
         Send a message to a channel
 
         Args:
             channel_id (str): The channel's `channel_id`.
-            user_id (str): The sender user's `user_id`.
+            user_id (str): The sender's owning user `user_id` (a bot's owner, for a bot-sent message).
             message (str): The message to send.
             attachments (list[dict], optional): List of attachment objects with url/filename/type/size.
             sent_at (str, optional): ISO format timestamp when message was sent. If None, uses current time.
+            sender_bot_id (str, optional): The bot that actually sent this, if any.
 
         Returns:
             Messages: The message metadata object.
@@ -357,6 +359,7 @@ class MessagesManager:
             sent_at=sent_at,
             channel_id=channel_id,
             conversation_id=None,
+            sender_bot_id=sender_bot_id,
         )
         self.database_handler.save_message(message=message_metadata)
         self.database_handler.save_keys(key=encryption_key)
@@ -627,6 +630,7 @@ class MessagesManager:
         sent_at: str | None,
         channel_id: str | None,
         conversation_id: str | None,
+        sender_bot_id: str | None = None,
     ) -> tuple[Messages, object]:
         """
         Build encrypted message record and encryption key tuple.
@@ -652,6 +656,7 @@ class MessagesManager:
         message_metadata.channel_id = channel_id
         message_metadata.conversation_id = conversation_id
         message_metadata.sender_id = user_id
+        message_metadata.sender_bot_id = sender_bot_id
         message_metadata.attachments = attachments or []
 
         # Disappearing-DMs: compute expires_at from the
@@ -724,6 +729,7 @@ class MessagesManager:
         users that applied that emoji to the message.
         """
         messages_metadata: list[dict] = []
+        bot_cache: dict[str, object | None] = {}
 
         message_ids = [m[0].message_id for m in messages]
         reactions_by_message = self.database_handler.get_reactions_for_messages(
@@ -831,6 +837,23 @@ class MessagesManager:
                 json_metadata_format["attachments"] = []
 
             json_metadata_format["sender_user_id"] = str(message_data.sender_id)
+
+            bot_id = message_data.sender_bot_id
+            if bot_id:
+                if bot_id not in bot_cache:
+                    bot_cache[bot_id] = self.database_handler.get_bot(bot_id)
+                bot_row = bot_cache[bot_id]
+                # A bot's identity (name, no avatar) replaces the owner's, and
+                # the author id switches to the bot so clients can tell a
+                # bot-authored message apart from the owner's own messages —
+                # matching the live/send shape built in MessageService.create.
+                json_metadata_format["sender_user_id"] = f"bot:{bot_id}"
+                json_metadata_format["sender_username"] = bot_row.name if bot_row else "Unknown Bot"
+                json_metadata_format["sender_avatar_url"] = None
+                json_metadata_format["sender_banner_url"] = None
+                json_metadata_format["sender_avatar_lqip_url"] = None
+                json_metadata_format["sender_banner_lqip_url"] = None
+                json_metadata_format["sender_status"] = "online"
 
             message_reactions = reactions_by_message.get(message_data.message_id, [])
             json_metadata_format["reactions"] = _summarize_reactions(

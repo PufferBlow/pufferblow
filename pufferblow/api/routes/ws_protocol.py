@@ -39,7 +39,7 @@ CLOSE_UNAUTHENTICATED = 4401
 
 async def run_protocol_session(websocket: WebSocket, auth_token: str, version: int) -> None:
     manager = api_initializer.websockets_manager
-    resolver = api_initializer.user_principal_resolver
+    resolver = api_initializer.principal_resolver
 
     if version not in SUPPORTED_VERSIONS:
         metrics.incr("connections_rejected")
@@ -55,8 +55,10 @@ async def run_protocol_session(websocket: WebSocket, auth_token: str, version: i
         metrics.incr("connections_rejected")
         raise exceptions.WebSocketException(code=1008, reason="Too many open connections for this account.")
 
+    # Access is computed against the accountable (owning) user: for a bot this is its
+    # owner, since channel allow-lists hold real user ids, not bot principal ids.
     channels = api_initializer.channels_manager.list_channels(
-        user_id=principal.id, include_private_channels=principal.has("view_private_channels")
+        user_id=principal.accountable_user_id, include_private_channels=principal.has("view_private_channels")
     )
     subscriptions = {c["channel_id"] for c in channels or [] if isinstance(c, dict) and c.get("channel_id")}
 

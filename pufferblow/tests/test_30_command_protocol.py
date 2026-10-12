@@ -912,16 +912,71 @@ def test_bot_principal_never_exceeds_its_owner_or_its_scopes(client: TestClient)
         api_initializer.bot_principal_resolver.resolve("pbb_nope.nope")
 
 
-async def test_bots_cannot_post_until_messages_can_represent_them(client: TestClient):
+async def test_a_bot_can_post_edit_and_delete_its_own_messages(client: TestClient):
+    owner_token = _signup(client)
+    owner_id = extract_user_id(owner_token)
+    channel = _new_channel(owner_token)
+    created = api_initializer.bot_manager.create_bot(owner_id, "poster", ["send_messages"])
+    bot = api_initializer.bot_principal_resolver.resolve(created.token)
+
+    ctx = ConnectionContext(principal=bot, session_id="s", connection_key="k", subscriptions={channel})
+    sock = _attach(ctx)
+    created_reply = await _run(ctx, _command("message.create", {"channel_id": channel, "content": "beep"}))
+    message = created_reply["data"]["result"]["message"]
+    assert message["content"] == "beep" and message["author_id"] == bot.id and message["author_name"] == "poster"
+    assert _message_count(channel) == 1
+
+    event = sock.events("message.created")[0]["data"]
+    assert event["author_id"] == bot.id and event["author_name"] == "poster"
+
+    # The row is stored under the owner (bots have no row of their own), but
+    # the bot — not the owner directly — is who may edit and delete it.
+    row = api_initializer.database_handler.get_message_by_id(message_id=message["id"])
+    assert str(row.sender_id) == owner_id and row.sender_bot_id == created.identity.bot_id
+
+    owner_ctx = _context(owner_token, channel)
+    edited = await _run(owner_ctx, _command("message.edit", {"channel_id": channel, "message_id": message["id"], "content": "nope"}))
+    assert _error_code(edited) == ProtocolErrorCode.PERMISSION_DENIED
+
+    bot_edit = await _run(ctx, _command("message.edit", {"channel_id": channel, "message_id": message["id"], "content": "fixed"}))
+    assert bot_edit["data"]["result"]["content"] == "fixed"
+
+    bot_delete = await _run(ctx, _command("message.delete", {"channel_id": channel, "message_id": message["id"]}))
+    assert bot_delete["data"]["result"]["deleted"] is True
+    assert _message_count(channel) == 0
+
+
+async def test_bots_still_cannot_react_pending_a_reactions_schema_change(client: TestClient):
     token = _signup(client)
     channel = _new_channel(token)
     created = api_initializer.bot_manager.create_bot(extract_user_id(token), "poster", ["send_messages"])
     bot = api_initializer.bot_principal_resolver.resolve(created.token)
-
     ctx = ConnectionContext(principal=bot, session_id="s", connection_key="k", subscriptions={channel})
-    reply = await _run(ctx, _command("message.create", {"channel_id": channel, "content": "beep"}))
+
+    message_id = (await _run(ctx, _command("message.create", {"channel_id": channel, "content": "react to me"})))["data"]["result"]["message"]["id"]
+    reply = await _run(ctx, _command("reaction.add", {"channel_id": channel, "message_id": message_id, "emoji": "👍"}))
     assert _error_code(reply) == ProtocolErrorCode.PERMISSION_DENIED
-    assert _message_count(channel) == 0
+
+
+def test_websocket_accepts_a_bot_token_and_the_message_carries_the_bot_identity(client: TestClient):
+    owner_token = _signup(client)
+    channel = _new_channel(owner_token)
+    created = api_initializer.bot_manager.create_bot(extract_user_id(owner_token), "sockpuppet", ["send_messages"])
+
+    with client.websocket_connect(f"/ws?auth_token={created.token}&protocol=1") as ws:
+        hello = ws.receive_json()
+        HelloEnvelope.model_validate(hello)
+
+        ws.send_json(_command("channel.subscribe", {"channel_id": channel}, "cmd_sub"))
+        assert ws.receive_json()["type"] == "ack"
+
+        ws.send_json(_command("message.create", {"channel_id": channel, "content": "hi from a bot"}, "cmd_bot"))
+        ack = ws.receive_json()
+        assert ack["type"] == "ack"
+        event = ws.receive_json()
+        assert event["name"] == "message.created"
+        assert event["data"]["author_name"] == "sockpuppet"
+        assert event["data"]["author_id"] == f"bot:{created.identity.bot_id}"
 
 
 async def test_command_outcomes_are_counted_without_content(client: TestClient):

@@ -82,3 +82,22 @@ class BotPrincipalResolver:
             scopes=scopes,
             auth_context="bot_token",
         )
+
+
+class AnyPrincipalResolver:
+    """Resolves either a user session token or a bot token into a Principal.
+
+    Bot tokens are shaped ``pbb_<prefix>.<secret>`` (see ``bot_manager.TOKEN_MARKER``),
+    which a user token never is, so routing on that prefix is unambiguous.
+    """
+
+    def __init__(self, user_resolver: UserPrincipalResolver, bot_resolver: BotPrincipalResolver) -> None:
+        self._users = user_resolver
+        self._bots = bot_resolver
+
+    def resolve(self, credential: str) -> Principal:
+        from pufferblow.api.bots.bot_manager import TOKEN_MARKER
+
+        if credential and credential.startswith(f"{TOKEN_MARKER}_"):
+            return self._bots.resolve(credential)
+        return self._users.resolve(credential)
