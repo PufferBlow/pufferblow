@@ -145,7 +145,9 @@ class CommandDispatcher:
         if version not in SUPPORTED_VERSIONS or isinstance(version, bool):
             raise ProtocolError(
                 ProtocolErrorCode.UNSUPPORTED_VERSION,
-                f"Protocol version {version!r} is not supported. Supported: {list(SUPPORTED_VERSIONS)}.",
+                # Never echo an arbitrary client value back (it can be large or nested).
+                f"Protocol version {version if isinstance(version, int) and not isinstance(version, bool) else 'given'} "
+                f"is not supported. Supported: {list(SUPPORTED_VERSIONS)}.",
             )
         try:
             return CommandEnvelope.model_validate(frame)
