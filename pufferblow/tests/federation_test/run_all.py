@@ -19,6 +19,13 @@ relevant `activitypub_manager.py` docstrings for why):
     (this instance) originally sent — never something the peer authored
     and sent to us. `scenarios/dm_reactions.py` only exercises the
     direction that actually resolves.
+
+`voice_channel.py` and `voice_calls_p2p.py` are same-instance-only (voice
+isn't federated at all — see `docs/developer/architecture.md`) and only
+exercise the control-plane REST surface. Neither opens a real WebRTC/SFU
+connection or a WebSocket client, so "a signal was relayed" is checked via
+the control plane's own acceptance of the request, not independently
+verified delivery — see each file's module docstring.
 """
 
 from __future__ import annotations
@@ -34,9 +41,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import Reporter, wait_for_health, INSTANCE_A, INSTANCE_B  # noqa: E402
 from topology import sign_in_all  # noqa: E402
-from scenarios import identity, follow, dm_basic, dm_attachments, dm_replies, dm_reactions, forwarding  # noqa: E402
+from scenarios import (  # noqa: E402
+    identity,
+    follow,
+    dm_basic,
+    dm_attachments,
+    dm_replies,
+    dm_reactions,
+    forwarding,
+    voice_channel,
+    voice_calls_p2p,
+)
 
-SCENARIOS = (identity, follow, dm_basic, dm_attachments, dm_replies, dm_reactions, forwarding)
+SCENARIOS = (
+    identity,
+    follow,
+    dm_basic,
+    dm_attachments,
+    dm_replies,
+    dm_reactions,
+    forwarding,
+    voice_channel,
+    voice_calls_p2p,
+)
 
 
 def main() -> int:

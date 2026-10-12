@@ -157,6 +157,10 @@ pufferblow/tests/federation_test/
     dm_replies.py            -- reply threading, federated both directions
     dm_reactions.py          -- Like/Undo(Like) reactions on a DM message
     forwarding.py            -- DM-to-DM and channel-to-DM forwarding
+    voice_channel.py         -- channel voice join/leave/participants/
+                                mute, same-instance only (not federated)
+    voice_calls_p2p.py       -- 1:1 DM call invite/accept/reject/signal/
+                                end + SFU fallback, same-instance only
   run_all.py               -- entry point: runs every scenario in order
                                against a shared Reporter, exits non-zero
                                on any failure
@@ -177,6 +181,10 @@ known, documented gaps rather than bugs (see the relevant
   * Forwarding and replies both work end-to-end — including the trickier
     "reply to something the peer sent you" direction, now that
     `remote_object_uri` is tracked on inbound Creates.
+  * `voice_channel.py`/`voice_calls_p2p.py` only exercise the control-plane
+    REST surface — no real WebRTC/SFU connection or WebSocket client is
+    opened, so signal relay is checked by the control plane accepting the
+    request, not by independently verified delivery.
 
 To point the harness at a real third-party server instead of your own
 second instance, skip `devp.federation.toml` and follow the "resolve a
