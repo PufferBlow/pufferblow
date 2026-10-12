@@ -322,6 +322,8 @@ class MessagesManager:
         attachments: list[dict] | None = None,
         sent_at: str | None = None,
         sender_bot_id: str | None = None,
+        reply_to_message_id: str | None = None,
+        forwarded_from_message_id: str | None = None,
     ) -> Messages:
         """
         Send a message to a channel
@@ -360,6 +362,8 @@ class MessagesManager:
             channel_id=channel_id,
             conversation_id=None,
             sender_bot_id=sender_bot_id,
+            reply_to_message_id=reply_to_message_id,
+            forwarded_from_message_id=forwarded_from_message_id,
         )
         self.database_handler.save_message(message=message_metadata)
         self.database_handler.save_keys(key=encryption_key)
@@ -380,9 +384,16 @@ class MessagesManager:
         message: str,
         attachments: list[dict] | None = None,
         sent_at: str | None = None,
+        reply_to_message_id: str | None = None,
+        forwarded_from_message_id: str | None = None,
+        remote_object_uri: str | None = None,
     ) -> Messages:
         """
         Save a direct message in a conversation.
+
+        `remote_object_uri` is the ORIGINAL ActivityPub object id when this
+        message arrived via an inbound Create (the remote peer authored
+        it) — null for anything sent locally. See `Messages.remote_object_uri`.
         """
         message_metadata, encryption_key = self._build_message_record(
             user_id=user_id,
@@ -391,6 +402,9 @@ class MessagesManager:
             sent_at=sent_at,
             channel_id=None,
             conversation_id=conversation_id,
+            reply_to_message_id=reply_to_message_id,
+            forwarded_from_message_id=forwarded_from_message_id,
+            remote_object_uri=remote_object_uri,
         )
         self.database_handler.save_direct_message(message=message_metadata)
         self.database_handler.save_keys(key=encryption_key)
@@ -631,6 +645,9 @@ class MessagesManager:
         channel_id: str | None,
         conversation_id: str | None,
         sender_bot_id: str | None = None,
+        reply_to_message_id: str | None = None,
+        forwarded_from_message_id: str | None = None,
+        remote_object_uri: str | None = None,
     ) -> tuple[Messages, object]:
         """
         Build encrypted message record and encryption key tuple.
@@ -658,6 +675,9 @@ class MessagesManager:
         message_metadata.sender_id = user_id
         message_metadata.sender_bot_id = sender_bot_id
         message_metadata.attachments = attachments or []
+        message_metadata.reply_to_message_id = reply_to_message_id
+        message_metadata.forwarded_from_message_id = forwarded_from_message_id
+        message_metadata.remote_object_uri = remote_object_uri
 
         # Disappearing-DMs: compute expires_at from the
         # conversation's TTL setting at send time. Channel messages

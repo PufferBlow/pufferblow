@@ -10,9 +10,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from loguru import logger
 
 from pufferblow.api.dependencies import get_current_user
+from pufferblow.api.errors import ApiError
 from pufferblow.api.schemas import (
     ActivityPubFollowRequest,
+    DirectMessageForwardRequest,
     DirectMessageLoadQuery,
+    DirectMessageReactionRequest,
     DirectMessageSendRequest,
 )
 from pufferblow.core.bootstrap import api_initializer
@@ -474,6 +477,7 @@ async def send_direct_message(request_body: DirectMessageSendRequest, request: R
             base_url=base_url,
             sent_at=request_body.sent_at,
             attachments=merged_attachments,
+            reply_to_message_id=request_body.reply_to_message_id,
         )
     except Exception as exc:
         logger.error(f"Direct message send failed: {str(exc)}")
@@ -483,6 +487,106 @@ async def send_direct_message(request_body: DirectMessageSendRequest, request: R
         "status_code": 201,
         "message": "Direct message sent",
         "result": result,
+    }
+
+
+@router.post("/api/v1/messages/{message_id}/forward", status_code=201)
+async def forward_message(
+    message_id: str, request: Request, request_body: DirectMessageForwardRequest = Body(...)
+):
+    """Forward an existing message (channel or DM) into a DM with `peer`.
+
+    Authorization happens here, before `ActivityPubManager.forward_message`
+    does anything — a channel message needs channel access (reuses the
+    same `Authorizer` the channel routes use), a DM message needs the
+    caller to be a participant in its conversation (reuses the DM
+    reaction/edit check in `ActivityPubManager.user_can_access_dm_message`).
+    """
+    user_id = get_current_user(request_body.auth_token)
+    base_url = _request_base_url(request)
+
+    row = api_initializer.database_handler.get_message_by_id(message_id=message_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if row.channel_id:
+        principal = api_initializer.user_principal_resolver.resolve(request_body.auth_token)
+        try:
+            api_initializer.authorizer.require_channel_access(principal, row.channel_id)
+        except ApiError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+    elif row.conversation_id:
+        if not api_initializer.activitypub_manager.user_can_access_dm_message(user_id, row, base_url):
+            raise HTTPException(status_code=403, detail="Not a participant in this conversation")
+    else:
+        raise HTTPException(status_code=400, detail="Message has no channel or conversation to forward from")
+
+    try:
+        result = await api_initializer.activitypub_manager.forward_message(
+            local_user_id=user_id, source_message=row, peer=request_body.peer, base_url=base_url
+        )
+    except Exception as exc:
+        logger.error(f"Message forward failed: {str(exc)}")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"status_code": 201, "message": "Message forwarded", "result": result}
+
+
+@router.post("/api/v1/dms/messages/{message_id}/reactions", status_code=201)
+async def add_dm_message_reaction(
+    message_id: str, request: Request, request_body: DirectMessageReactionRequest = Body(...)
+):
+    """Add a reaction emoji to a DM message.
+
+    Mirrors the channel reaction route's idempotency contract: re-applying
+    the same emoji is a no-op (200, `already_present: true`).
+    """
+    user_id = get_current_user(request_body.auth_token)
+    base_url = _request_base_url(request)
+    try:
+        result = await api_initializer.activitypub_manager.add_dm_reaction(
+            local_user_id=user_id, message_id=message_id, emoji=request_body.emoji, base_url=base_url
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return {
+        "status_code": 201 if result["changed"] else 200,
+        "already_present": not result["changed"],
+        "message_id": message_id,
+        "emoji": result["emoji"],
+        "reactions": result["reactions"],
+    }
+
+
+@router.delete("/api/v1/dms/messages/{message_id}/reactions", status_code=200)
+async def remove_dm_message_reaction(
+    message_id: str, request: Request, auth_token: str, emoji: str
+):
+    """Remove a reaction emoji the viewer applied to a DM message.
+
+    Idempotent: removing a reaction the viewer never applied returns 200
+    with `already_absent: true`.
+    """
+    user_id = get_current_user(auth_token)
+    base_url = _request_base_url(request)
+    try:
+        result = await api_initializer.activitypub_manager.remove_dm_reaction(
+            local_user_id=user_id, message_id=message_id, emoji=emoji, base_url=base_url
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return {
+        "status_code": 200,
+        "already_absent": not result["changed"],
+        "message_id": message_id,
+        "emoji": result["emoji"],
+        "reactions": result["reactions"],
     }
 
 

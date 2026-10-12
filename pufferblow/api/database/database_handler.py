@@ -3780,6 +3780,21 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             row = session.execute(stmt).first()
             return row[0] if row else None
 
+    def get_message_by_remote_object_uri(self, remote_object_uri: str) -> Messages | None:
+        """Resolve a remote ActivityPub object id back to the local message row.
+
+        Only ever matches inbound (remote-authored) messages — `_handle_create`
+        is the only writer of `remote_object_uri`. Used by `_handle_update`/
+        `_handle_delete`/`_handle_like` to find what a remote Update/Delete/
+        Like activity is actually targeting.
+        """
+        if not remote_object_uri:
+            return None
+        with self.database_session() as session:
+            stmt = select(Messages).where(Messages.remote_object_uri == remote_object_uri)
+            row = session.execute(stmt).first()
+            return row[0] if row else None
+
     def fetch_conversation_messages(
         self, conversation_id: str, messages_per_page: int, page: int
     ) -> list[tuple[Messages, Users | None]]:

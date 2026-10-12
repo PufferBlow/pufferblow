@@ -35,7 +35,17 @@ def banner() -> None:
 
 CURRENT_PLATFORM = platform.system()
 
-if CURRENT_PLATFORM == "Windows":
+# PUFFERBLOW_HOME overrides where ~/.pufferblow lives, independent of
+# USERPROFILE/HOME. Needed because overriding USERPROFILE/HOME itself (the
+# obvious way to isolate config dirs, e.g. for running two instances side by
+# side) also hijacks Poetry's own cache/venv location on that same
+# variable, breaking `poetry run`. See devp.federation.toml / the
+# federation test harness for the motivating case.
+_home_override = os.environ.get("PUFFERBLOW_HOME", "").strip()
+if _home_override:
+    HOME = _home_override
+    SLASH = "\\" if CURRENT_PLATFORM == "Windows" else "/"
+elif CURRENT_PLATFORM == "Windows":
     HOME = os.environ["USERPROFILE"]
     SLASH = "\\"
 else:

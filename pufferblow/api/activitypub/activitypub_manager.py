@@ -642,6 +642,34 @@ class ActivityPubManager:
             "delivery_target": delivery_target,
         }
 
+    def _local_message_from_object_uri(self, object_uri: str, base_url: str):
+        """Reverse `_object_uri_for_message`'s local-object branch.
+
+        Only matches our own deterministic `{base_url}/ap/objects/{id}`
+        scheme — i.e. a remote peer referencing something WE sent them
+        (they're replying to / reacting to our message). Returns None for
+        anything else, including the remote's own object ids (those are
+        looked up via `get_message_by_remote_object_uri` instead, which
+        this does not duplicate).
+        """
+        prefix = f"{base_url}/ap/objects/"
+        if not object_uri.startswith(prefix):
+            return None
+        candidate_id = object_uri[len(prefix):]
+        if not candidate_id:
+            return None
+        return self.database_handler.get_message_by_id(message_id=candidate_id)
+
+    def _object_uri_for_message(self, row, base_url: str) -> str:
+        """The ActivityPub object id a message is addressable as.
+
+        `remote_object_uri` wins when set (the message arrived from a
+        remote peer under THEIR id); otherwise falls back to our own
+        deterministic `{base_url}/ap/objects/{message_id}` scheme (used for
+        anything we authored).
+        """
+        return row.remote_object_uri or f"{base_url}/ap/objects/{row.message_id}"
+
     async def send_direct_message(
         self,
         local_user_id: str,
@@ -650,9 +678,17 @@ class ActivityPubManager:
         base_url: str,
         sent_at: str | None = None,
         attachments: list[str] | None = None,
+        reply_to_message_id: str | None = None,
+        forwarded_from_message_id: str | None = None,
     ) -> dict:
         """
         Send a direct message to local or remote peer. Remote delivery uses ActivityPub Create(Note).
+
+        `reply_to_message_id`/`forwarded_from_message_id` are stored locally
+        either way. Federated as the Note's `inReplyTo` when the reply target
+        resolves to an addressable object id (see `_object_uri_for_message`)
+        — always true for a reply to anything previously sent or received
+        through this same mechanism, so in practice this just works.
         """
         # Allow attachment-only / sticker-only DMs: the route layer
         # already enforces "at least one of body OR attachments OR
@@ -684,6 +720,8 @@ class ActivityPubManager:
             message=message,
             attachments=attachments or [],
             sent_at=sent_at,
+            reply_to_message_id=reply_to_message_id,
+            forwarded_from_message_id=forwarded_from_message_id,
         )
 
         if peer_info.is_local and peer_info.user_id:
@@ -699,6 +737,8 @@ class ActivityPubManager:
                         local_message.sent_at.isoformat() if local_message.sent_at else None
                     ),
                     "attachments": attachments or [],
+                    "reply_to_message_id": reply_to_message_id,
+                    "forwarded_from_message_id": forwarded_from_message_id,
                     "federated": False,
                 },
             )
@@ -743,6 +783,14 @@ class ActivityPubManager:
             "pufferblow:visibility": "direct",
             "pufferblow:kind": "dm",
         }
+        if reply_to_message_id:
+            parent_row = self.database_handler.get_message_by_id(message_id=reply_to_message_id)
+            if parent_row is not None:
+                note_object["inReplyTo"] = self._object_uri_for_message(parent_row, base_url)
+        if forwarded_from_message_id:
+            source_row = self.database_handler.get_message_by_id(message_id=forwarded_from_message_id)
+            if source_row is not None:
+                note_object["pufferblow:forwardedFrom"] = self._object_uri_for_message(source_row, base_url)
         activity_uri = f"{base_url}/ap/activities/{uuid.uuid4()}"
         activity = {
             "@context": [self.ACTIVITYSTREAMS_CONTEXT, {"pufferblow": f"{base_url}/ns#"}],
@@ -944,6 +992,181 @@ class ActivityPubManager:
         await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
         return {"activity_id": activity_uri, "target_actor": remote_peer.actor_uri, "delivery_target": delivery_target}
 
+    def user_can_access_dm_message(self, user_id: str, row, base_url: str) -> bool:
+        """Is `user_id` one of the two participants in `row`'s conversation?
+
+        The sender always qualifies. Otherwise recomputes the conversation
+        id for (this user's actor, the row's sender's actor) and checks it
+        matches — the same verification `list_dm_conversations` already
+        does, which guards against a conversation_id collision or a random
+        uninvolved user passing in someone else's conversation.
+        """
+        if not row.conversation_id:
+            return False
+        if str(row.sender_id) == str(user_id):
+            return True
+
+        my_actor = self.ensure_local_actor(user_id=user_id, base_url=base_url)
+        sender_actor_row = self.database_handler.get_activitypub_actor_by_user_id(user_id=str(row.sender_id))
+        sender_actor_uri = (
+            sender_actor_row.actor_uri
+            if sender_actor_row is not None
+            else self._actor_uri_for_user(str(row.sender_id), base_url)
+        )
+        expected = self._conversation_id(my_actor.actor_uri, sender_actor_uri)
+        return expected == row.conversation_id
+
+    async def _federate_dm_reaction(self, *, row, local_user_id: str, emoji: str, added: bool, base_url: str) -> None:
+        """Best-effort: tell the DM peer about a reaction add/remove.
+
+        No-ops when the peer is local (nothing to federate) or the message
+        isn't addressable via our own deterministic object id scheme — a
+        reaction on a message the PEER authored can't be federated back to
+        them this way (same `_local_message_from_object_uri` restriction
+        `_handle_like` documents: we can only tell a remote about a
+        reaction to something WE sent them).
+        """
+        object_uri = self._object_uri_for_message(row, base_url)
+        if not object_uri.startswith(f"{base_url}/ap/objects/"):
+            return  # the message was THEIRS; nothing to federate here
+
+        local_actor = self.ensure_local_actor(user_id=local_user_id, base_url=base_url)
+        peer = await self._resolve_dm_peer_actor(
+            conversation_id=row.conversation_id, viewer_user_id=local_user_id, base_url=base_url
+        )
+        if peer is None or peer.is_local:
+            return
+
+        like_object = {"id": object_uri, "type": "Note"}
+        if added:
+            activity_uri = f"{base_url}/ap/activities/{uuid.uuid4()}"
+            activity: dict = {
+                "@context": self.ACTIVITYSTREAMS_CONTEXT,
+                "id": activity_uri,
+                "type": "Like",
+                "actor": local_actor.actor_uri,
+                "content": emoji,
+                "object": like_object,
+            }
+            activity_type = "Like"
+        else:
+            activity_uri = f"{base_url}/ap/activities/{uuid.uuid4()}"
+            activity = {
+                "@context": self.ACTIVITYSTREAMS_CONTEXT,
+                "id": activity_uri,
+                "type": "Undo",
+                "actor": local_actor.actor_uri,
+                "object": {"type": "Like", "content": emoji, "object": like_object},
+            }
+            activity_type = "Undo"
+
+        self.database_handler.store_activitypub_outbox_activity(
+            activity_uri=activity_uri,
+            activity_type=activity_type,
+            actor_uri=local_actor.actor_uri,
+            payload_json=json.dumps(activity),
+            object_uri=object_uri,
+        )
+        await self._http_post_json(
+            url=peer.shared_inbox_uri or peer.inbox_uri, payload=activity, signing_actor=local_actor
+        )
+
+    async def _notify_dm_reaction(
+        self, *, row, local_user_id: str, emoji: str, added: bool, base_url: str, reactions: list[dict]
+    ) -> None:
+        """Tell the OTHER participant about a reaction add/remove.
+
+        Local peer gets a WS broadcast (same shape family as the message
+        broadcast in `send_direct_message`); remote peer gets Like/Undo(Like)
+        federation via `_federate_dm_reaction`. Both are best-effort — a
+        failure here never unwinds the reaction itself, which already
+        committed.
+        """
+        peer = await self._resolve_dm_peer_actor(
+            conversation_id=row.conversation_id, viewer_user_id=local_user_id, base_url=base_url
+        )
+        if peer is not None and peer.is_local and peer.user_id:
+            try:
+                await self.websockets_manager.broadcast_to_user(
+                    user_id=peer.user_id,
+                    message={
+                        "type": "reaction",
+                        "conversation_id": row.conversation_id,
+                        "message_id": row.message_id,
+                        "emoji": emoji,
+                        "added": added,
+                        "reactor_user_id": str(local_user_id),
+                        "reactions": reactions,
+                    },
+                )
+            except Exception as exc:
+                logger.warning(f"DM reaction WS broadcast failed: {exc}")
+            return
+        try:
+            await self._federate_dm_reaction(row=row, local_user_id=local_user_id, emoji=emoji, added=added, base_url=base_url)
+        except Exception as exc:
+            logger.warning(f"DM reaction federation failed: {exc}")
+
+    async def add_dm_reaction(self, local_user_id: str, message_id: str, emoji: str, base_url: str) -> dict:
+        """Add a reaction to a DM message, authorized by conversation membership."""
+        row = self.database_handler.get_message_by_id(message_id=message_id)
+        if row is None or not row.conversation_id:
+            raise ValueError("Message not found or is not a direct message")
+        if not self.user_can_access_dm_message(local_user_id, row, base_url):
+            raise PermissionError("Not a participant in this conversation")
+
+        changed = self.messages_manager.add_reaction(message_id=message_id, user_id=local_user_id, emoji=emoji)
+        summary = self.messages_manager.get_reaction_summary(message_id=message_id, viewer_user_id=local_user_id)
+        if changed:
+            await self._notify_dm_reaction(
+                row=row, local_user_id=local_user_id, emoji=emoji, added=True, base_url=base_url, reactions=summary
+            )
+        return {"changed": changed, "emoji": emoji, "reactions": summary}
+
+    async def remove_dm_reaction(self, local_user_id: str, message_id: str, emoji: str, base_url: str) -> dict:
+        """Remove a reaction from a DM message, authorized by conversation membership."""
+        row = self.database_handler.get_message_by_id(message_id=message_id)
+        if row is None or not row.conversation_id:
+            raise ValueError("Message not found or is not a direct message")
+        if not self.user_can_access_dm_message(local_user_id, row, base_url):
+            raise PermissionError("Not a participant in this conversation")
+
+        changed = self.messages_manager.remove_reaction(message_id=message_id, user_id=local_user_id, emoji=emoji)
+        summary = self.messages_manager.get_reaction_summary(message_id=message_id, viewer_user_id=local_user_id)
+        if changed:
+            await self._notify_dm_reaction(
+                row=row, local_user_id=local_user_id, emoji=emoji, added=False, base_url=base_url, reactions=summary
+            )
+        return {"changed": changed, "emoji": emoji, "reactions": summary}
+
+    async def forward_message(self, local_user_id: str, source_message, peer: str, base_url: str) -> dict:
+        """Forward an existing message (channel or DM) to a DM peer.
+
+        Re-sends the source's decrypted content and attachments through
+        `send_direct_message`, so forwarding a channel message into a DM or
+        forwarding between two DMs both get full attachment/reply/federation
+        handling for free. Caller is responsible for authorizing that
+        `local_user_id` may read `source_message` (channel access or DM
+        participation) BEFORE calling this — see the route for the actual
+        check, kept there since it already has an `Authorizer` / `Principal`
+        to check channel access with.
+        """
+        import base64
+
+        plaintext = self.messages_manager.decrypt_message(
+            user_id=str(source_message.sender_id),
+            message_id=source_message.message_id,
+            encrypted_message=base64.b64decode(source_message.hashed_message),
+        )
+        return await self.send_direct_message(
+            local_user_id=local_user_id,
+            peer=peer,
+            message=plaintext,
+            base_url=base_url,
+            attachments=source_message.attachments or [],
+            forwarded_from_message_id=source_message.message_id,
+        )
+
     async def verify_inbox_signature(
         self, *, method: str, path: str, headers, raw_body: bytes, claimed_actor_uri: str
     ) -> None:
@@ -1042,7 +1265,7 @@ class ActivityPubManager:
             return await self._handle_ping_ack(activity=activity, base_url=base_url)
 
         if activity_type == "Undo":
-            return self._handle_undo(activity=activity)
+            return self._handle_undo(activity=activity, base_url=base_url)
 
         if activity_type == "Delete":
             return self._handle_delete(activity=activity)
@@ -1052,6 +1275,9 @@ class ActivityPubManager:
 
         if activity_type == "Reject":
             return self._handle_reject(activity=activity)
+
+        if activity_type == "Like":
+            return await self._handle_like(activity=activity, base_url=base_url)
 
         return {"processed": True, "activity_type": activity_type, "action": "stored_only"}
 
@@ -1113,10 +1339,32 @@ class ActivityPubManager:
             )
         return {"processed": True, "activity_type": "Accept", "action": "follow_marked_accepted"}
 
-    def _handle_undo(self, activity: dict) -> dict:
-        """Handle Undo. Currently only `Undo(Follow)` (an unfollow)."""
+    def _handle_undo(self, activity: dict, base_url: str) -> dict:
+        """Handle Undo — `Undo(Follow)` (an unfollow) or `Undo(Like)` (un-react)."""
         obj = activity.get("object", {})
-        if not isinstance(obj, dict) or str(obj.get("type", "")) != "Follow":
+        if not isinstance(obj, dict):
+            return {"processed": True, "activity_type": "Undo", "action": "stored_only"}
+        inner_type = str(obj.get("type", ""))
+
+        if inner_type == "Like":
+            target_uri = str(obj.get("object", "")).strip()
+            row = self._local_message_from_object_uri(target_uri, base_url) if target_uri else None
+            if row is None:
+                return {"processed": True, "activity_type": "Undo", "action": "message_not_found"}
+            emoji = str(obj.get("content") or "\U0001F44D")
+            remote_actor_uri = str(activity.get("actor", "")).strip()
+            remote_actor_row = self.database_handler.get_activitypub_actor_by_uri(remote_actor_uri)
+            reactor_user_id = str(remote_actor_row.user_id) if remote_actor_row and remote_actor_row.user_id else None
+            if not reactor_user_id:
+                return {"processed": True, "activity_type": "Undo", "action": "stored_only"}
+            removed = self.messages_manager.remove_reaction(message_id=row.message_id, user_id=reactor_user_id, emoji=emoji)
+            return {
+                "processed": True,
+                "activity_type": "Undo",
+                "action": "reaction_removed" if removed else "reaction_not_found",
+            }
+
+        if inner_type != "Follow":
             return {"processed": True, "activity_type": "Undo", "action": "stored_only"}
 
         remote_actor_uri = str(activity.get("actor", "")).strip()
@@ -1158,23 +1406,74 @@ class ActivityPubManager:
         }
 
     def _handle_delete(self, activity: dict) -> dict:
-        """Handle Delete.
-
-        Acknowledged (already persisted to the inbox activities table by
-        `process_inbox_activity` before dispatch) but not applied to a
-        specific local row: `_handle_create` gives an inbound DM its own
-        locally-generated `message_id`, with no stored mapping back to the
-        remote object's uri this Delete references. Tracking that mapping
-        at Create time is a reasonable follow-up, not done here.
+        """Handle Delete — resolves the target via `remote_object_uri`
+        (persisted by `_handle_create` since the object-tracking fix) and
+        actually removes the local row.
         """
-        return {"processed": True, "activity_type": "Delete", "action": "acknowledged_unmapped"}
+        obj = activity.get("object")
+        object_uri = str(obj.get("id") if isinstance(obj, dict) else obj or "").strip()
+        if not object_uri:
+            return {"processed": True, "activity_type": "Delete", "action": "stored_only"}
+
+        row = self.database_handler.get_message_by_remote_object_uri(object_uri)
+        if row is None:
+            return {"processed": True, "activity_type": "Delete", "action": "message_not_found"}
+
+        self.messages_manager.delete_message(message_id=row.message_id, channel_id=row.channel_id)
+        return {"processed": True, "activity_type": "Delete", "action": "message_deleted"}
 
     def _handle_update(self, activity: dict) -> dict:
-        """Handle Update. Same local-row mapping gap as `_handle_delete`."""
+        """Handle Update(Note) — resolves via `remote_object_uri` and applies
+        the new body to the local row, same mechanism as `_handle_delete`.
+        """
         obj = activity.get("object", {})
         if not isinstance(obj, dict) or str(obj.get("type", "")) != "Note":
             return {"processed": True, "activity_type": "Update", "action": "stored_only"}
-        return {"processed": True, "activity_type": "Update", "action": "acknowledged_unmapped"}
+
+        object_uri = str(obj.get("id") or "").strip()
+        if not object_uri:
+            return {"processed": True, "activity_type": "Update", "action": "stored_only"}
+
+        row = self.database_handler.get_message_by_remote_object_uri(object_uri)
+        if row is None:
+            return {"processed": True, "activity_type": "Update", "action": "message_not_found"}
+
+        new_content = self._clean_html_to_text(str(obj.get("content", "")))
+        try:
+            self.messages_manager.edit_message(
+                message_id=row.message_id, editor_user_id=str(row.sender_id), new_body=new_content
+            )
+        except (PermissionError, ValueError) as exc:
+            logger.warning(f"Inbound Update could not be applied to {row.message_id}: {exc}")
+            return {"processed": True, "activity_type": "Update", "action": "edit_rejected"}
+        return {"processed": True, "activity_type": "Update", "action": "message_updated"}
+
+    async def _handle_like(self, activity: dict, base_url: str) -> dict:
+        """Handle Like — a remote peer reacting to a message of ours.
+
+        The emoji rides in a non-standard `content` field (Pufferblow
+        reactions are free-form strings, not the fixed `Like` semantic);
+        absent that, defaults to a thumbs-up. Only resolves against our own
+        deterministic object ids (`_local_message_from_object_uri`) — a
+        remote can only React to something WE sent them, never to their own
+        message via this path.
+        """
+        obj = activity.get("object")
+        object_uri = str(obj.get("id") if isinstance(obj, dict) else obj or "").strip()
+        if not object_uri:
+            return {"processed": True, "activity_type": "Like", "action": "stored_only"}
+
+        row = self._local_message_from_object_uri(object_uri, base_url)
+        if row is None:
+            return {"processed": True, "activity_type": "Like", "action": "message_not_found"}
+
+        emoji = str((activity.get("content") if isinstance(activity, dict) else None) or "\U0001F44D")
+        remote_actor_uri = str(activity.get("actor", "")).strip()
+        remote_actor = await self.fetch_remote_actor(actor_uri=remote_actor_uri)
+        reactor_user_id = self._ensure_remote_shadow_user(remote_actor=remote_actor)
+
+        self.messages_manager.add_reaction(message_id=row.message_id, user_id=reactor_user_id, emoji=emoji)
+        return {"processed": True, "activity_type": "Like", "action": "reaction_added"}
 
     async def _handle_create(self, activity: dict, base_url: str) -> dict:
         """Handle create."""
@@ -1217,6 +1516,21 @@ class ActivityPubManager:
             elif isinstance(item, dict) and item.get("url"):
                 attachments.append(str(item["url"]))
 
+        # Resolve inReplyTo back to a local row when it points at something
+        # addressable via `_object_uri_for_message` (anything we've sent or
+        # received before) — None otherwise, same best-effort posture as
+        # everywhere else that crosses the remote-object-id boundary.
+        reply_to_uri = str(obj.get("inReplyTo") or "").strip()
+        reply_to_message_id = None
+        if reply_to_uri:
+            parent = self.database_handler.get_message_by_remote_object_uri(reply_to_uri)
+            if parent is None:
+                parent = self._local_message_from_object_uri(reply_to_uri, base_url)
+            if parent is not None:
+                reply_to_message_id = parent.message_id
+
+        remote_object_uri = str(obj.get("id") or "").strip() or None
+
         delivered = 0
         for target in local_targets:
             conversation_id = obj.get("conversation") or self._conversation_id(
@@ -1228,6 +1542,8 @@ class ActivityPubManager:
                 message=text_message,
                 attachments=attachments,
                 sent_at=str(obj.get("published") or ""),
+                reply_to_message_id=reply_to_message_id,
+                remote_object_uri=remote_object_uri,
             )
             await self.websockets_manager.broadcast_to_user(
                 user_id=str(target.user_id),
@@ -1239,6 +1555,7 @@ class ActivityPubManager:
                     "message": text_message,
                     "sent_at": message_obj.sent_at.isoformat() if message_obj.sent_at else None,
                     "attachments": attachments,
+                    "reply_to_message_id": reply_to_message_id,
                     "federated": True,
                     "remote_actor_uri": remote_actor.actor_uri,
                 },

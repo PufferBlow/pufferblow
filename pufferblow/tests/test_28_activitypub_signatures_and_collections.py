@@ -264,23 +264,45 @@ def test_ordered_collection_page_omits_next_on_last_page():
 
 
 class _FakeFollowDatabaseHandler:
-    """Just enough surface for the Undo/Reject handlers' follow-row deletion."""
+    """Just enough surface for the Undo/Reject/Delete/Update/Like handlers."""
 
     def __init__(self):
         self.deleted: list[tuple[str, str]] = []
         self.delete_returns = True
+        self.message_by_remote_uri: dict[str, SimpleNamespace] = {}
+        self.actor_by_uri: dict[str, SimpleNamespace] = {}
+        self.edited: list[tuple[str, str, str]] = []
+        self.deleted_messages: list[tuple[str, str | None]] = []
 
     def delete_activitypub_follow(self, local_actor_uri: str, remote_actor_uri: str) -> bool:
         self.deleted.append((local_actor_uri, remote_actor_uri))
         return self.delete_returns
 
+    def get_message_by_remote_object_uri(self, remote_object_uri: str):
+        return self.message_by_remote_uri.get(remote_object_uri)
+
+    def get_activitypub_actor_by_uri(self, actor_uri: str):
+        return self.actor_by_uri.get(actor_uri)
+
+    def get_message_by_id(self, message_id: str):
+        # `_local_message_from_object_uri` resolves our own deterministic
+        # ids straight back through here in the real implementation.
+        return self._local_messages.get(message_id) if hasattr(self, "_local_messages") else None
+
 
 def _make_manager_with_fake_follow_db() -> tuple[ap_module.ActivityPubManager, _FakeFollowDatabaseHandler]:
     handler = _FakeFollowDatabaseHandler()
+    fake_messages_manager = SimpleNamespace(
+        delete_message=lambda message_id, channel_id: handler.deleted_messages.append((message_id, channel_id)),
+        edit_message=lambda message_id, editor_user_id, new_body: handler.edited.append(
+            (message_id, editor_user_id, new_body)
+        ),
+        add_reaction=lambda message_id, user_id, emoji: True,
+    )
     manager = ap_module.ActivityPubManager(
         database_handler=handler,  # type: ignore[arg-type]
         user_manager=SimpleNamespace(),  # type: ignore[arg-type]
-        messages_manager=SimpleNamespace(),  # type: ignore[arg-type]
+        messages_manager=fake_messages_manager,  # type: ignore[arg-type]
         websockets_manager=SimpleNamespace(),  # type: ignore[arg-type]
     )
     return manager, handler
@@ -297,19 +319,46 @@ def test_handle_undo_follow_removes_the_follow_row():
                 "actor": "https://remote.test/users/alice",
                 "object": "https://local.test/ap/users/1",
             },
-        }
+        },
+        base_url="https://local.test",
     )
     assert result["action"] == "follow_removed"
     assert handler.deleted == [("https://local.test/ap/users/1", "https://remote.test/users/alice")]
 
 
-def test_handle_undo_ignores_non_follow_objects():
+def test_handle_undo_ignores_non_follow_non_like_objects():
     manager, handler = _make_manager_with_fake_follow_db()
     result = manager._handle_undo(
-        activity={"type": "Undo", "actor": "https://remote.test/users/alice", "object": {"type": "Like"}}
+        activity={"type": "Undo", "actor": "https://remote.test/users/alice", "object": {"type": "Announce"}},
+        base_url="https://local.test",
     )
     assert result["action"] == "stored_only"
     assert handler.deleted == []
+
+
+def test_handle_undo_like_removes_the_reaction():
+    manager, handler = _make_manager_with_fake_follow_db()
+    handler._local_messages = {"msg1": SimpleNamespace(message_id="msg1")}
+    handler.actor_by_uri["https://remote.test/users/alice"] = SimpleNamespace(user_id="alice-user-id")
+    removed_calls = []
+    manager.messages_manager.remove_reaction = lambda message_id, user_id, emoji: (
+        removed_calls.append((message_id, user_id, emoji)) or True
+    )
+
+    result = manager._handle_undo(
+        activity={
+            "type": "Undo",
+            "actor": "https://remote.test/users/alice",
+            "object": {
+                "type": "Like",
+                "content": "\U0001F44D",
+                "object": "https://local.test/ap/objects/msg1",
+            },
+        },
+        base_url="https://local.test",
+    )
+    assert result["action"] == "reaction_removed"
+    assert removed_calls == [("msg1", "alice-user-id", "\U0001F44D")]
 
 
 def test_handle_reject_follow_removes_the_outgoing_follow_row():
@@ -342,18 +391,32 @@ def test_handle_reject_reports_not_found_when_no_row_existed():
     assert result["action"] == "follow_not_found"
 
 
-def test_handle_delete_is_acknowledged_but_unmapped():
-    manager, _ = _make_manager_with_fake_follow_db()
+def test_handle_delete_resolves_via_remote_object_uri_and_deletes():
+    manager, handler = _make_manager_with_fake_follow_db()
+    row = SimpleNamespace(message_id="msg1", channel_id=None)
+    handler.message_by_remote_uri["https://remote.test/objects/123"] = row
+
     result = manager._handle_delete(activity={"type": "Delete", "object": "https://remote.test/objects/123"})
-    assert result == {"processed": True, "activity_type": "Delete", "action": "acknowledged_unmapped"}
+    assert result["action"] == "message_deleted"
+    assert handler.deleted_messages == [("msg1", None)]
 
 
-def test_handle_update_note_is_acknowledged_but_unmapped():
-    manager, _ = _make_manager_with_fake_follow_db()
+def test_handle_delete_reports_not_found_when_unresolvable():
+    manager, _handler = _make_manager_with_fake_follow_db()
+    result = manager._handle_delete(activity={"type": "Delete", "object": "https://remote.test/objects/unknown"})
+    assert result["action"] == "message_not_found"
+
+
+def test_handle_update_note_resolves_and_edits():
+    manager, handler = _make_manager_with_fake_follow_db()
+    row = SimpleNamespace(message_id="msg1", channel_id=None, sender_id="alice-user-id")
+    handler.message_by_remote_uri["https://remote.test/objects/123"] = row
+
     result = manager._handle_update(
         activity={"type": "Update", "object": {"type": "Note", "id": "https://remote.test/objects/123", "content": "edited"}}
     )
-    assert result["action"] == "acknowledged_unmapped"
+    assert result["action"] == "message_updated"
+    assert handler.edited == [("msg1", "alice-user-id", "edited")]
 
 
 def test_handle_update_ignores_non_note_objects():
@@ -386,3 +449,96 @@ def test_process_inbox_activity_dispatches_undo_delete_update_reject(monkeypatch
         )
     )
     assert result["action"] == "follow_removed"
+
+
+# --- Like (inbound) ----------------------------------------------------------
+
+
+def test_handle_like_adds_a_reaction_to_our_own_message():
+    manager, handler = _make_manager_with_fake_follow_db()
+    handler._local_messages = {"msg1": SimpleNamespace(message_id="msg1")}
+    added_calls = []
+    manager.messages_manager.add_reaction = lambda message_id, user_id, emoji: added_calls.append(
+        (message_id, user_id, emoji)
+    )
+
+    async def fake_fetch_remote_actor(*, actor_uri: str):
+        return SimpleNamespace(actor_uri=actor_uri, user_id=None)
+
+    manager.fetch_remote_actor = fake_fetch_remote_actor
+    manager._ensure_remote_shadow_user = lambda remote_actor: "shadow-user-id"
+
+    result = asyncio.run(
+        manager._handle_like(
+            activity={
+                "type": "Like",
+                "actor": "https://remote.test/users/alice",
+                "content": "\U0001F389",
+                "object": {"id": "https://local.test/ap/objects/msg1", "type": "Note"},
+            },
+            base_url="https://local.test",
+        )
+    )
+    assert result["action"] == "reaction_added"
+    assert added_calls == [("msg1", "shadow-user-id", "\U0001F389")]
+
+
+def test_handle_like_reports_not_found_for_unresolvable_object():
+    manager, _handler = _make_manager_with_fake_follow_db()
+
+    async def fake_fetch_remote_actor(*, actor_uri: str):
+        return SimpleNamespace(actor_uri=actor_uri, user_id=None)
+
+    manager.fetch_remote_actor = fake_fetch_remote_actor
+
+    result = asyncio.run(
+        manager._handle_like(
+            activity={
+                "type": "Like",
+                "actor": "https://remote.test/users/alice",
+                "object": {"id": "https://remote.test/their-own-objects/999", "type": "Note"},
+            },
+            base_url="https://local.test",
+        )
+    )
+    assert result["action"] == "message_not_found"
+
+
+# --- DM conversation-membership authorization --------------------------------
+
+
+def test_user_can_access_dm_message_true_for_sender():
+    manager, _handler = _make_manager_with_fake_follow_db()
+    row = SimpleNamespace(conversation_id="conv-1", sender_id="alice-user-id")
+    assert manager.user_can_access_dm_message("alice-user-id", row, "https://local.test") is True
+
+
+def test_user_can_access_dm_message_true_for_the_other_participant():
+    manager, handler = _make_manager_with_fake_follow_db()
+    row = SimpleNamespace(conversation_id=None, sender_id="alice-user-id")
+    # Compute the real expected conversation id the same way the manager
+    # will, so this test doesn't need to fake out the hash function too.
+    sender_actor_uri = "https://local.test/ap/users/alice-user-id"
+    bob_actor_uri = "https://local.test/ap/users/bob-user-id"
+    row.conversation_id = manager._conversation_id(sender_actor_uri, bob_actor_uri)
+
+    manager.ensure_local_actor = lambda user_id, base_url: SimpleNamespace(actor_uri=bob_actor_uri)
+    handler.get_activitypub_actor_by_user_id = lambda user_id: None  # sender resolves via the local uri fallback
+
+    assert manager.user_can_access_dm_message("bob-user-id", row, "https://local.test") is True
+
+
+def test_user_can_access_dm_message_false_for_an_uninvolved_user():
+    manager, handler = _make_manager_with_fake_follow_db()
+    row = SimpleNamespace(
+        conversation_id=manager._conversation_id(
+            "https://local.test/ap/users/alice-user-id", "https://local.test/ap/users/bob-user-id"
+        ),
+        sender_id="alice-user-id",
+    )
+    manager.ensure_local_actor = lambda user_id, base_url: SimpleNamespace(
+        actor_uri=f"https://local.test/ap/users/{user_id}"
+    )
+    handler.get_activitypub_actor_by_user_id = lambda user_id: None
+
+    assert manager.user_can_access_dm_message("mallory-user-id", row, "https://local.test") is False

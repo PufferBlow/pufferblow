@@ -37,7 +37,14 @@ _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 def _build_config(database_url: str) -> Config:
     config = Config()
     config.set_main_option("script_location", str(_MIGRATIONS_DIR))
-    config.set_main_option("sqlalchemy.url", database_url)
+    # `Config` stores values in a `ConfigParser`, which treats `%` as its
+    # interpolation escape char — a literal `%` in the URL (a Windows
+    # SQLite temp path gets URL-encoded to `%3A%5C...`; a Postgres password
+    # can legitimately contain a URL-encoded `%xx` sequence too) would
+    # otherwise raise `ValueError: invalid interpolation syntax` right
+    # here, before a single migration runs. `%%` round-trips back to `%`
+    # on read, so this is lossless.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     return config
 
 

@@ -112,6 +112,33 @@ class Messages(Base):
         nullable=True,
     )
 
+    # Reply threading. Self-referential — a reply's target can be any
+    # message (channel or DM). ``SET NULL`` so deleting the parent doesn't
+    # cascade-delete every reply to it.
+    reply_to_message_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("messages.message_id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    # Forwarding. Same self-FK shape as reply_to_message_id — set when this
+    # message was created by forwarding another one (channel-to-DM or
+    # DM-to-DM; see ActivityPubManager.forward_message).
+    forwarded_from_message_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("messages.message_id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    # The ORIGINAL ActivityPub object id for a message that arrived via an
+    # inbound Create (i.e. a remote peer authored it) — null for anything
+    # authored locally. This is what lets a later inbound Update/Delete/Like
+    # resolve back to this row; see `_handle_update`/`_handle_delete`/
+    # `_handle_like` in activitypub_manager.py.
+    remote_object_uri: Mapped[str | None] = mapped_column(
+        String, index=True, nullable=True
+    )
+
     def to_dict(self) -> dict:
         """Convert message object to dictionary format"""
         return {
@@ -132,6 +159,9 @@ class Messages(Base):
             "last_edited_at": (
                 self.last_edited_at.isoformat() if self.last_edited_at else None
             ),
+            "reply_to_message_id": self.reply_to_message_id,
+            "forwarded_from_message_id": self.forwarded_from_message_id,
+            "remote_object_uri": self.remote_object_uri,
         }
 
     def __repr__(self) -> str:

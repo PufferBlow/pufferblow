@@ -492,6 +492,24 @@ class DirectMessageSendRequest(BaseModel):
             "StickerRenderer."
         ),
     )
+    reply_to_message_id: str | None = Field(
+        default=None,
+        description="message_id this is a reply to, if any. Federated as the Note's inReplyTo.",
+    )
+
+
+class DirectMessageForwardRequest(BaseModel):
+    """Forward an existing message (channel or DM) into a DM."""
+
+    auth_token: str = Field(min_length=1)
+    peer: str = Field(min_length=1, description="Same peer formats as DirectMessageSendRequest.peer")
+
+
+class DirectMessageReactionRequest(BaseModel):
+    """Add/remove a reaction on a DM message."""
+
+    auth_token: str = Field(min_length=1)
+    emoji: str = Field(min_length=1, max_length=64)
 
 
 class DirectMessageLoadQuery(BaseModel):
