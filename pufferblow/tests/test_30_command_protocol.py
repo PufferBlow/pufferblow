@@ -645,7 +645,6 @@ async def test_reactions_publish_events_and_repeat_adds_are_quiet(client: TestCl
 
     added = await _run(ctx, _command("reaction.add", {"channel_id": channel, "message_id": message_id, "emoji": "👍"}))
     assert added["data"]["result"]["changed"] is True
-    print("SOCK", [(f.get("type"), f.get("name")) for f in sock.sent])
     assert sock.events("reaction.added")[0]["data"]["reactions"][0]["count"] == 1
 
     again = await _run(ctx, _command("reaction.add", {"channel_id": channel, "message_id": message_id, "emoji": "👍"}))

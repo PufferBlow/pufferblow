@@ -3845,6 +3845,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     emoji=emoji,
                 )
             )
+            session.commit()
         return True
 
     def remove_message_reaction(
@@ -3862,6 +3863,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 )
                 .delete(synchronize_session=False)
             )
+            session.commit()
         return bool(deleted)
 
     def get_reactions_for_messages(
@@ -3893,6 +3895,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         """Insert a single notification row."""
         with self.database_session() as session:
             session.add(notification)
+            session.commit()
 
     def create_notifications_bulk(
         self, notifications: list[Notifications]
@@ -3902,6 +3905,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             return
         with self.database_session() as session:
             session.add_all(notifications)
+            session.commit()
 
         # Drop the unread-count cache for every user that just got a new
         # notification so their next badge read reflects the increase.
@@ -4044,6 +4048,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     synchronize_session=False,
                 )
             )
+            session.commit()
 
         # All-read collapses the unread count to zero; drop the cache
         # so the next read reseeds (rather than relying on a manual
@@ -4150,6 +4155,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 )
                 .delete(synchronize_session=False)
             )
+            session.commit()
         return bool(deleted)
 
     def bulk_set_channel_mute(
@@ -4213,6 +4219,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     )
                     .delete(synchronize_session=False)
                 )
+            session.commit()
         return int(touched or 0)
 
     def is_channel_muted_for_user(self, user_id: str, channel_id: str) -> bool:
@@ -4543,14 +4550,26 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         """
         with self.database_session() as session:
             stmts = [
-                update(Channels)
-                .where(Channels.channel_id == channel_id)
-                .values(
-                    messages_ids=text("array_remove(messages_ids, '%s')" % message_id)
-                ),
                 delete(Messages).where(Messages.message_id == message_id),
                 delete(Keys).where(Keys.message_id == message_id),
             ]
+
+            if self._is_sqlite():
+                # SQLite has no array_remove(); edit the list in Python instead.
+                channel = session.get(Channels, channel_id)
+                if channel is not None:
+                    channel.messages_ids = [
+                        mid for mid in (channel.messages_ids or []) if str(mid) != str(message_id)
+                    ]
+            else:
+                stmts.insert(
+                    0,
+                    update(Channels)
+                    .where(Channels.channel_id == channel_id)
+                    .values(
+                        messages_ids=text("array_remove(messages_ids, '%s')" % message_id)
+                    ),
+                )
 
             for stmt in stmts:
                 session.execute(stmt)

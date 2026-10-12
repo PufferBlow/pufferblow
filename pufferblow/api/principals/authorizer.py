@@ -60,16 +60,27 @@ class Authorizer:
         self.require_channel_access(principal, channel_id)
         self.require_not_timed_out(principal, action)
 
-    def require_edit(self, principal: Principal, channel_id: str, sender_id: str) -> None:
+    def require_edit(
+        self, principal: Principal, channel_id: str, sender_id: str, sender_bot_id: str | None = None
+    ) -> None:
         """Only the author may rewrite a message; moderators delete, they do not edit.
 
         ``sender_id`` is the row's ``sender_id`` column, which for a bot-authored
         message is the bot's owner (bots have no row of their own for that FK to
         target) — so this compares against ``accountable_user_id``, not ``id``,
         and a user's own id is unaffected since the two are the same for them.
+
+        When ``sender_bot_id`` is set the bot is the author: only that bot may edit,
+        not its owner, and a bot never edits a message a person wrote.
         """
         self.require_send(principal, channel_id, "edit messages")
-        if str(sender_id) != principal.accountable_user_id:
+        author_is_bot = bool(sender_bot_id)
+        is_author = (
+            principal.is_bot and author_is_bot and principal.id.split(":", 1)[1] == str(sender_bot_id)
+            if (principal.is_bot or author_is_bot)
+            else str(sender_id) == principal.accountable_user_id
+        )
+        if not is_author:
             raise ApiError(
                 ErrorCode.AUTH_PRIVILEGE_DENIED,
                 user_message="Only the original author can edit this message.",

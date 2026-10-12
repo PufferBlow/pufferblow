@@ -238,7 +238,7 @@ class MessageService:
 
         self._authz.require_send(principal, channel_id, "edit messages")
         row = self._load_message(channel_id, message_id)
-        self._authz.require_edit(principal, channel_id, str(row.sender_id))
+        self._authz.require_edit(principal, channel_id, str(row.sender_id), getattr(row, "sender_bot_id", None))
 
         result = self._messages.edit_message(
             message_id=message_id, editor_user_id=principal.accountable_user_id, new_body=cleaned
