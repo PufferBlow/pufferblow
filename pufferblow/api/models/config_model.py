@@ -108,6 +108,12 @@ class Config:
     S3_SECRET_KEY: str | None = None
     S3_ENDPOINT_URL: str | None = None
 
+    # ActivityPub federation. Signatures are required by default — most
+    # real-world peers (Mastodon/Misskey/Pleroma) reject or heavily distrust
+    # unsigned deliveries, so an operator has to opt OUT rather than in.
+    # The escape hatch exists for a peer that misbehaves during rollout.
+    ACTIVITYPUB_REQUIRE_HTTP_SIGNATURES: bool = True
+
     # Database backup settings
     BACKUP_ENABLED: bool = False
     BACKUP_MODE: str = "file"  # "file" or "mirror"

@@ -16,6 +16,7 @@ from pufferblow.api.schemas import (
     DirectMessageSendRequest,
 )
 from pufferblow.core.bootstrap import api_initializer
+from pufferblow.core.constants import VERSION
 
 router = APIRouter()
 
@@ -23,6 +24,42 @@ router = APIRouter()
 def _request_base_url(request: Request) -> str:
     """Request base url."""
     return str(request.base_url).rstrip("/")
+
+
+@router.get("/.well-known/nodeinfo", status_code=200)
+async def nodeinfo_discovery(request: Request):
+    """NodeInfo discovery document — points probing peers at `/nodeinfo/2.0`.
+
+    Many federated servers check this before trusting a peer at all, so its
+    absence (not just a wrong answer) is itself a signal some crawlers act
+    on. No auth, no per-request computation — just a pointer.
+    """
+    base_url = _request_base_url(request)
+    return {
+        "links": [
+            {
+                "rel": "http://nodeinfo.diaspora.software/ns/schema/2.0",
+                "href": f"{base_url}/nodeinfo/2.0",
+            }
+        ]
+    }
+
+
+@router.get("/nodeinfo/2.0", status_code=200)
+async def nodeinfo_document():
+    """NodeInfo 2.0 document. No config toggle for open registrations exists
+    yet — signup is unconditionally open today, so that's what's reported.
+    """
+    total_users = api_initializer.database_handler.count_users()
+    return {
+        "version": "2.0",
+        "software": {"name": "pufferblow", "version": VERSION},
+        "protocols": ["activitypub"],
+        "services": {"inbound": [], "outbound": []},
+        "openRegistrations": True,
+        "usage": {"users": {"total": total_users}},
+        "metadata": {},
+    }
 
 
 @router.get("/.well-known/webfinger", status_code=200)
@@ -108,6 +145,49 @@ async def get_actor_outbox(
     }
 
 
+async def _verify_and_parse_inbox_request(request: Request) -> dict:
+    """Read the raw body, verify its HTTP Signature, then parse it as JSON.
+
+    Raw bytes are read first (and parsed from, not re-serialized) because
+    the `Digest` check must hash exactly what the sender hashed — a
+    reparse-then-`json.dumps()` round trip can reorder keys or change
+    whitespace and silently break verification.
+
+    Raises `HTTPException(401)` on a bad/missing signature. The response
+    never says which part failed — same posture as the rest of this
+    codebase's auth errors.
+    """
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Activity must be a JSON object")
+
+    claimed_actor_uri = str(payload.get("actor", "")).strip()
+    if not claimed_actor_uri:
+        raise HTTPException(status_code=400, detail="Activity must include 'actor'")
+
+    path = request.url.path
+    if request.url.query:
+        path = f"{path}?{request.url.query}"
+
+    try:
+        await api_initializer.activitypub_manager.verify_inbox_signature(
+            method=request.method,
+            path=path,
+            headers=request.headers,
+            raw_body=raw_body,
+            claimed_actor_uri=claimed_actor_uri,
+        )
+    except ValueError as exc:
+        logger.warning(f"ActivityPub inbox signature rejected: {exc}")
+        raise HTTPException(status_code=401, detail="Signature verification failed")
+
+    return payload
+
+
 @router.post("/ap/users/{user_id}/inbox", status_code=202)
 async def actor_inbox(user_id: str, request: Request):
     """
@@ -121,7 +201,7 @@ async def actor_inbox(user_id: str, request: Request):
     except Exception:
         raise HTTPException(status_code=404, detail="Local actor not found")
 
-    payload = await request.json()
+    payload = await _verify_and_parse_inbox_request(request)
     result = await api_initializer.activitypub_manager.process_inbox_activity(
         activity=payload,
         base_url=base_url,
@@ -136,7 +216,7 @@ async def shared_inbox(request: Request):
     Shared inbox endpoint for federated delivery.
     """
     base_url = _request_base_url(request)
-    payload = await request.json()
+    payload = await _verify_and_parse_inbox_request(request)
     result = await api_initializer.activitypub_manager.process_inbox_activity(
         activity=payload,
         base_url=base_url,

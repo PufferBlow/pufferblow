@@ -226,6 +226,14 @@ class ConfigHandler:
                 "PUFFERBLOW_MEMCACHE_PORT", int(config.MEMCACHE_PORT)
             )
 
+        # ActivityPub settings
+        activitypub_section = config_toml.get("activitypub", {})
+        if isinstance(activitypub_section, dict):
+            config.ACTIVITYPUB_REQUIRE_HTTP_SIGNATURES = _config_bool(
+                activitypub_section.get("require_http_signatures"),
+                config.ACTIVITYPUB_REQUIRE_HTTP_SIGNATURES,
+            )
+
         # Backup settings
         backup_section = config_toml.get("backup", {})
         if isinstance(backup_section, dict):

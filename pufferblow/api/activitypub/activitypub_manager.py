@@ -275,7 +275,9 @@ class ActivityPubManager:
             response.raise_for_status()
             return response.json()
 
-    async def _http_post_json(self, url: str, payload: dict, timeout: float = 10.0) -> None:
+    async def _http_post_json(
+        self, url: str, payload: dict, timeout: float = 10.0, signing_actor: object | None = None
+    ) -> None:
         """POST an ActivityPub payload with retry-on-transient-failure.
 
         Retries up to :data:`OUTBOUND_POST_MAX_ATTEMPTS` times on network
@@ -284,6 +286,12 @@ class ActivityPubManager:
         layer; retrying won't help). The final exception is re-raised so
         callers can decide whether to surface to the user, persist for a
         background retry, or just log.
+
+        ``signing_actor`` is the local actor row sending this activity (it
+        has ``actor_uri`` + ``private_key_pem``). When given, the request is
+        signed per HTTP Signatures — most real-world ActivityPub peers
+        (Mastodon/Misskey/Pleroma) reject or heavily distrust unsigned
+        deliveries, so every real send passes this.
         """
         headers = {
             "Content-Type": "application/activity+json",
@@ -291,6 +299,18 @@ class ActivityPubManager:
             "User-Agent": _ACTIVITYPUB_USER_AGENT,
         }
         body = json.dumps(payload)
+        if signing_actor is not None and getattr(signing_actor, "private_key_pem", None):
+            from pufferblow.api.activitypub.http_signatures import key_id_for_actor, sign_request
+
+            headers.update(
+                sign_request(
+                    method="POST",
+                    url=url,
+                    body=body.encode("utf-8"),
+                    private_key_pem=signing_actor.private_key_pem,
+                    key_id=key_id_for_actor(signing_actor.actor_uri),
+                )
+            )
         last_error: Exception | None = None
 
         for attempt in range(1, OUTBOUND_POST_MAX_ATTEMPTS + 1):
@@ -612,7 +632,7 @@ class ActivityPubManager:
         )
 
         delivery_target = remote_peer.shared_inbox_uri or remote_peer.inbox_uri
-        await self._http_post_json(url=delivery_target, payload=activity)
+        await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
         return {
             "activity_id": activity_uri,
             "target_actor": remote_peer.actor_uri,
@@ -735,7 +755,7 @@ class ActivityPubManager:
             object_uri=object_uri,
         )
         delivery_target = peer_info.shared_inbox_uri or peer_info.inbox_uri
-        await self._http_post_json(url=delivery_target, payload=activity)
+        await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
         return {
             "conversation_id": conversation_id,
             "message_id": str(local_message.message_id),
@@ -744,6 +764,46 @@ class ActivityPubManager:
             "delivered_remote": True,
             "delivery_target": delivery_target,
         }
+
+    async def verify_inbox_signature(
+        self, *, method: str, path: str, headers, raw_body: bytes, claimed_actor_uri: str
+    ) -> None:
+        """Verify an inbound activity's HTTP Signature, or raise `ValueError`.
+
+        No-ops when `[activitypub] require_http_signatures` is turned off
+        (the operator escape hatch for a misbehaving peer). Resolves the
+        signer's public key via the existing `fetch_remote_actor` cache —
+        the same lookup `_handle_follow`/`_handle_create` already do, so
+        this adds no new network call on top of what inbound handling
+        already does for a previously-unseen actor.
+
+        Deliberately does not disclose *which* check failed — never to the
+        remote caller, and the exception message here is for logs only.
+        """
+        from pufferblow.api.activitypub.http_signatures import (
+            SignatureVerificationError,
+            verify_request,
+        )
+
+        config = getattr(self.database_handler, "config", None)
+        if config is not None and not getattr(config, "ACTIVITYPUB_REQUIRE_HTTP_SIGNATURES", True):
+            return
+
+        try:
+            remote_actor = await self.fetch_remote_actor(actor_uri=claimed_actor_uri)
+        except Exception as exc:
+            raise ValueError(f"could not resolve signer actor: {exc}") from exc
+
+        try:
+            verify_request(
+                method=method,
+                path=path,
+                headers=headers,
+                body=raw_body,
+                public_key_pem=remote_actor.public_key_pem,
+            )
+        except SignatureVerificationError as exc:
+            raise ValueError(str(exc)) from exc
 
     async def process_inbox_activity(
         self, activity: dict, base_url: str, target_actor_uri: str | None = None
@@ -841,6 +901,7 @@ class ActivityPubManager:
         await self._http_post_json(
             url=remote_actor.shared_inbox_uri or remote_actor.inbox_uri,
             payload=accept_activity,
+            signing_actor=local_actor,
         )
         return {"processed": True, "activity_type": "Follow", "action": "accepted"}
 
