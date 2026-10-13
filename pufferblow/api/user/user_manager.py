@@ -121,6 +121,11 @@ class UserManager:
             >>> print(user.status)
             'online'
         """
+        from pufferblow.api.notifications.notifications_manager import RESERVED_MENTION_NAMES
+
+        if username.strip().lower() in RESERVED_MENTION_NAMES:
+            raise ValueError(f"The username '{username}' is reserved.")
+
         new_user = Users()
 
         user_id = self._generate_user_id(username=username)

@@ -1,6 +1,6 @@
 """Notification recording + delivery surface.
 
-v1.0 covers exactly one notification class: ``mention``. A message that
+v1.0 covers two notification classes: ``mention`` and ``reply``. A message that
 includes ``@<existing-username>`` produces one Notifications row per resolved
 recipient (excluding the sender). The route layer is responsible for calling
 :meth:`record_mentions_for_message` after a successful send.
@@ -30,7 +30,18 @@ from pufferblow.api.database.tables.notifications import Notifications
 _MENTION_PATTERN = re.compile(r"(?:^|(?<=\s))@([A-Za-z0-9._-]{1,32})")
 
 
-def extract_mention_usernames(content: str) -> list[str]:
+#: Mentions that are not people. ``@everyone`` pings the whole channel and is only honoured for
+#: members who may moderate (see :func:`mentions_everyone`); nobody can sign up with this name.
+EVERYONE_MENTION = "everyone"
+RESERVED_MENTION_NAMES = frozenset({EVERYONE_MENTION})
+
+
+def mentions_everyone(content: str) -> bool:
+    """Whether ``content`` contains ``@everyone`` as its own word."""
+    return EVERYONE_MENTION in {u.lower() for u in extract_mention_usernames(content, include_reserved=True)}
+
+
+def extract_mention_usernames(content: str, *, include_reserved: bool = False) -> list[str]:
     """Return distinct usernames mentioned in ``content``, preserving order.
 
     The matcher is conservative (32 chars max, lowercase ascii + . _ -). It
@@ -50,6 +61,8 @@ def extract_mention_usernames(content: str) -> list[str]:
             continue
         if cleaned in seen:
             continue
+        if cleaned.lower() in RESERVED_MENTION_NAMES and not include_reserved:
+            continue
         seen.add(cleaned)
         ordered.append(cleaned)
     return ordered
@@ -63,6 +76,53 @@ class NotificationsManager:
         self.database_handler = database_handler
 
     # --- Recording -------------------------------------------------------
+
+    def _user_id_value(self, user_id):
+        """A user id in the form the notifications table binds: a string on SQLite, a UUID elsewhere."""
+        if self.database_handler._is_sqlite():
+            return str(user_id)
+        return user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+
+    def record_everyone_for_message(
+        self,
+        *,
+        sender_user_id: str,
+        channel_id: str,
+        message_id: str,
+        recipient_ids: list[str],
+        already_notified: set[str] | None = None,
+    ) -> list[Notifications]:
+        """One ``mention`` notification for each of ``recipient_ids`` ( the people who can read the
+        channel), except the sender, anyone already pinged by name for this message, and anyone who
+        muted the channel. The caller decides who may use ``@everyone`` and who can read the channel.
+        """
+        try:
+            muted = self.database_handler.muted_user_ids_for_channel(channel_id=channel_id)
+        except Exception:
+            logger.exception(f"Failed to read mute prefs for channel={channel_id}; notifying everyone")
+            muted = set()
+
+        skip = {str(sender_user_id), *(already_notified or set()), *muted}
+        rows = [
+            Notifications(
+                notification_id=str(uuid.uuid4()),
+                user_id=self._user_id_value(recipient),
+                type="mention",
+                actor_user_id=self._user_id_value(sender_user_id),
+                channel_id=channel_id,
+                message_id=message_id,
+            )
+            for recipient in dict.fromkeys(str(r) for r in recipient_ids)
+            if recipient not in skip
+        ]
+        if not rows:
+            return []
+        try:
+            self.database_handler.create_notifications_bulk(rows)
+        except Exception:
+            logger.exception(f"Failed to persist {len(rows)} @everyone notifications for message_id={message_id}")
+            return []
+        return rows
 
     def record_mentions_for_message(
         self,
@@ -133,9 +193,9 @@ class NotificationsManager:
             rows.append(
                 Notifications(
                     notification_id=str(uuid.uuid4()),
-                    user_id=user.user_id,
+                    user_id=self._user_id_value(user.user_id),
                     type="mention",
-                    actor_user_id=sender_user_id,
+                    actor_user_id=self._user_id_value(sender_user_id),
                     channel_id=channel_id,
                     message_id=message_id,
                 )
@@ -154,6 +214,55 @@ class NotificationsManager:
                 return []
 
         return rows
+
+    def record_reply_for_message(
+        self,
+        *,
+        sender_user_id: str,
+        channel_id: str,
+        message_id: str,
+        reply_to_message_id: str,
+        already_notified: set[str] | None = None,
+    ) -> list[Notifications]:
+        """Tell the author of the message being replied to that someone answered them.
+
+        One ``reply`` notification for the original author, unless that is the sender, they
+        muted the channel, or ``already_notified`` says they are getting a mention for this very
+        message (one ping per message is enough). Returns the rows persisted, at most one.
+        """
+        try:
+            original = self.database_handler.get_message_by_id(message_id=reply_to_message_id)
+        except Exception:
+            logger.exception(f"Failed to look up the replied-to message {reply_to_message_id}; skipping")
+            return []
+        if original is None or original.sender_id is None:
+            return []
+
+        recipient_id = str(original.sender_id)
+        if recipient_id == str(sender_user_id) or recipient_id in (already_notified or set()):
+            return []
+
+        try:
+            if self.database_handler.is_channel_muted_for_user(user_id=recipient_id, channel_id=channel_id):
+                return []
+        except Exception:
+            # Mute lookup must never block delivery; default to notifying.
+            logger.exception(f"Failed to read mute pref for user={recipient_id} channel={channel_id}")
+
+        row = Notifications(
+            notification_id=str(uuid.uuid4()),
+            user_id=self._user_id_value(original.sender_id),
+            type="reply",
+            actor_user_id=self._user_id_value(sender_user_id),
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        try:
+            self.database_handler.create_notifications_bulk([row])
+        except Exception:
+            logger.exception(f"Failed to persist the reply notification for message_id={message_id}")
+            return []
+        return [row]
 
     # --- Read API --------------------------------------------------------
 

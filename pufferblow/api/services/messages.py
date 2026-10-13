@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 from pufferblow.api.errors import ApiError, ErrorCode
+from pufferblow.api.notifications.notifications_manager import mentions_everyone
 from pufferblow.api.principals.authorizer import Authorizer
 from pufferblow.api.principals.principal import Principal
 from pufferblow.api.protocol.commands import MAX_EMOJI_LENGTH
@@ -30,6 +31,10 @@ from pufferblow.api.protocol.events import (
     DomainEvent,
     message_view,
 )
+
+#: Who may use ``@everyone``: the privilege the owner, administrators and moderators share (and
+#: regular members lack), so it needs no new role data on instances that already exist.
+EVERYONE_PRIVILEGE = "moderate_content"
 
 #: ``(max_message_length, max_total_attachment_mb)``
 MessagePolicy = Callable[[], tuple[int, int]]
@@ -180,7 +185,16 @@ class MessageService:
                 legacy=message_dict,
             )
         ]
-        events.extend(self._mention_events(content, principal.accountable_user_id, channel_id, str(message_obj.message_id)))
+        events.extend(
+            self._mention_events(
+                content,
+                principal.accountable_user_id,
+                channel_id,
+                str(message_obj.message_id),
+                reply_to_message_id=reply_to_message_id or None,
+                may_mention_everyone=principal.has(EVERYONE_PRIVILEGE),
+            )
+        )
 
         return ServiceResult(
             value={"message": message_view(message_dict), "legacy": message_dict},
@@ -211,8 +225,16 @@ class MessageService:
             )
         return resolved
 
-    def _mention_events(self, content: str, sender_id: str, channel_id: str, message_id: str) -> list[DomainEvent]:
-        """Mention notifications are best effort: failing here must never fail the send."""
+    def _mention_events(
+        self,
+        content: str,
+        sender_id: str,
+        channel_id: str,
+        message_id: str,
+        reply_to_message_id: str | None = None,
+        may_mention_everyone: bool = False,
+    ) -> list[DomainEvent]:
+        """Mention and reply notifications are best effort: failing here must never fail the send."""
         if self._notifications is None:
             return []
         events: list[DomainEvent] = []
@@ -220,6 +242,24 @@ class MessageService:
             notifications = self._notifications.record_mentions_for_message(
                 content=content, sender_user_id=sender_id, channel_id=channel_id, message_id=message_id
             )
+            # ``@everyone`` pings every member who can read the channel, but only when the sender may
+            # moderate (owner, admins, moderators). From anyone else it is just text.
+            if may_mention_everyone and mentions_everyone(content):
+                notifications += self._notifications.record_everyone_for_message(
+                    sender_user_id=sender_id,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    recipient_ids=self._everyone_recipients(channel_id),
+                    already_notified={str(n.user_id) for n in notifications},
+                )
+            if reply_to_message_id:
+                notifications += self._notifications.record_reply_for_message(
+                    sender_user_id=sender_id,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    reply_to_message_id=reply_to_message_id,
+                    already_notified={str(n.user_id) for n in notifications},
+                )
             for notification in notifications:
                 frame = self._notifications.serialize_for_broadcast(notification)
                 events.append(
@@ -233,6 +273,13 @@ class MessageService:
         except Exception:
             logger.exception(f"Mention-notification recording failed for message_id={message_id}")
         return events
+
+    def _everyone_recipients(self, channel_id: str) -> list[str]:
+        """Who ``@everyone`` reaches: every member, or in a private channel those allowed to read it."""
+        everyone = [str(user_id) for user_id in self._db.get_users_id()]
+        if not self._channels.is_private(channel_id=channel_id):
+            return everyone
+        return [uid for uid in everyone if "view_private_channels" in self._users.get_user_privileges(user_id=uid)]
 
     # ── edit ───────────────────────────────────────────────────
 

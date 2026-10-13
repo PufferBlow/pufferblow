@@ -4253,6 +4253,19 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             )
         return bool(row and row[0])
 
+    def muted_user_ids_for_channel(self, channel_id: str) -> set[str]:
+        """Ids of everyone who muted ``channel_id`` (one query, for notifying a whole channel)."""
+        with self.database_session() as session:
+            rows = (
+                session.query(NotificationPreferences.user_id)
+                .filter(
+                    NotificationPreferences.channel_id == channel_id,
+                    NotificationPreferences.muted.is_(True),
+                )
+                .all()
+            )
+        return {str(row[0]) for row in rows}
+
     def update_channel_participants(
         self, channel_id: str, participant_ids: list[str]
     ) -> None:
