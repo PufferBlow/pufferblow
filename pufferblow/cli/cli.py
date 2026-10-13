@@ -14,6 +14,7 @@ Command surface is unchanged:
     pufferblow serve            [--log-level N] [--debug] [--dev]
     pufferblow migrate          [--check]
     pufferblow doctor
+    pufferblow seed             [--password PW] [--filler N] [--owner NAME] [--yes]
     pufferblow backup now
     pufferblow backup mirror
     pufferblow storage setup
@@ -154,6 +155,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Read-only health check across DB, schema, storage, and config.",
     )
 
+    # ── seed ─────────────────────────────────────────────────────
+    seed_p = subparsers.add_parser(
+        "seed",
+        help="Fill the instance with sample users, channels and messages (for trying clients).",
+    )
+    seed_p.add_argument("--password", default=None, help="Password for every sample account (default: a well-known demo password).")
+    seed_p.add_argument("--filler", type=int, default=100, help="Extra messages in #random, to try loading older history (default 100).")
+    seed_p.add_argument("--owner", default=None, help="Make this sample user (for example ada) the server owner. Use on a fresh instance only.")
+    seed_p.add_argument("--yes", dest="assume_yes", action="store_true", help="Do not ask for confirmation.")
+
     # ── backup (group) ───────────────────────────────────────────
     backup_p = subparsers.add_parser(
         "backup",
@@ -259,6 +270,17 @@ def _dispatch(args: argparse.Namespace) -> int:
             from pufferblow.cli.commands.doctor import doctor_command
 
             doctor_command()
+            return 0
+
+        if args.command == "seed":
+            from pufferblow.cli.commands.seed import DEFAULT_PASSWORD, seed_command
+
+            seed_command(
+                password=args.password or DEFAULT_PASSWORD,
+                filler=max(0, args.filler),
+                owner=args.owner,
+                assume_yes=args.assume_yes,
+            )
             return 0
 
         if args.command == "backup":

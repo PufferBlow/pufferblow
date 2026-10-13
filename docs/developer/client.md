@@ -27,8 +27,8 @@ documented API is a valid client.
 - **REST API** at `http://<host>:7575/api/v1/*` plus
   `/api/v2/voice/*`. See the
   [API reference](api-reference.md).
-- **WebSocket fanout** at `ws://<host>:7575/ws` (all channels)
-  and `ws://<host>:7575/ws/channels/{channel_id}` (one channel).
+- **WebSocket session** at `ws://<host>:7575/ws?protocol=1` (all channels
+  you can read, plus commands).
 - **Static media** at `http://<host>:7575/storage/{file_hash}`,
   decrypted on the fly by `StorageManager`.
 - **Voice signaling** at `ws://<host>:8787/rtc/v1/ws` (via the
@@ -138,6 +138,29 @@ sensitive that should never be stored, set a short
 not persist it. The current implementation persists every
 query result by default — that's a known trade-off favouring
 "feels instant" over "always fresh."
+
+## Trying a client with sample data
+
+`pufferblow seed` fills the configured instance with sample people, channels and a few days of
+conversation, so a client has something to show:
+
+```bash
+pufferblow setup            # once, to create the instance
+pufferblow seed --yes       # add the sample data
+pufferblow serve
+```
+
+It creates six accounts (`ada`, `grace`, `linus`, `alan`, `margaret`, `edsger`) that share one
+well-known password (printed at the end, or set with `--password`), nine channels (public, a private
+`staff` channel, a mixed one and two voice channels), about 130 messages with reactions, mentions,
+a multi-line message and 100 filler messages in `#random` for trying older history, friend requests
+and a block, and a muted channel. `grace` is an admin. Nobody is made owner unless you pass
+`--owner ada` on a fresh instance; otherwise sign in with your own owner account to reach the
+control panel. A few channels are left with unread messages so the badges can be seen.
+
+It goes through the same managers as the API, so passwords are hashed and messages are encrypted and
+indexed like real ones. Running it again adds only what is missing and never changes existing
+messages. **Do not run it against an instance people use.** Attachments and avatars are not created.
 
 ## Building an alternative client
 

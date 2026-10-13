@@ -1890,7 +1890,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             if status == "offline":
                 stmts.append(
                     update(Users)
-                    .values(last_seen=date_in_gmt(format="%Y-%m-%d %H:%M:%S"))
+                    .values(last_seen=_datetime.now(timezone.utc))
                     .where(Users.user_id == user_id)
                 )
 
@@ -1938,7 +1938,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = _datetime.now(timezone.utc)
 
         with self.database_session() as session:
             stmt = (
