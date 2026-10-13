@@ -368,7 +368,7 @@ async def channel_send_message(
                     storage_url, is_duplicate, filename, mime_type, file_size = (
                         await api_initializer.storage_manager.upload_file(
                             file=file,
-                            user_id=user_id,
+                            user_id=principal.id,
                             reference_type="message_attachment",
                             check_duplicates=True,
                         )
@@ -406,7 +406,7 @@ async def channel_send_message(
                                 "channel_id": channel_id,
                                 "is_duplicate": is_duplicate,
                             },
-                            "user_id": user_id,
+                            "user_id": principal.id,
                             "timestamp": datetime.utcnow().isoformat(),
                         })
                     except Exception as e:

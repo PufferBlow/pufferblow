@@ -135,3 +135,28 @@ def test_send_message_attachment_rejections_surface_as_client_errors(client: Tes
 
     assert response.status_code == 400
     assert "not allowed" in response.json()["detail"].lower()
+
+
+def test_send_message_with_an_allowed_attachment_succeeds(client: TestClient):
+    _, owner_token = _create_session_user(
+        "policy_upload_owner",
+        "owner-password",
+        is_owner=True,
+    )
+    channel_id = _create_channel(client, owner_token, "attachment-upload-room")
+
+    response = client.post(
+        f"/api/v1/channels/{channel_id}/send_message",
+        data={
+            "auth_token": owner_token,
+            "message": "here is a file",
+        },
+        files={
+            "attachments": ("notes.txt", b"hello", "text/plain"),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    attachments = response.json()["attachments"]
+    assert len(attachments) == 1
+    assert attachments[0]["size"] == 5
