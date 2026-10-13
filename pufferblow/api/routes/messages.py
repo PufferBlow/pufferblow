@@ -200,6 +200,7 @@ async def channel_load_messages(
                 sender_created_at=msg.get("sender_created_at"),
                 reply_to_message_id=msg.get("reply_to_message_id"),
                 reply_to=msg.get("reply_to"),
+                forwarded_from_message_id=msg.get("forwarded_from_message_id"),
             )
         )
 
@@ -296,6 +297,7 @@ async def channel_search_messages(
             sender_created_at=msg.get("sender_created_at"),
             reply_to_message_id=msg.get("reply_to_message_id"),
             reply_to=msg.get("reply_to"),
+            forwarded_from_message_id=msg.get("forwarded_from_message_id"),
         )
         for msg in matches
     ]

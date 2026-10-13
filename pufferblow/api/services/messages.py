@@ -113,6 +113,7 @@ class MessageService:
         attachments: Sequence[dict] = (),
         sent_at: str | None = None,
         reply_to_message_id: str | None = None,
+        forwarded_from_message_id: str | None = None,
     ) -> ServiceResult:
         max_length, _ = self._policy()
         if len(content) > max_length:
@@ -146,6 +147,7 @@ class MessageService:
             sent_at=sent_at if sent_at and sent_at.strip() else None,
             sender_bot_id=bot_id,
             reply_to_message_id=reply_to_message_id or None,
+            forwarded_from_message_id=forwarded_from_message_id or None,
         )
 
         sender = self._bot_sender_profile(bot_id) if principal.is_bot else self._users.user_profile(user_id=principal.id)
@@ -167,6 +169,7 @@ class MessageService:
             "attachments": attachment_objects,
             "reply_to_message_id": reply_to_message_id or None,
             "reply_to": self._messages.reply_preview(reply_to_message_id) if reply_to_message_id else None,
+            "forwarded_from_message_id": forwarded_from_message_id or None,
         }
 
         events = [

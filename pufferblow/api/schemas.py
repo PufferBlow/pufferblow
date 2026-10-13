@@ -7,7 +7,7 @@ API requests and responses across all routes.
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ============================================================================
@@ -356,6 +356,8 @@ class MessageData(BaseModel):
     #: The answered message: {message_id, author_id, author_name, author_avatar_url,
     #: content, has_attachments, deleted}.
     reply_to: dict | None = None
+    #: Set when this message was forwarded from another one.
+    forwarded_from_message_id: str | None = None
 
 
 class LoadMessagesQuery(BaseModel):
@@ -545,10 +547,25 @@ class DirectMessageSendRequest(BaseModel):
 
 
 class DirectMessageForwardRequest(BaseModel):
-    """Forward an existing message (channel or DM) into a DM."""
+    """Forward an existing message (channel or DM) into a DM with `peer`, or into a channel."""
 
     auth_token: str = Field(min_length=1)
-    peer: str = Field(min_length=1, description="Same peer formats as DirectMessageSendRequest.peer")
+    peer: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Same peer formats as DirectMessageSendRequest.peer. Give this or `channel_id`.",
+    )
+    channel_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Forward into this channel of this instance instead. Give this or `peer`.",
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one_target(self):
+        if (self.peer is None) == (self.channel_id is None):
+            raise ValueError("Give exactly one of `peer` or `channel_id`.")
+        return self
 
 
 class DirectMessageReactionRequest(BaseModel):

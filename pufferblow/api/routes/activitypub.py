@@ -4,6 +4,7 @@ ActivityPub and cross-instance DM routes.
 
 from __future__ import annotations
 
+import base64
 import json
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -520,6 +521,30 @@ async def forward_message(
             raise HTTPException(status_code=403, detail="Not a participant in this conversation")
     else:
         raise HTTPException(status_code=400, detail="Message has no channel or conversation to forward from")
+
+    if request_body.channel_id:
+        # Into a channel of this instance: the same text and attachments, posted as the caller
+        # (who must be allowed to send there) and marked as forwarded.
+        plaintext = api_initializer.messages_manager.decrypt_message(
+            user_id=str(row.sender_id),
+            message_id=row.message_id,
+            encrypted_message=base64.b64decode(row.hashed_message),
+        )
+        principal = api_initializer.user_principal_resolver.resolve(request_body.auth_token)
+        outcome = api_initializer.message_service.create(
+            principal,
+            request_body.channel_id,
+            plaintext,
+            attachments=row.attachments or [],
+            forwarded_from_message_id=row.message_id,
+        )
+        await api_initializer.event_publisher.publish_all(outcome.events)
+        message_dict = outcome.value["legacy"]
+        return {
+            "status_code": 201,
+            "message": "Message forwarded",
+            "result": {"channel_id": request_body.channel_id, "message_id": message_dict["message_id"]},
+        }
 
     try:
         result = await api_initializer.activitypub_manager.forward_message(

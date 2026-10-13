@@ -73,4 +73,6 @@ def message_view(raw: dict[str, Any]) -> dict[str, Any]:
         #: The answered message as {message_id, author_id, author_name, author_avatar_url,
         #: content, has_attachments, deleted}, or null for a message that isn't a reply.
         "reply_to": raw.get("reply_to"),
+        #: Set when this message was forwarded from another one (its id; clients only need to know it is set).
+        "forwarded_from_message_id": raw.get("forwarded_from_message_id"),
     }
