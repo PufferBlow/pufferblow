@@ -6,6 +6,32 @@ from loguru import logger
 from pufferblow.api.user.status import normalize_user_status
 from pufferblow.api.utils.extract_user_id import extract_user_id
 
+#: Event names for the per-user (DM) frames, as protocol-v1 sessions receive them.
+DM_EVENT_NAMES = {
+    "message": "dm.message.created",
+    "message_edited": "dm.message.updated",
+    "message_deleted": "dm.message.deleted",
+    "reaction": "dm.reaction.updated",
+}
+
+
+def as_protocol_event(message: dict) -> dict:
+    """A per-user frame in the shape a protocol-v1 session understands.
+
+    DM frames (those with a ``conversation_id``) become ``dm.*`` events; anything
+    else (call signalling, pings) becomes ``user.<type>``. The legacy ``type`` key
+    moves into the event name, the rest is the event's data unchanged. Frames that
+    are already v1 events pass through.
+    """
+    if message.get("type") == "event" and "version" in message:
+        return message
+    from pufferblow.api.protocol.envelopes import build_event
+
+    kind = str(message.get("type") or "notice")
+    name = DM_EVENT_NAMES.get(kind) if message.get("conversation_id") else None
+    data = {key: value for key, value in message.items() if key != "type"}
+    return build_event(name or f"user.{kind}", data)
+
 if TYPE_CHECKING:
     from pufferblow.api.user.user_manager import UserManager
 
@@ -532,9 +558,16 @@ class WebSocketsManager:
 
         sent_count = 0
         failed_count = 0
+        protocol_frame: dict | None = None
         for websocket in recipients:
             try:
-                await websocket.send_json(message)
+                info = active_connections_copy.get(websocket) or {}
+                if info.get("protocol") == 1:
+                    # v1 clients only accept versioned frames; legacy ones are ignored.
+                    protocol_frame = protocol_frame or as_protocol_event(message)
+                    await websocket.send_json(protocol_frame)
+                else:
+                    await websocket.send_json(message)
                 sent_count += 1
             except Exception as exc:
                 failed_count += 1

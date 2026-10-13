@@ -738,8 +738,10 @@ class ActivityPubManager:
                     ),
                     "attachments": attachments or [],
                     "reply_to_message_id": reply_to_message_id,
+                    "reply_to": self.messages_manager.reply_preview(reply_to_message_id) if reply_to_message_id else None,
                     "forwarded_from_message_id": forwarded_from_message_id,
                     "federated": False,
+                    **self._sender_fields(local_user_id),
                 },
             )
             return {
@@ -946,6 +948,39 @@ class ActivityPubManager:
         delivery_target = peer.shared_inbox_uri or peer.inbox_uri
         await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
         return {"activity_id": activity_uri, "delivery_target": delivery_target}
+
+    def _sender_fields(self, user_id: str) -> dict:
+        """Author name and avatar for a live DM frame, so a client can draw the row."""
+        try:
+            user = self.database_handler.get_user(user_id=str(user_id))
+        except Exception:
+            user = None
+        return {
+            "username": getattr(user, "username", None) or "Unknown User",
+            "sender_avatar_url": getattr(user, "avatar_url", None),
+        }
+
+    async def notify_local_dm_peer(
+        self, local_user_id: str, message_id: str, payload: dict, base_url: str
+    ) -> None:
+        """Tell the other side of a DM about an edit or delete when they are on this
+        instance (a remote peer hears through federation instead). Best effort: the
+        change itself has already happened."""
+        try:
+            row = self.database_handler.get_message_by_id(message_id=message_id)
+            if row is None or not row.conversation_id:
+                return
+            peer = await self._resolve_dm_peer_actor(
+                conversation_id=row.conversation_id, viewer_user_id=local_user_id, base_url=base_url
+            )
+            if peer is None or not peer.is_local or not peer.user_id:
+                return
+            await self.websockets_manager.broadcast_to_user(
+                user_id=peer.user_id,
+                message={**payload, "conversation_id": row.conversation_id, "message_id": str(message_id)},
+            )
+        except Exception as exc:
+            logger.warning(f"Local DM peer notification failed: {exc}")
 
     async def send_undo_follow(self, local_user_id: str, remote_handle: str, base_url: str) -> dict:
         """Unfollow: send Undo(Follow) and drop the local follow row.
@@ -1556,6 +1591,8 @@ class ActivityPubManager:
                     "sent_at": message_obj.sent_at.isoformat() if message_obj.sent_at else None,
                     "attachments": attachments,
                     "reply_to_message_id": reply_to_message_id,
+                    "reply_to": self.messages_manager.reply_preview(reply_to_message_id) if reply_to_message_id else None,
+                    **self._sender_fields(sender_user_id),
                     "federated": True,
                     "remote_actor_uri": remote_actor.actor_uri,
                 },

@@ -3800,9 +3800,12 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         self, conversation_id: str, messages_per_page: int, page: int
     ) -> list[tuple[Messages, Users | None]]:
         """
-        Fetch a specific number of direct messages for a conversation_id.
+        Fetch one page of direct messages for a conversation_id.
+
+        Page 1 is the newest ``messages_per_page`` messages, page 2 the ones before
+        them, and so on (like channel history); each page is returned oldest first
+        so it can be shown as-is.
         """
-        messages_with_users: list[tuple[Messages, Users | None]] = []
         start_index = (page * messages_per_page) - messages_per_page
 
         with self.database_session() as session:
@@ -3810,14 +3813,13 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 session.query(Messages, Users)
                 .join(Users, Messages.sender_id == Users.user_id, isouter=True)
                 .filter(Messages.conversation_id == conversation_id)
-                .order_by(Messages.sent_at)
+                .order_by(Messages.sent_at.desc(), Messages.message_id.desc())
                 .offset(start_index)
                 .limit(messages_per_page)
                 .all()
             )
-            messages_with_users = response
 
-        return messages_with_users
+        return list(reversed(response))
 
     # --- Message reactions -----------------------------------------------
 

@@ -663,6 +663,18 @@ async def edit_direct_message(
     except Exception as exc:
         logger.warning(f"Federation Update for DM edit failed: {exc}")
 
+    await api_initializer.activitypub_manager.notify_local_dm_peer(
+        local_user_id=user_id,
+        message_id=message_id,
+        payload={
+            "type": "message_edited",
+            "message": result["message"],
+            "edit_count": result["edit_count"],
+            "last_edited_at": result["last_edited_at"],
+        },
+        base_url=_request_base_url(request),
+    )
+
     return {
         "status_code": 200,
         "message_id": result["message_id"],
@@ -696,6 +708,14 @@ async def delete_direct_message(message_id: str, request: Request, auth_token: s
         )
     except Exception as exc:
         logger.warning(f"Federation Delete for DM failed: {exc}")
+
+    # Before the row goes: the peer is found through its conversation.
+    await api_initializer.activitypub_manager.notify_local_dm_peer(
+        local_user_id=user_id,
+        message_id=message_id,
+        payload={"type": "message_deleted"},
+        base_url=_request_base_url(request),
+    )
 
     api_initializer.messages_manager.delete_message(message_id=message_id, channel_id=row.channel_id)
     return {"status_code": 200, "message_id": message_id, "deleted": True}
