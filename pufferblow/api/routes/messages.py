@@ -84,6 +84,9 @@ async def parse_send_message_form(
             "sticker_url — no file re-upload."
         ),
     ),
+    reply_to_message_id: str = Form(
+        "", description="message_id (in the same channel) this message replies to, if any"
+    ),
 ) -> tuple[SendMessageForm, list[UploadFile], list[str]]:
     """
     Parse multipart form data into a validated SendMessageForm.
@@ -98,6 +101,7 @@ async def parse_send_message_form(
         message=message,
         sent_at=sent_at,
         attachments=[],
+        reply_to_message_id=reply_to_message_id.strip() or None,
     )
     parsed_sticker_ids = [
         sid.strip() for sid in (sticker_ids or "").split(",") if sid.strip()
@@ -194,6 +198,8 @@ async def channel_load_messages(
                 sender_about=msg.get("sender_about"),
                 sender_last_seen=msg.get("sender_last_seen"),
                 sender_created_at=msg.get("sender_created_at"),
+                reply_to_message_id=msg.get("reply_to_message_id"),
+                reply_to=msg.get("reply_to"),
             )
         )
 
@@ -288,6 +294,8 @@ async def channel_search_messages(
             sender_about=msg.get("sender_about"),
             sender_last_seen=msg.get("sender_last_seen"),
             sender_created_at=msg.get("sender_created_at"),
+            reply_to_message_id=msg.get("reply_to_message_id"),
+            reply_to=msg.get("reply_to"),
         )
         for msg in matches
     ]
@@ -431,6 +439,7 @@ async def channel_send_message(
         sticker_ids=sticker_ids,
         attachments=attachment_objects,
         sent_at=sent_at,
+        reply_to_message_id=validated_form.reply_to_message_id,
     )
     await api_initializer.event_publisher.publish_all(outcome.events)
 

@@ -16,7 +16,13 @@ from pufferblow.api.services.messages import MessageService
 
 def build_registry(*, messages: MessageService, authorizer: Authorizer, publisher) -> dict[str, CommandSpec]:
     async def message_create(ctx: ConnectionContext, data: schema.MessageCreate) -> HandlerOutput:
-        outcome = messages.create(ctx.principal, data.channel_id, data.content, sticker_ids=data.sticker_ids)
+        outcome = messages.create(
+            ctx.principal,
+            data.channel_id,
+            data.content,
+            sticker_ids=data.sticker_ids,
+            reply_to_message_id=data.reply_to_message_id,
+        )
         return HandlerOutput(result={"message": outcome.value["message"]}, events=outcome.events)
 
     async def message_edit(ctx: ConnectionContext, data: schema.MessageEdit) -> HandlerOutput:

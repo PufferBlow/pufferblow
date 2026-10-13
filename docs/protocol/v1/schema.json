@@ -85,6 +85,20 @@
           "default": null,
           "title": "Nonce"
         },
+        "reply_to_message_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply To Message Id"
+        },
         "sticker_ids": {
           "items": {
             "type": "string"

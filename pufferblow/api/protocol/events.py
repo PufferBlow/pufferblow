@@ -69,4 +69,8 @@ def message_view(raw: dict[str, Any]) -> dict[str, Any]:
         "created_at": raw.get("sent_at"),
         "edit_count": raw.get("edit_count") or 0,
         "last_edited_at": raw.get("last_edited_at"),
+        "reply_to_message_id": raw.get("reply_to_message_id"),
+        #: The answered message as {message_id, author_id, author_name, author_avatar_url,
+        #: content, has_attachments, deleted}, or null for a message that isn't a reply.
+        "reply_to": raw.get("reply_to"),
     }

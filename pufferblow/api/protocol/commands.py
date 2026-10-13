@@ -24,6 +24,8 @@ class MessageCreate(_Strict):
     channel_id: str = Field(min_length=1, max_length=128)
     content: str = Field(default="", max_length=20_000)
     sticker_ids: list[str] = Field(default_factory=list, max_length=MAX_STICKERS_PER_MESSAGE)
+    #: The message (in the same channel) this one replies to.
+    reply_to_message_id: str | None = Field(default=None, min_length=1, max_length=128)
     #: Client-generated idempotency key. Retrying with the same nonce never creates a second message.
     nonce: str | None = Field(default=None, min_length=1, max_length=MAX_NONCE_LENGTH)
 

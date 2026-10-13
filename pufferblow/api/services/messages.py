@@ -112,6 +112,7 @@ class MessageService:
         sticker_ids: Sequence[str] = (),
         attachments: Sequence[dict] = (),
         sent_at: str | None = None,
+        reply_to_message_id: str | None = None,
     ) -> ServiceResult:
         max_length, _ = self._policy()
         if len(content) > max_length:
@@ -127,6 +128,10 @@ class MessageService:
         if self._channels.get_channel_type(channel_id) == "voice":
             raise ApiError(ErrorCode.CHANNELS_VOICE_ONLY_NO_TEXT)
 
+        # A reply can only answer a message in the same channel.
+        if reply_to_message_id:
+            self._load_message(channel_id, reply_to_message_id)
+
         attachment_objects = list(attachments) + self._resolve_stickers(sticker_ids)
 
         # ``sender_id`` on the row is always the owning user (bots have no row of
@@ -140,6 +145,7 @@ class MessageService:
             attachments=attachment_objects,
             sent_at=sent_at if sent_at and sent_at.strip() else None,
             sender_bot_id=bot_id,
+            reply_to_message_id=reply_to_message_id or None,
         )
 
         sender = self._bot_sender_profile(bot_id) if principal.is_bot else self._users.user_profile(user_id=principal.id)
@@ -159,6 +165,8 @@ class MessageService:
             "sender_created_at": sender.get("created_at"),
             "sent_at": _iso(message_obj.sent_at),
             "attachments": attachment_objects,
+            "reply_to_message_id": reply_to_message_id or None,
+            "reply_to": self._messages.reply_preview(reply_to_message_id) if reply_to_message_id else None,
         }
 
         events = [

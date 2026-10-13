@@ -90,6 +90,10 @@ def _summarize_reactions(
 DEFAULT_DM_DISAPPEAR_SECONDS = 24 * 60 * 60
 
 
+
+#: How much of the answered message's text a reply carries.
+REPLY_PREVIEW_LENGTH = 200
+
 class MessagesManager:
     """Messages manager class"""
 
@@ -882,6 +886,52 @@ class MessagesManager:
 
             messages_metadata.append(json_metadata_format)
 
+        # What each reply answers, looked up once per distinct target on the page.
+        reply_ids = {m["reply_to_message_id"] for m in messages_metadata if m.get("reply_to_message_id")}
+        previews = {reply_id: self.reply_preview(reply_id) for reply_id in reply_ids}
+        for metadata in messages_metadata:
+            reply_id = metadata.get("reply_to_message_id")
+            if reply_id:
+                metadata["reply_to"] = previews[reply_id]
+
         logger.debug(f"{messages = }")
         return messages_metadata
+
+    def reply_preview(self, message_id: str) -> dict:
+        """
+        What a reply shows of the message it answers: the author, a snippet of the
+        text and whether it had attachments. ``deleted`` is true when the original
+        is gone (deleting a message keeps its replies; the FK sets this to null for
+        new reads, but a cached id can still point at nothing).
+        """
+        row = self.database_handler.get_message_by_id(message_id=message_id)
+        if row is None:
+            return {"message_id": message_id, "deleted": True}
+
+        try:
+            text = self.decrypt_message(
+                user_id=str(row.sender_id),
+                message_id=row.message_id,
+                encrypted_message=base64.b64decode(row.hashed_message),
+            )
+        except Exception:
+            text = ""
+
+        author_name, author_avatar_url = "Unknown User", None
+        try:
+            author = self.database_handler.get_user(user_id=str(row.sender_id))
+            if author is not None:
+                author_name, author_avatar_url = author.username, author.avatar_url
+        except Exception:
+            pass
+
+        return {
+            "message_id": str(row.message_id),
+            "author_id": str(row.sender_id),
+            "author_name": author_name,
+            "author_avatar_url": author_avatar_url,
+            "content": text[:REPLY_PREVIEW_LENGTH],
+            "has_attachments": bool(row.attachments),
+            "deleted": False,
+        }
 

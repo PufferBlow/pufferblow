@@ -352,6 +352,10 @@ class MessageData(BaseModel):
     sender_about: str | None = None
     sender_last_seen: str | None = None
     sender_created_at: str | None = None
+    reply_to_message_id: str | None = None
+    #: The answered message: {message_id, author_id, author_name, author_avatar_url,
+    #: content, has_attachments, deleted}.
+    reply_to: dict | None = None
 
 
 class LoadMessagesQuery(BaseModel):
@@ -404,6 +408,9 @@ class SendMessageForm(BaseModel):
     )
     attachments: list = Field(
         default_factory=list, description="File attachments (optional)"
+    )
+    reply_to_message_id: str | None = Field(
+        None, description="message_id (in the same channel) this message replies to"
     )
 
     @field_validator("auth_token")
