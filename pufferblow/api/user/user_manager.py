@@ -121,9 +121,9 @@ class UserManager:
             >>> print(user.status)
             'online'
         """
-        from pufferblow.api.notifications.notifications_manager import RESERVED_MENTION_NAMES
+        from pufferblow.api.notifications.notifications_manager import is_reserved_username
 
-        if username.strip().lower() in RESERVED_MENTION_NAMES:
+        if is_reserved_username(username):
             raise ValueError(f"The username '{username}' is reserved.")
 
         new_user = Users()
@@ -903,6 +903,11 @@ class UserManager:
         Returns:
             `None`.
         """
+        from pufferblow.api.notifications.notifications_manager import is_reserved_username
+
+        if is_reserved_username(new_username):
+            raise ValueError(f"The username '{new_username}' is reserved.")
+
         user_data = self.database_handler.get_user(
             user_id=user_id,
         )

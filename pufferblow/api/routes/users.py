@@ -8,6 +8,7 @@ from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.dependencies import get_current_user
 from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.logger.msgs import info
+from pufferblow.api.notifications.notifications_manager import is_reserved_username
 from pufferblow.api.schemas import (
     AuthTokenQuery,
     EditProfileRequest,
@@ -70,6 +71,13 @@ def _validate_username_format(username: str) -> None:
             ErrorCode.AUTH_USERNAME_INVALID,
             message=f"Username failed pattern check: {username!r}",
             details={"field": "username"},
+        )
+    # Names like "everyone" belong to mentions, not to people; this guards sign-up and renaming alike.
+    if is_reserved_username(username):
+        raise ApiError(
+            ErrorCode.AUTH_USERNAME_INVALID,
+            message=f"Username is reserved: {username!r}",
+            details={"field": "username", "reason": "reserved"},
         )
 
 

@@ -36,6 +36,11 @@ EVERYONE_MENTION = "everyone"
 RESERVED_MENTION_NAMES = frozenset({EVERYONE_MENTION})
 
 
+def is_reserved_username(username: str | None) -> bool:
+    """Whether ``username`` is a name only mentions may use (compared ignoring case and edges)."""
+    return (username or "").strip().lower() in RESERVED_MENTION_NAMES
+
+
 def mentions_everyone(content: str) -> bool:
     """Whether ``content`` contains ``@everyone`` as its own word."""
     return EVERYONE_MENTION in {u.lower() for u in extract_mention_usernames(content, include_reserved=True)}

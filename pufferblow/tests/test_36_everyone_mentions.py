@@ -117,3 +117,25 @@ def test_in_a_private_channel_only_those_who_can_read_it_are_pinged(client: Test
 def test_nobody_can_sign_up_as_everyone(client: TestClient):
     with pytest.raises(ValueError, match="reserved"):
         api_initializer.user_manager.sign_up(username="Everyone", password="a-long-password")
+
+
+def test_the_username_validator_used_by_sign_up_and_renaming_refuses_a_reserved_name():
+    from pufferblow.api.errors import ApiError
+    from pufferblow.api.routes.users import _validate_username_format
+
+    with pytest.raises(ApiError):
+        _validate_username_format("everyone")
+    with pytest.raises(ApiError):
+        _validate_username_format("Everyone")
+    _validate_username_format("everyone_else")  # only the exact name is reserved
+
+
+def test_nobody_can_rename_themselves_to_everyone(client: TestClient):
+    user, token = _user("rename_me")
+
+    over_http = client.put("/api/v1/users/profile", json={"auth_token": token, "new_username": "Everyone"})
+    assert over_http.status_code == 400, over_http.text
+
+    with pytest.raises(ValueError, match="reserved"):
+        api_initializer.user_manager.update_username(user_id=str(user.user_id), new_username="everyone")
+    assert api_initializer.database_handler.get_user(user_id=str(user.user_id)).username == "rename_me"
