@@ -235,8 +235,7 @@ logical thread shows up on both instances.
 
 ### WebSockets
 
-- Global stream — `ws://<host>/ws` (all channels for the user).
-- Channel stream — `ws://<host>/ws/channels/{channel_id}`.
+- Session stream — `ws://<host>/ws?protocol=1` (all channels for the user, plus commands).
 
 `WebSocketsManager` handles:
 

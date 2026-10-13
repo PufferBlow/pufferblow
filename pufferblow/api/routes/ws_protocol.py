@@ -1,8 +1,7 @@
 """WebSocket session for the versioned command/event protocol.
 
-``/ws?auth_token=...&protocol=1`` opts a connection into protocol v1. Older
-clients keep using ``/ws`` without the parameter and are served by the legacy
-loop in ``routes/websocket.py``.
+``/ws?auth_token=...&protocol=1`` opens a protocol v1 session. The parameter is
+required; ``routes/websocket.py`` refuses connections without it.
 
 This module is the only place that touches the socket: it authenticates, builds
 a transport-free :class:`ConnectionContext`, forwards frames to the dispatcher,
@@ -115,7 +114,7 @@ async def run_protocol_session(websocket: WebSocket, auth_token: str, version: i
 
 
 async def _handle_housekeeping(websocket: WebSocket, ctx: ConnectionContext, text: str) -> bool | str:
-    """Handle the non-command frames older clients already send: ping and presence.
+    """Handle the housekeeping frames that are not commands: ping and presence.
 
     Returns True when the frame was consumed, ``"close"`` when the session must end.
     """

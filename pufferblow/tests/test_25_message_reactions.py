@@ -1,8 +1,16 @@
-"""Tests for message reaction lifecycle (add, remove, idempotency, summary)."""
+"""Tests for message reaction lifecycle (add, remove, idempotency, summary).
+
+Reactions are changed through the shared service, the one the ``reaction.add`` and
+``reaction.remove`` commands call; the HTTP routes for them were retired."""
 
 import uuid
 
+import pytest
+
 from fastapi.testclient import TestClient
+
+from pufferblow.api.errors import ApiError
+from pufferblow.core.bootstrap import api_initializer
 
 
 SIGNUP_ROUTE = "/api/v1/users/signup"
@@ -34,31 +42,26 @@ def _send(client: TestClient, channel_id: str, auth_token: str, body: str) -> st
     return response.json()["message_id"]
 
 
-def _add(client: TestClient, channel_id: str, message_id: str, auth_token: str, emoji: str):
-    return client.post(
-        f"/api/v1/channels/{channel_id}/messages/{message_id}/reactions",
-        params={"auth_token": auth_token, "emoji": emoji},
-    )
+def _add(client: TestClient, channel_id: str, message_id: str, auth_token: str, emoji: str) -> dict:
+    """Add a reaction through the shared service (what the ``reaction.add`` command calls)."""
+    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    return api_initializer.message_service.add_reaction(principal, channel_id, message_id, emoji).value
 
 
-def _remove(client: TestClient, channel_id: str, message_id: str, auth_token: str, emoji: str):
-    return client.delete(
-        f"/api/v1/channels/{channel_id}/messages/{message_id}/reactions",
-        params={"auth_token": auth_token, "emoji": emoji},
-    )
+def _remove(client: TestClient, channel_id: str, message_id: str, auth_token: str, emoji: str) -> dict:
+    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    return api_initializer.message_service.remove_reaction(principal, channel_id, message_id, emoji).value
 
 
-def test_add_reaction_returns_201_and_summary(client: TestClient):
+def test_add_reaction_returns_the_summary(client: TestClient):
     auth_token = _make_user(client)
     channel_id = _first_channel_id(client, auth_token)
     if not channel_id:
         return
     message_id = _send(client, channel_id, auth_token, "react to me")
 
-    response = _add(client, channel_id, message_id, auth_token, "👍")
-    assert response.status_code == 201, response.text
-    body = response.json()
-    assert body["already_present"] is False
+    body = _add(client, channel_id, message_id, auth_token, "👍")
+    assert body["changed"] is True
     assert body["emoji"] == "👍"
     assert len(body["reactions"]) == 1
     summary = body["reactions"][0]
@@ -74,12 +77,9 @@ def test_add_reaction_is_idempotent(client: TestClient):
         return
     message_id = _send(client, channel_id, auth_token, "idempotent target")
 
-    first = _add(client, channel_id, message_id, auth_token, "🎉")
-    assert first.status_code == 201
-    second = _add(client, channel_id, message_id, auth_token, "🎉")
-    assert second.status_code == 200
-    body = second.json()
-    assert body["already_present"] is True
+    assert _add(client, channel_id, message_id, auth_token, "🎉")["changed"] is True
+    body = _add(client, channel_id, message_id, auth_token, "🎉")
+    assert body["changed"] is False
     assert body["reactions"][0]["count"] == 1
 
 
@@ -89,13 +89,10 @@ def test_remove_reaction_returns_summary_without_emoji(client: TestClient):
     if not channel_id:
         return
     message_id = _send(client, channel_id, auth_token, "remove target")
-    add_response = _add(client, channel_id, message_id, auth_token, "🔥")
-    assert add_response.status_code == 201
+    assert _add(client, channel_id, message_id, auth_token, "🔥")["changed"] is True
 
-    response = _remove(client, channel_id, message_id, auth_token, "🔥")
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["already_absent"] is False
+    body = _remove(client, channel_id, message_id, auth_token, "🔥")
+    assert body["changed"] is True
     assert body["reactions"] == []
 
 
@@ -106,10 +103,9 @@ def test_remove_reaction_is_idempotent(client: TestClient):
         return
     message_id = _send(client, channel_id, auth_token, "never reacted")
 
-    response = _remove(client, channel_id, message_id, auth_token, "🤷")
-    assert response.status_code == 200, response.text
-    assert response.json()["already_absent"] is True
-    assert response.json()["reactions"] == []
+    body = _remove(client, channel_id, message_id, auth_token, "🤷")
+    assert body["changed"] is False
+    assert body["reactions"] == []
 
 
 def test_user_can_apply_multiple_distinct_emoji(client: TestClient):
@@ -120,11 +116,9 @@ def test_user_can_apply_multiple_distinct_emoji(client: TestClient):
     message_id = _send(client, channel_id, auth_token, "multi-emoji target")
 
     for emoji in ("👍", "🎉", "💯"):
-        response = _add(client, channel_id, message_id, auth_token, emoji)
-        assert response.status_code == 201, (emoji, response.text)
+        assert _add(client, channel_id, message_id, auth_token, emoji)["changed"] is True, emoji
 
-    response = _add(client, channel_id, message_id, auth_token, "✨")
-    body = response.json()
+    body = _add(client, channel_id, message_id, auth_token, "✨")
     emojis = {entry["emoji"] for entry in body["reactions"]}
     assert emojis == {"👍", "🎉", "💯", "✨"}
     assert all(entry["count"] == 1 for entry in body["reactions"])
@@ -137,8 +131,8 @@ def test_empty_emoji_rejected(client: TestClient):
         return
     message_id = _send(client, channel_id, auth_token, "empty target")
 
-    response = _add(client, channel_id, message_id, auth_token, "")
-    assert response.status_code == 400
+    with pytest.raises(ApiError):
+        _add(client, channel_id, message_id, auth_token, "")
 
 
 def test_over_long_emoji_rejected(client: TestClient):
@@ -149,8 +143,8 @@ def test_over_long_emoji_rejected(client: TestClient):
     message_id = _send(client, channel_id, auth_token, "long target")
 
     too_long = "a" * 64
-    response = _add(client, channel_id, message_id, auth_token, too_long)
-    assert response.status_code == 400
+    with pytest.raises(ApiError):
+        _add(client, channel_id, message_id, auth_token, too_long)
 
 
 def test_load_messages_includes_reactions(client: TestClient):

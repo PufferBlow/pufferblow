@@ -1,6 +1,6 @@
 """Message operations, independent of any transport.
 
-The WebSocket command handlers and the legacy HTTP routes both call this
+The WebSocket command handlers and the HTTP routes that remain (send with files) both call this
 service, so validation, authorization and persistence rules exist exactly once.
 A method returns the value to send back to the caller plus the
 :class:`DomainEvent` objects describing what changed. It never publishes: the
@@ -182,7 +182,6 @@ class MessageService:
                 name=MESSAGE_CREATED,
                 data=message_view(message_dict),
                 channel_id=channel_id,
-                legacy=message_dict,
             )
         ]
         events.extend(
@@ -197,7 +196,7 @@ class MessageService:
         )
 
         return ServiceResult(
-            value={"message": message_view(message_dict), "legacy": message_dict},
+            value={"message": message_view(message_dict), "raw": message_dict},
             events=events,
         )
 
@@ -267,7 +266,6 @@ class MessageService:
                         name=NOTIFICATION_CREATED,
                         data=frame,
                         target_user_id=str(notification.user_id),
-                        legacy=frame,
                     )
                 )
         except Exception:
@@ -309,17 +307,9 @@ class MessageService:
             "edit_count": result["edit_count"],
             "last_edited_at": result["last_edited_at"],
         }
-        legacy = {
-            "type": "message_edited",
-            "message_id": message_id,
-            "channel_id": channel_id,
-            "message": result["message"],
-            "edit_count": result["edit_count"],
-            "last_edited_at": result["last_edited_at"],
-        }
         return ServiceResult(
             value=data,
-            events=[DomainEvent(name=MESSAGE_UPDATED, data=data, channel_id=channel_id, legacy=legacy)],
+            events=[DomainEvent(name=MESSAGE_UPDATED, data=data, channel_id=channel_id)],
         )
 
     # ── delete ─────────────────────────────────────────────────
@@ -340,8 +330,7 @@ class MessageService:
         data = {"id": message_id, "channel_id": channel_id, "deleted_by": principal.id}
         return ServiceResult(
             value={"id": message_id, "channel_id": channel_id, "deleted": True, "already_deleted": False},
-            # Older clients never had a delete frame, so none is invented for them.
-            events=[DomainEvent(name=MESSAGE_DELETED, data=data, channel_id=channel_id, legacy=None)],
+            events=[DomainEvent(name=MESSAGE_DELETED, data=data, channel_id=channel_id)],
         )
 
     # ── reactions ──────────────────────────────────────────────
@@ -372,7 +361,7 @@ class MessageService:
         self._load_message(channel_id, message_id)
 
         newly_added = self._messages.add_reaction(message_id=message_id, user_id=principal.id, emoji=value)
-        return self._reaction_result(principal, channel_id, message_id, value, REACTION_ADDED, "message_reaction_added", changed=newly_added)
+        return self._reaction_result(principal, channel_id, message_id, value, REACTION_ADDED, changed=newly_added)
 
     def remove_reaction(self, principal: Principal, channel_id: str, message_id: str, emoji: str) -> ServiceResult:
         self._require_user_principal(principal)
@@ -384,11 +373,11 @@ class MessageService:
         self._load_message(channel_id, message_id)
 
         removed = self._messages.remove_reaction(message_id=message_id, user_id=principal.id, emoji=value)
-        return self._reaction_result(principal, channel_id, message_id, value, REACTION_REMOVED, "message_reaction_removed", changed=removed)
+        return self._reaction_result(principal, channel_id, message_id, value, REACTION_REMOVED, changed=removed)
 
     def _reaction_result(
         self, principal: Principal, channel_id: str, message_id: str, emoji: str,
-        event_name: str, legacy_type: str, *, changed: bool,
+        event_name: str, *, changed: bool,
     ) -> ServiceResult:
         summary = self._messages.get_reaction_summary(message_id=message_id, viewer_user_id=principal.id)
         public = _public_reactions(summary)
@@ -403,8 +392,7 @@ class MessageService:
             return ServiceResult(value=value)
 
         data = {"message_id": message_id, "channel_id": channel_id, "user_id": principal.id, "emoji": emoji, "reactions": public}
-        legacy = {"type": legacy_type, **data}
-        return ServiceResult(value=value, events=[DomainEvent(name=event_name, data=data, channel_id=channel_id, legacy=legacy)])
+        return ServiceResult(value=value, events=[DomainEvent(name=event_name, data=data, channel_id=channel_id)])
 
     # ── history (used for resync) ──────────────────────────────
 

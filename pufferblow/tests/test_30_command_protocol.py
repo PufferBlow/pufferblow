@@ -107,7 +107,7 @@ def _context(token: str, *channels: str) -> ConnectionContext:
     )
 
 
-def _attach(ctx: ConnectionContext, *, protocol: int = 1) -> FakeSocket:
+def _attach(ctx: ConnectionContext) -> FakeSocket:
     sock = FakeSocket()
     api_initializer.websockets_manager.active_connections[sock] = {
         "user_id": ctx.principal.id,
@@ -115,8 +115,8 @@ def _attach(ctx: ConnectionContext, *, protocol: int = 1) -> FakeSocket:
         "scope": "global",
         "channel_id": None,
         "accessible_channels": list(ctx.subscriptions),
-        "protocol": protocol,
-        "context": ctx if protocol else None,
+        "protocol": 1,
+        "context": ctx,
     }
     return sock
 
@@ -740,12 +740,10 @@ async def test_private_channel_events_are_rechecked_at_delivery(client: TestClie
     assert sock.events() == []
 
 
-async def test_legacy_clients_get_the_legacy_frame_and_v1_clients_the_envelope(client: TestClient):
+async def test_http_send_publishes_a_v1_envelope(client: TestClient):
     token = _signup(client)
     channel = _new_channel(token)
-    v1_ctx = _context(token, channel)
-    v1 = _attach(v1_ctx)
-    legacy = _attach(_context(_signup(client), channel), protocol=0)
+    sock = _attach(_context(token, channel))
 
     response = client.post(
         f"/api/v1/channels/{channel}/send_message",
@@ -755,41 +753,48 @@ async def test_legacy_clients_get_the_legacy_frame_and_v1_clients_the_envelope(c
     body = response.json()
     assert body["message_id"] and body["message_data"]["message"] == "via http"
 
-    assert [e["data"]["content"] for e in v1.events("message.created")] == ["via http"]
-    assert all(f.get("type") == "event" for f in v1.sent)
-    assert [f["message"] for f in legacy.sent] == ["via http"]
-    assert "type" not in legacy.sent[0]  # the old raw message shape
+    assert [e["data"]["content"] for e in sock.events("message.created")] == ["via http"]
+    assert all(f.get("type") == "event" for f in sock.sent)
 
 
-async def test_http_edit_delete_and_reactions_share_the_service_and_events(client: TestClient):
+async def test_edit_react_and_delete_are_commands_that_publish_in_order(client: TestClient):
     token = _signup(client)
     channel = _new_channel(token)
     ctx = _context(token, channel)
     sock = _attach(ctx)
 
-    sent = client.post(f"/api/v1/channels/{channel}/send_message", data={"auth_token": token, "message": "v1", "sent_at": ""})
-    message_id = sent.json()["message_id"]
-    base = f"/api/v1/channels/{channel}"
+    created = await _run(ctx, _command("message.create", {"channel_id": channel, "content": "v1"}))
+    message_id = created["data"]["result"]["message"]["id"]
 
-    assert client.patch(f"{base}/messages/{message_id}", json={"auth_token": token, "message": "v2"}).json()["edit_count"] == 1
-    assert client.post(f"{base}/messages/{message_id}/reactions", params={"auth_token": token, "emoji": "🎉"}).status_code == 201
-    assert client.delete(f"{base}/messages/{message_id}/reactions", params={"auth_token": token, "emoji": "🎉"}).status_code == 200
-    assert client.delete(f"{base}/delete_message", params={"auth_token": token, "message_id": message_id}).status_code == 200
+    edited = await _run(ctx, _command("message.edit", {"channel_id": channel, "message_id": message_id, "content": "v2"}))
+    assert edited["data"]["result"]["edit_count"] == 1
+    await _run(ctx, _command("reaction.add", {"channel_id": channel, "message_id": message_id, "emoji": "🎉"}))
+    await _run(ctx, _command("reaction.remove", {"channel_id": channel, "message_id": message_id, "emoji": "🎉"}))
+    await _run(ctx, _command("message.delete", {"channel_id": channel, "message_id": message_id}))
 
     assert [f["name"] for f in sock.events()] == ["message.created", "message.updated", "reaction.added", "reaction.removed", "message.deleted"]
 
 
-async def test_http_routes_still_reject_unauthorised_edits(client: TestClient):
+async def test_someone_else_cannot_edit_or_delete_through_commands(client: TestClient):
     owner, other = _signup(client), _signup(client)
     channel = _new_channel(owner)
-    message_id = client.post(
-        f"/api/v1/channels/{channel}/send_message", data={"auth_token": owner, "message": "mine", "sent_at": ""}
-    ).json()["message_id"]
+    owner_ctx, other_ctx = _context(owner, channel), _context(other, channel)
+    created = await _run(owner_ctx, _command("message.create", {"channel_id": channel, "content": "mine"}))
+    message_id = created["data"]["result"]["message"]["id"]
 
-    response = client.patch(f"/api/v1/channels/{channel}/messages/{message_id}", json={"auth_token": other, "message": "no"})
-    assert response.status_code == 403
-    response = client.delete(f"/api/v1/channels/{channel}/delete_message", params={"auth_token": other, "message_id": message_id})
-    assert response.status_code == 403
+    edit = await _run(other_ctx, _command("message.edit", {"channel_id": channel, "message_id": message_id, "content": "no"}))
+    assert edit["type"] == "error"
+    delete = await _run(other_ctx, _command("message.delete", {"channel_id": channel, "message_id": message_id}))
+    assert delete["type"] == "error"
+
+
+def test_the_http_routes_that_commands_replaced_are_gone(client: TestClient):
+    token = _signup(client)  # a well-formed token, so only the missing route can explain the status
+    base = "/api/v1/channels/c1"
+    assert client.patch(f"{base}/messages/m1", json={"auth_token": token, "message": "x"}).status_code in (404, 405)
+    assert client.post(f"{base}/messages/m1/reactions", params={"auth_token": token, "emoji": "x"}).status_code in (404, 405)
+    assert client.delete(f"{base}/messages/m1/reactions", params={"auth_token": token, "emoji": "x"}).status_code in (404, 405)
+    assert client.delete(f"{base}/delete_message", params={"auth_token": token, "message_id": "m1"}).status_code in (404, 405)
 
 
 async def test_disconnect_removes_the_connection(client: TestClient):
@@ -875,6 +880,16 @@ def test_websocket_rejects_bad_credentials_and_unknown_versions(client: TestClie
             pass
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(f"/ws?auth_token={token}&protocol=2"):
+            pass
+
+
+def test_the_legacy_socket_is_refused(client: TestClient):
+    token = _signup(client)
+    with pytest.raises(WebSocketDisconnect):  # no protocol parameter: the pre-protocol loop is gone
+        with client.websocket_connect(f"/ws?auth_token={token}"):
+            pass
+    with pytest.raises(WebSocketDisconnect):  # and so is the per-channel socket
+        with client.websocket_connect(f"/ws/channels/c1?auth_token={token}"):
             pass
 
 

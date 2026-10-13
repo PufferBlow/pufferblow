@@ -56,7 +56,7 @@ class InProcessPublisher(EventPublisher):
     async def publish(self, event: DomainEvent) -> None:
         if event.target_user_id is not None:
             frame = build_event(event.name, event.data, epoch=self.epoch)
-            await self._connections.deliver_user_event(event.target_user_id, frame, event.legacy)
+            await self._connections.deliver_user_event(event.target_user_id, frame)
             return
 
         if event.channel_id is None:
@@ -70,4 +70,4 @@ class InProcessPublisher(EventPublisher):
             seq=self._seq[event.channel_id],
             epoch=self.epoch,
         )
-        await self._connections.deliver_channel_event(event.channel_id, frame, event.legacy)
+        await self._connections.deliver_channel_event(event.channel_id, frame)

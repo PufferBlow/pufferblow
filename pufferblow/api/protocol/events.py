@@ -31,8 +31,7 @@ class DomainEvent:
     """Something that has already been committed.
 
     Services return these; they never send anything themselves. The publisher
-    turns each one into a v1 ``event`` envelope for v1 sessions and into the
-    ``legacy`` frame (the pre-protocol shape) for older clients.
+    turns each one into a v1 ``event`` envelope.
     """
 
     name: str
@@ -41,8 +40,6 @@ class DomainEvent:
     channel_id: str | None = None
     #: Deliver to this user's connections only (e.g. notifications) instead of a channel.
     target_user_id: str | None = None
-    #: The frame older clients understand, or None when there never was one.
-    legacy: dict[str, Any] | None = None
     #: Connection session that caused the event; its own echo is not suppressed, only labelled.
     origin_command_id: str | None = field(default=None, compare=False)
 

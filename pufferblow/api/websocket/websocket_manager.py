@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 from loguru import logger
 from pufferblow.api.user.status import normalize_user_status
-from pufferblow.api.utils.extract_user_id import extract_user_id
 
 #: Event names for the per-user (DM) frames, as protocol-v1 sessions receive them.
 DM_EVENT_NAMES = {
@@ -41,8 +40,8 @@ class WebSocketsManager:
 
     def __init__(self, user_manager: "UserManager | None" = None):
         # Format:
-        # {websocket: {"user_id": str, "auth_token": str, "scope": "global"|"channel",
-        #              "channel_id": str|None, "accessible_channels": list[str]}}
+        # {websocket: {"user_id": str, "auth_token": str, "scope": "global", "protocol": 1,
+        #              "channel_id": None, "accessible_channels": list[str], "context": ConnectionContext}}
         """Initialize the instance."""
         self.active_connections: dict[WebSocket, dict] = {}
         self.user_manager = user_manager
@@ -59,8 +58,6 @@ class WebSocketsManager:
             return ("unknown", "unknown")
 
         user_id = str(connection_info.get("user_id", "unknown"))
-        if connection_info.get("scope") == "channel":
-            return (user_id, str(connection_info.get("channel_id", "unknown")))
         return (user_id, "global")
 
     def _count_connections_for_user(self, user_id: str) -> int:
@@ -106,10 +103,9 @@ class WebSocketsManager:
         sent_count = 0
         failed_count = 0
 
-        for websocket, info in active_connections_copy.items():
-            frame = v1_frame if isinstance(info, dict) and info.get("protocol", 0) >= 1 else message
+        for websocket in active_connections_copy:
             try:
-                await websocket.send_json(frame)
+                await websocket.send_json(v1_frame)
                 sent_count += 1
             except Exception as exc:
                 failed_count += 1
@@ -206,63 +202,22 @@ class WebSocketsManager:
                 f"Failed to set user offline on websocket disconnect | User: {user_id} | Error: {str(exc)}"
             )
 
-    async def connect(
-        self, websocket: WebSocket, auth_token: str, channel_id: str
-    ) -> None:
-        """
-        Accept connections from a client, and stores the corresponding auth_token
-        and channel_id of this clients in `active_connections`
-
-        Args:
-            websocket (WebSocket): A `WebSocket` object.
-            auth_token (str): The client's `auth_token`.
-            channel_id (str): The channel's `channel_id`.
-
-        Returns:
-            None.
-        """
-        try:
-            await websocket.accept()
-
-            try:
-                user_id = extract_user_id(auth_token)
-            except Exception:
-                user_id = auth_token[:8]
-
-            self.active_connections[websocket] = {
-                "user_id": user_id,
-                "auth_token": auth_token,
-                "scope": "channel",
-                "channel_id": channel_id,
-                "accessible_channels": [channel_id],
-            }
-
-            logger.info(
-                f"WebSocket connected | User: {user_id} | Channel: {channel_id} | Total connections: {len(self.active_connections)}"
-            )
-            await self.ensure_user_online(user_id=user_id, source="ws_channel_connect")
-        except Exception as e:
-            logger.error(
-                f"WebSocket connection failed | Auth: {auth_token[:8]}... | Channel: {channel_id} | Error: {str(e)}"
-            )
-            raise
-
     async def connect_global(
         self,
         websocket: WebSocket,
         auth_token: str,
         accessible_channels: list[str],
         *,
-        context=None,
+        context,
     ) -> None:
         """
-        Accept global WebSocket connections from a client that can receive updates
-        from all accessible channels.
+        Accept a protocol session. ``context`` (principal, subscriptions) is required.
 
         Args:
             websocket (WebSocket): A `WebSocket` object.
             auth_token (str): The client's `auth_token`.
             accessible_channels (list[str]): List of channel IDs this user can access.
+            context (ConnectionContext): The session's principal and subscriptions.
 
         Returns:
             None.
@@ -270,15 +225,8 @@ class WebSocketsManager:
         try:
             await websocket.accept()
 
-            if context is not None:
-                # Protocol v1 already knows who this is (user or bot) — no need to
-                # guess from the token, which fails for bot tokens anyway.
-                user_id = context.principal.id
-            else:
-                try:
-                    user_id = extract_user_id(auth_token)
-                except Exception:
-                    user_id = auth_token[:8]
+            # The principal is the user or the bot; the token is not parsed to find out.
+            user_id = context.principal.id
 
             self.active_connections[websocket] = {
                 "user_id": user_id,
@@ -286,9 +234,7 @@ class WebSocketsManager:
                 "scope": "global",
                 "channel_id": None,
                 "accessible_channels": accessible_channels,
-                # Command/event protocol sessions carry a ConnectionContext (principal,
-                # subscriptions). Legacy sessions leave it None and keep the old frames.
-                "protocol": 1 if context is not None else 0,
+                "protocol": 1,
                 "context": context,
             }
 
@@ -342,202 +288,18 @@ class WebSocketsManager:
                 except Exception as exc:
                     logger.warning(f"Voice session cleanup on disconnect failed for user {user_id}: {exc}")
 
-    async def send_message(
-        self,
-        message: str,
-        websocket: WebSocket,
-        message_type: str | None = "plain-text",
-    ) -> None:
-        """
-        Send a message to a client using his `websocket` object
-
-        Args:
-            message (str): The message to send out to the client.
-            message_type (str, optional, default: plain-text): The type of message to send. ["json", "plain-text", "bytes"]
-            websocket (WebSocket): A `WebSocket` object.
-
-        Returns:
-            None.
-        """
-        try:
-            connection_info = self.active_connections.get(websocket)
-            user_id = "unknown"
-            channel_id = "unknown"
-            if connection_info:
-                user_id, channel_id = self._connection_context(connection_info)
-
-            message_preview = (
-                str(message)[:50] + "..." if len(str(message)) > 50 else str(message)
-            )
-
-            logger.debug(
-                f"WebSocket send_message | User: {user_id} | Channel: {channel_id} | Type: {message_type} | Content: {message_preview}"
-            )
-
-            if message_type == "json":
-                await websocket.send_json(message)
-            elif message_type == "plain-text":
-                await websocket.send_text(message)
-            elif message_type == "bytes":
-                await websocket.send_bytes(message)
-
-        except Exception as e:
-            logger.error(f"WebSocket send_message failed | Error: {str(e)}")
-            raise
-
-    async def broadcast(self, message: str) -> None:
-        """
-        Broadcast a message to all the connected clients.
-
-        Args:
-            message (str): The message to send out to the clients.
-
-        Returns:
-            None.
-        """
-        total_connections = len(self.active_connections)
-        message_preview = message[:50] + "..." if len(message) > 50 else message
-
-        logger.info(
-            f"Broadcasting to all clients | Recipients: {total_connections} | Content: {message_preview}"
-        )
-
-        sent_count = 0
-        failed_count = 0
-
-        for websocket in self.active_connections:
-            try:
-                await websocket.send_text(message)
-                sent_count += 1
-            except Exception as e:
-                logger.error(f"Broadcast failed for one client: {str(e)}")
-                failed_count += 1
-
-        logger.info(
-            f"Broadcast completed | Sent: {sent_count} | Failed: {failed_count}"
-        )
-
     async def broadcast_to_channel(self, channel_id: str, message: dict) -> None:
+        """Send a channel-wide notice (e.g. a voice session change) as a v1 event.
+
+        The legacy ``type`` key becomes the event name (``channel.<type>``) and the rest the
+        event data. Only sessions subscribed to the channel receive it, and private channels
+        are re-checked like any other channel event.
         """
-        Broadcast a message to all connected clients in a specific channel.
+        from pufferblow.api.protocol.envelopes import build_event
 
-        Args:
-            channel_id (str): The channel ID to broadcast to.
-            message (dict): The message dict to send as JSON.
-
-        Returns:
-            None.
-        """
-        # Create a copy of active connections to avoid runtime errors if dictionary is modified during iteration
-        active_connections_copy = self.active_connections.copy()
-
-        # Count recipients first
-        recipients = []
-        for ws, connection_info in active_connections_copy.items():
-            if not isinstance(connection_info, dict):
-                continue
-
-            scope = connection_info.get("scope")
-            user_id = str(connection_info.get("user_id", "unknown"))
-            if scope == "channel" and connection_info.get("channel_id") == channel_id:
-                recipients.append((ws, user_id))
-                continue
-
-            if scope == "global":
-                accessible_channels = connection_info.get("accessible_channels", [])
-                if channel_id in accessible_channels:
-                    recipients.append((ws, user_id))
-        total_recipients = len(recipients)
-
-        # Get message type info for logging
-        message_type = message.get("type", "unknown")
-        message_id = message.get("message_id", "unknown")
-        content_preview = (
-            message.get("content", "")[:50] + "..."
-            if len(message.get("content", "")) > 50
-            else message.get("content", "")
-        )
-
-        logger.info(
-            f"Channel broadcast | Channel: {channel_id} | Recipients: {total_recipients} | Message-Type: {message_type} | ID: {message_id} | Content: {content_preview}"
-        )
-
-        if total_recipients == 0:
-            logger.warning(
-                f"Channel broadcast attempted but no clients connected to channel {channel_id}"
-            )
-            return
-
-        sent_count = 0
-        failed_count = 0
-
-        for websocket, user_id in recipients:
-            try:
-                logger.debug(
-                    f"Sending message to user {user_id} in channel {channel_id}"
-                )
-
-                await websocket.send_json(message)
-                sent_count += 1
-            except Exception as e:
-                logger.error(
-                    f"Channel broadcast failed for one client in channel {channel_id}: {str(e)}"
-                )
-                failed_count += 1
-
-        logger.info(
-            f"Channel broadcast completed | Channel: {channel_id} | Sent: {sent_count} | Failed: {failed_count} | Total recipients: {total_recipients}"
-        )
-
-    async def send_personal_message(self, websocket: WebSocket, message: dict) -> None:
-        """
-        Send a message to a specific websocket client.
-
-        Args:
-            websocket (WebSocket): The target websocket.
-            message (dict): The message dict to send as JSON.
-
-        Returns:
-            None.
-        """
-        try:
-            # Check if websocket is still connected before sending
-            if websocket.client_state != 1:  # 1 = OPEN
-                logger.warning(
-                    f"Cannot send personal message - websocket not in OPEN state: {websocket.client_state}"
-                )
-                return
-
-            # Get user info for logging
-            connection_info = self.active_connections.get(websocket)
-            user_id = "unknown"
-            channel_id = "unknown"
-            if connection_info:
-                user_id, channel_id = self._connection_context(connection_info)
-
-            message_type = message.get("type", "unknown")
-            message_preview = (
-                str(message)[:50] + "..." if len(str(message)) > 50 else str(message)
-            )
-
-            logger.debug(
-                f"Personal message | User: {user_id} | Channel: {channel_id} | Type: {message_type} | Content: {message_preview}"
-            )
-
-            await websocket.send_json(message)
-
-        except Exception as e:
-            # Get error logging info
-            connection_info = self.active_connections.get(websocket)
-            user_id = "unknown"
-            if connection_info:
-                user_id, _ = self._connection_context(connection_info)
-
-            logger.error(f"Personal message failed | User: {user_id} | Error: {str(e)}")
-
-            # Handle disconnected websockets - only if still in active connections
-            if websocket in self.active_connections:
-                await self.disconnect(websocket)
+        kind = str(message.get("type") or "notice")
+        data = {key: value for key, value in message.items() if key != "type"}
+        await self.deliver_channel_event(channel_id, build_event(f"channel.{kind}", data, channel_id=channel_id))
 
     async def broadcast_to_user(self, user_id: str, message: dict) -> None:
         """
@@ -558,16 +320,10 @@ class WebSocketsManager:
 
         sent_count = 0
         failed_count = 0
-        protocol_frame: dict | None = None
+        protocol_frame = as_protocol_event(message)
         for websocket in recipients:
             try:
-                info = active_connections_copy.get(websocket) or {}
-                if info.get("protocol") == 1:
-                    # v1 clients only accept versioned frames; legacy ones are ignored.
-                    protocol_frame = protocol_frame or as_protocol_event(message)
-                    await websocket.send_json(protocol_frame)
-                else:
-                    await websocket.send_json(message)
+                await websocket.send_json(protocol_frame)
                 sent_count += 1
             except Exception as exc:
                 failed_count += 1
@@ -577,93 +333,6 @@ class WebSocketsManager:
 
         logger.info(
             f"Personal broadcast completed | User: {user_id} | Sent: {sent_count} | Failed: {failed_count}"
-        )
-
-    async def broadcast_to_eligible_users(
-        self, channel_id: str, message: dict, database_handler=None
-    ) -> None:
-        """
-        Broadcast a message to all connected users who have permission to access the specified channel.
-        This is the core method for global websocket message distribution.
-
-        Args:
-            channel_id (str): The channel ID the message is from.
-            message (dict): The message dict to send as JSON.
-            database_handler (DatabaseHandler, optional): Database handler for permission checks.
-
-        Returns:
-            None.
-        """
-        # Create a copy of active connections to avoid runtime errors if dictionary is modified during iteration
-        active_connections_copy = self.active_connections.copy()
-
-        # Get message type info for logging
-        message_type = message.get("type", "unknown")
-        message_id = message.get("message_id", "unknown")
-        content_preview = (
-            message.get("content", "")[:50] + "..."
-            if len(message.get("content", "")) > 50
-            else message.get("content", "")
-        )
-
-        # Count recipients and determine accessibility
-        recipients = []
-        total_global_connections = 0
-        total_channel_connections = 0
-
-        for websocket, connection_info in active_connections_copy.items():
-            if not isinstance(connection_info, dict) or "user_id" not in connection_info:
-                continue
-
-            scope = connection_info.get("scope")
-            user_id = str(connection_info.get("user_id", "unknown"))
-
-            if scope == "global":
-                total_global_connections += 1
-                accessible_channels = connection_info.get("accessible_channels", [])
-                if channel_id in accessible_channels:
-                    recipients.append((websocket, user_id, "global"))
-                continue
-
-            if scope == "channel":
-                total_channel_connections += 1
-                if connection_info.get("channel_id") == channel_id:
-                    recipients.append((websocket, user_id, "channel"))
-
-        total_recipients = len(recipients)
-
-        logger.info(
-            f"Global broadcast | Channel: {channel_id} | Recipients: {total_recipients} | Message-Type: {message_type} | ID: {message_id} | Content: {content_preview}"
-        )
-        logger.debug(
-            f"Connection types: {total_global_connections} global, {total_channel_connections} channel"
-        )
-
-        if total_recipients == 0:
-            logger.warning(
-                f"Global broadcast attempted but no eligible users connected for channel {channel_id}"
-            )
-            return
-
-        sent_count = 0
-        failed_count = 0
-
-        for websocket, user_id, connection_type in recipients:
-            try:
-                logger.debug(
-                    f"Sending message to user {user_id} (via {connection_type} connection) for channel {channel_id}"
-                )
-
-                await websocket.send_json(message)
-                sent_count += 1
-            except Exception as e:
-                logger.error(
-                    f"Global broadcast failed for one client in channel {channel_id}: {str(e)}"
-                )
-                failed_count += 1
-
-        logger.info(
-            f"Global broadcast completed | Channel: {channel_id} | Sent: {sent_count} | Failed: {failed_count} | Total recipients: {total_recipients}"
         )
 
     # ── command/event protocol delivery ───────────────────────
@@ -693,14 +362,11 @@ class WebSocketsManager:
         except Exception:
             return False
 
-    async def deliver_channel_event(
-        self, channel_id: str, v1_frame: dict, legacy_frame: dict | None
-    ) -> None:
-        """Send one committed channel event to every authorised connection.
+    async def deliver_channel_event(self, channel_id: str, v1_frame: dict) -> None:
+        """Send one committed channel event to every session subscribed to the channel.
 
-        v1 sessions get ``v1_frame`` when subscribed to the channel; older sessions get
-        ``legacy_frame`` (if the event ever had one). Private channels are re-checked at
-        delivery time so a revoked privilege stops events immediately.
+        Private channels are re-checked at delivery time so a revoked privilege stops
+        events immediately.
         """
         from pufferblow.api.commands.metrics import metrics
 
@@ -711,26 +377,15 @@ class WebSocketsManager:
             if not isinstance(info, dict) or "user_id" not in info:
                 continue
 
-            if info.get("protocol", 0) >= 1:
-                context = info.get("context")
-                if context is None or channel_id not in context.subscriptions:
-                    continue
-                frame = v1_frame
-            else:
-                if legacy_frame is None:
-                    continue
-                if info.get("scope") == "global":
-                    if channel_id not in info.get("accessible_channels", []):
-                        continue
-                elif info.get("channel_id") != channel_id:
-                    continue
-                frame = legacy_frame
+            context = info.get("context")
+            if context is None or channel_id not in context.subscriptions:
+                continue
 
             if is_private and not self._may_view_private(str(info["user_id"])):
                 continue
 
             try:
-                await websocket.send_json(frame)
+                await websocket.send_json(v1_frame)
                 sent += 1
             except Exception as exc:
                 failed += 1
@@ -740,19 +395,14 @@ class WebSocketsManager:
         metrics.incr("events_delivered", sent)
         logger.debug(f"Channel event delivered | channel={channel_id} sent={sent} failed={failed}")
 
-    async def deliver_user_event(
-        self, user_id: str, v1_frame: dict, legacy_frame: dict | None
-    ) -> None:
+    async def deliver_user_event(self, user_id: str, v1_frame: dict) -> None:
         """Send an event addressed to one user to every connection that user has open."""
         target = str(user_id)
         for websocket, info in list(self.active_connections.items()):
             if not isinstance(info, dict) or str(info.get("user_id")) != target:
                 continue
-            frame = v1_frame if info.get("protocol", 0) >= 1 else legacy_frame
-            if frame is None:
-                continue
             try:
-                await websocket.send_json(frame)
+                await websocket.send_json(v1_frame)
             except Exception as exc:
                 logger.warning(f"User event delivery failed for {target}: {exc}")
 
@@ -798,43 +448,3 @@ class WebSocketsManager:
                 except Exception:
                     pass
         return removed
-
-    def get_user_accessible_channels(self, user_id: str, database_handler) -> list[str]:
-        """
-        Get a list of all channel IDs that a user can access.
-        This includes public channels and private channels where the user has been invited.
-
-        Args:
-            user_id (str): The user ID to check access for.
-            database_handler (DatabaseHandler): Database handler to query channel access.
-
-        Returns:
-            list[str]: List of accessible channel IDs.
-        """
-        try:
-            # Use the existing database method to fetch user's accessible channels
-            # The fetch_channels method already handles permission filtering
-            channels_data = database_handler.fetch_channels(user_id)
-
-            # Extract channel IDs from the results.
-            # fetch_channels returns SQLAlchemy Row objects; access the ORM object via index 0.
-            accessible_channel_ids = []
-            for channel_data in channels_data:
-                try:
-                    channel_obj = channel_data[0]
-                    if hasattr(channel_obj, "channel_id"):
-                        accessible_channel_ids.append(str(channel_obj.channel_id))
-                except (IndexError, TypeError):
-                    if hasattr(channel_data, "channel_id"):
-                        accessible_channel_ids.append(str(channel_data.channel_id))
-
-            logger.debug(
-                f"User {user_id} has access to {len(accessible_channel_ids)} channels"
-            )
-            return accessible_channel_ids
-
-        except Exception as e:
-            logger.error(
-                f"Failed to get accessible channels for user {user_id}: {str(e)}"
-            )
-            return []

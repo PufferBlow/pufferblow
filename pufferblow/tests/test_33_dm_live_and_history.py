@@ -60,18 +60,18 @@ class FakeSocket:
         self.sent.append(data)
 
 
-def test_broadcast_to_user_speaks_each_session_s_protocol():
+def test_broadcast_to_user_sends_a_v1_event_to_each_of_that_user_s_sessions():
     manager = WebSocketsManager(user_manager=None)
-    legacy, v1, other_user = FakeSocket(), FakeSocket(), FakeSocket()
+    v1, second_tab, other_user = FakeSocket(), FakeSocket(), FakeSocket()
     manager.active_connections = {
-        legacy: {"user_id": "u1", "protocol": 0},
+        second_tab: {"user_id": "u1", "protocol": 1},
         v1: {"user_id": "u1", "protocol": 1},
         other_user: {"user_id": "u2", "protocol": 1},
     }
 
     asyncio.run(manager.broadcast_to_user("u1", {"type": "message", "conversation_id": "conv", "message_id": "m1"}))
 
-    assert legacy.sent == [{"type": "message", "conversation_id": "conv", "message_id": "m1"}]
+    assert [frame["name"] for frame in second_tab.sent] == ["dm.message.created"]
     assert [frame["name"] for frame in v1.sent] == ["dm.message.created"]
     assert other_user.sent == []
 

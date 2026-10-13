@@ -704,32 +704,13 @@ PUT /api/v1/channels/{channel_id}/mark_message_as_read?auth_token=<token>&messag
 
 Idempotent. Used by clients on focus / scroll-to-bottom.
 
-### `POST /api/v1/channels/{channel_id}/messages/{message_id}/reactions`
+### Edit, delete and react (commands only)
 
-Add a reaction emoji to a message.
-
-```
-POST .../reactions?auth_token=<token>&emoji=%F0%9F%8E%89
-```
-
-The emoji can be any 1–32-char Unicode string (multi-codepoint
-flags / skin tones supported). Idempotent: re-applying the same
-emoji from the same user returns 200 with
-`already_present: true`. Each user can apply multiple distinct
-emojis to the same message.
-
-### `DELETE /api/v1/channels/{channel_id}/messages/{message_id}/reactions`
-
-Remove the caller's reaction. Same query shape as the POST.
-
-### `DELETE /api/v1/channels/{channel_id}/delete_message`
-
-Delete one of the caller's own messages, or another user's
-message if the caller has `manage_messages`.
-
-```
-DELETE .../delete_message?auth_token=<token>&message_id=<msg-id>
-```
+The HTTP routes `PATCH .../messages/{message_id}`, `POST` and `DELETE .../messages/{message_id}/reactions`
+and `DELETE .../delete_message` were removed. Use the `message.edit`, `message.delete`,
+`reaction.add` and `reaction.remove` commands on the socket (see
+[`protocol/v1.md`](../protocol/v1.md)). Authorization is unchanged: a message's sender may edit it, and
+the sender or anyone with `delete_messages` may delete it.
 
 ---
 
@@ -823,11 +804,8 @@ Revert to default (per-instance setting).
 
 ## Reactions
 
-Documented inline under [Messages](#messages) above. The full
-endpoints are:
-
-- `POST   /api/v1/channels/{channel_id}/messages/{message_id}/reactions`
-- `DELETE /api/v1/channels/{channel_id}/messages/{message_id}/reactions`
+Reactions on channel messages are the `reaction.add` and `reaction.remove` socket commands
+(see [`protocol/v1.md`](../protocol/v1.md)).
 
 ---
 
@@ -1633,25 +1611,18 @@ only here.
 
 ### `WS /ws`
 
-Global session. Receives DM updates, presence changes,
-notifications. Open one per signed-in session.
+The single real-time session. Receives channel events, DM updates, presence changes and
+notifications, and carries commands. Open one per signed-in session.
 
 ```
-ws://chat.example.com/ws?auth_token=<token>
+ws://chat.example.com/ws?auth_token=<token>&protocol=1
 ```
 
-`auth_token` MUST be in the query string for the initial upgrade
-because browsers don't expose a way to set headers on
-`new WebSocket(...)`. After the upgrade, no further auth is sent.
-
-### `WS /ws/channels/{channel_id}`
-
-Channel-scoped session. Receives messages, reactions, member
-events for that channel only. Open one per visible channel.
-
-```
-ws://chat.example.com/ws/channels/<channel_id>?auth_token=<token>
-```
+`protocol=1` is required (the legacy frames and `/ws/channels/{channel_id}` were retired; a
+connection without it closes with `1008`). `auth_token` MUST be in the query string for the
+initial upgrade because browsers don't expose a way to set headers on `new WebSocket(...)`.
+See [`protocol/v1.md`](../protocol/v1.md) for the envelopes, commands and events; the frame
+list below is the pre-protocol shape and is kept for history only.
 
 ### Server-to-client frames
 

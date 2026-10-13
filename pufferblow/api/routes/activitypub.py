@@ -539,7 +539,7 @@ async def forward_message(
             forwarded_from_message_id=row.message_id,
         )
         await api_initializer.event_publisher.publish_all(outcome.events)
-        message_dict = outcome.value["legacy"]
+        message_dict = outcome.value["raw"]
         return {
             "status_code": 201,
             "message": "Message forwarded",

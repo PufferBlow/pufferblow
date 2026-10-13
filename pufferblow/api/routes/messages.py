@@ -9,13 +9,12 @@ This module handles all message-related operations including:
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Body, Depends, Form, UploadFile, exceptions
+from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
 from loguru import logger
 
 from pufferblow.api.schemas import (
     LoadMessagesResponse,
     MessageData,
-    ReactionSummary,
     SearchMessagesResponse,
     SendMessageForm,
 )
@@ -445,7 +444,7 @@ async def channel_send_message(
     )
     await api_initializer.event_publisher.publish_all(outcome.events)
 
-    message_dict = outcome.value["legacy"]
+    message_dict = outcome.value["raw"]
     return {
         "status_code": 201,
         "message": "message sent successfully",
@@ -482,103 +481,3 @@ async def channel_mark_message_as_read(
         "status_code": 201,
         "message": "The `message_id` was successfully mark as read",
     }
-
-
-@router.patch("/messages/{message_id}", status_code=200)
-async def channel_edit_message(
-    channel_id: str,
-    message_id: str,
-    auth_token: str = Body(..., embed=True),
-    message: str = Body(..., embed=True),
-):
-    """Edit a channel message's body.
-
-    Only the original sender may edit. Edits bump ``edit_count`` and stamp
-    ``last_edited_at``. The work is done by the shared MessageService.
-    """
-    principal = api_initializer.user_principal_resolver.resolve(auth_token)
-    outcome = api_initializer.message_service.edit(principal, channel_id, message_id, message)
-    await api_initializer.event_publisher.publish_all(outcome.events)
-
-    result = outcome.value
-    return {
-        "status_code": 200,
-        "message_id": result["id"],
-        "message": result["content"],
-        "edit_count": result["edit_count"],
-        "last_edited_at": result["last_edited_at"],
-    }
-
-
-@router.post("/messages/{message_id}/reactions", status_code=201)
-async def channel_add_message_reaction(
-    auth_token: str,
-    channel_id: str,
-    message_id: str,
-    emoji: str,
-):
-    """
-    Add a reaction emoji to a message.
-
-    Idempotent: re-applying the same emoji is a no-op (returns 200 with
-    ``already_present: true``). Adding a different emoji from the same user
-    is allowed.
-    """
-    principal = api_initializer.user_principal_resolver.resolve(auth_token)
-    outcome = api_initializer.message_service.add_reaction(principal, channel_id, message_id, emoji)
-    await api_initializer.event_publisher.publish_all(outcome.events)
-
-    value = outcome.value
-    return {
-        "status_code": 201 if value["changed"] else 200,
-        "already_present": not value["changed"],
-        "message_id": message_id,
-        "channel_id": channel_id,
-        "emoji": value["emoji"],
-        "reactions": value["reactions"],
-    }
-
-
-@router.delete("/messages/{message_id}/reactions", status_code=200)
-async def channel_remove_message_reaction(
-    auth_token: str,
-    channel_id: str,
-    message_id: str,
-    emoji: str,
-):
-    """
-    Remove a reaction emoji applied by the viewer from a message.
-
-    Idempotent: removing a reaction the viewer never applied returns 200
-    with ``already_absent: true``.
-    """
-    principal = api_initializer.user_principal_resolver.resolve(auth_token)
-    outcome = api_initializer.message_service.remove_reaction(principal, channel_id, message_id, emoji)
-    await api_initializer.event_publisher.publish_all(outcome.events)
-
-    value = outcome.value
-    return {
-        "status_code": 200,
-        "already_absent": not value["changed"],
-        "message_id": message_id,
-        "channel_id": channel_id,
-        "emoji": value["emoji"],
-        "reactions": value["reactions"],
-    }
-
-
-@router.delete("/delete_message")
-async def channel_delete_message(auth_token: str, channel_id: str, message_id: str):
-    """
-    Delete a message from a channel (its sender, or anyone with ``delete_messages``).
-
-    Returns:
-        200 OK: Message deleted (also when it was already gone)
-        403 FORBIDDEN: Not authorized to delete this message
-        404 NOT FOUND: Channel or message not found
-    """
-    principal = api_initializer.user_principal_resolver.resolve(auth_token)
-    outcome = api_initializer.message_service.delete(principal, channel_id, message_id)
-    await api_initializer.event_publisher.publish_all(outcome.events)
-
-    return {"status_code": 204, "message": "The message have been deleted successfully"}
