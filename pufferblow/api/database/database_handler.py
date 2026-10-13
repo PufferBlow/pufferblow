@@ -1600,6 +1600,17 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 - self.UNVIEWED_BURST_MAX_AGE
             )
 
+            # Nothing sent before the account existed can be "unread": a new member has no
+            # read history, so without this every message from the last week would light up
+            # every channel the moment they joined.
+            joined_at = session.execute(
+                select(Users.created_at).where(Users.user_id == uuid.UUID(str(user_id)))
+            ).scalar()
+            if joined_at is not None:
+                if joined_at.tzinfo is None:
+                    joined_at = joined_at.replace(tzinfo=datetime.timezone.utc)
+                floor = max(floor, joined_at)
+
             query = session.query(
                 Messages.channel_id,
                 func.count(Messages.message_id),
