@@ -89,24 +89,28 @@ class Users(Base):
     )
 
     def __repr__(self) -> str:
-        """Repr special method."""
+        """Repr special method. Credentials are masked: reprs end up in logs and tracebacks."""
         return (
             f"Users(user_id={self.user_id!r}, username={self.username!r}, "
-            f"password={self.password!r}, avatar_url={self.avatar_url!r}, "
+            f"password=<redacted>, avatar_url={self.avatar_url!r}, "
             f"banner_url={self.banner_url!r}, inbox_id={self.inbox_id!r}, "
             f"origin_server={self.origin_server!r}, status={self.status!r}, "
             f"roles_ids={self.roles_ids!r}, last_seen={self.last_seen!r}, "
-            f"joined_servers_ids={self.joined_servers_ids!r}, auth_token={self.auth_token!r}, "
+            f"joined_servers_ids={self.joined_servers_ids!r}, auth_token=<redacted>, "
             f"auth_token_expire_time={self.auth_token_expire_time!r}, created_at={self.created_at!r}, "
             f"updated_at={self.updated_at!r})"
         )
 
     def to_dict(self) -> dict:
-        """To dict."""
+        """The user as it may be shown to other people (and logged).
+
+        Credentials are never included: not the password hash, nor the stored or raw auth
+        token. This dict is what `/users/profile` and `/users/list` return to any signed-in
+        user, so anything secret added to the table must stay out of it.
+        """
         return {
             "user_id": self.user_id,
             "username": self.username,
-            "password": self.password,
             "about": self.about,
             "avatar_url": self.avatar_url,
             "banner_url": self.banner_url,
@@ -120,9 +124,7 @@ class Users(Base):
             "roles_ids": self.roles_ids,
             "last_seen": self.last_seen,
             "joined_servers_ids": self.joined_servers_ids,
-            "auth_token": self.auth_token,
             "auth_token_expire_time": self.auth_token_expire_time,
-            "raw_auth_token": self.raw_auth_token,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
