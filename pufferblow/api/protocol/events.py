@@ -14,6 +14,10 @@ CHANNEL_CREATED = "channel.created"
 CHANNEL_UPDATED = "channel.updated"
 PRESENCE_CHANGED = "presence.changed"
 NOTIFICATION_CREATED = "notification.created"
+TYPING_STARTED = "typing.started"
+
+#: How long a client shows someone as typing after one `typing.started`, unless renewed.
+TYPING_EXPIRES_MS = 8_000
 
 EVENT_NAMES = (
     MESSAGE_CREATED,
@@ -25,6 +29,7 @@ EVENT_NAMES = (
     CHANNEL_UPDATED,
     PRESENCE_CHANGED,
     NOTIFICATION_CREATED,
+    TYPING_STARTED,
 )
 
 
@@ -44,6 +49,9 @@ class DomainEvent:
     target_user_id: str | None = None
     #: Connection session that caused the event; its own echo is not suppressed, only labelled.
     origin_command_id: str | None = field(default=None, compare=False)
+    #: False for ephemeral channel events (typing) that are not part of the channel's history:
+    #: they get no ``seq``, so missing one never makes a client resync.
+    sequenced: bool = True
 
 
 def message_view(raw: dict[str, Any]) -> dict[str, Any]:

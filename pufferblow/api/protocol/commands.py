@@ -8,7 +8,7 @@ than silently ignored.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MAX_NONCE_LENGTH = 128
 MAX_EMOJI_LENGTH = 64
@@ -51,6 +51,19 @@ class ChannelRef(_Strict):
     channel_id: str = Field(min_length=1, max_length=128)
 
 
+class TypingStart(_Strict):
+    """Exactly one of ``channel_id`` or ``conversation_id`` (a direct message)."""
+
+    channel_id: str | None = Field(default=None, min_length=1, max_length=128)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def _one_target(self) -> "TypingStart":
+        if (self.channel_id is None) == (self.conversation_id is None):
+            raise ValueError("give exactly one of channel_id or conversation_id")
+        return self
+
+
 class EventsResync(_Strict):
     channel_id: str = Field(min_length=1, max_length=128)
     limit: int = Field(default=50, ge=1, le=MAX_RESYNC_LIMIT)
@@ -66,4 +79,5 @@ COMMAND_SCHEMAS: dict[str, type[BaseModel]] = {
     "channel.subscribe": ChannelRef,
     "channel.unsubscribe": ChannelRef,
     "events.resync": EventsResync,
+    "typing.start": TypingStart,
 }

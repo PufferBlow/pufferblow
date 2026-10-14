@@ -226,6 +226,42 @@
       ],
       "title": "ReactionChange",
       "type": "object"
+    },
+    "typing.start": {
+      "additionalProperties": false,
+      "description": "Exactly one of ``channel_id`` or ``conversation_id`` (a direct message).",
+      "properties": {
+        "channel_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel Id"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        }
+      },
+      "title": "TypingStart",
+      "type": "object"
     }
   },
   "error_codes": [
@@ -259,7 +295,6 @@
               "title": "Duplicate"
             },
             "result": {
-              "additionalProperties": true,
               "title": "Result",
               "type": "object"
             },
@@ -308,7 +343,6 @@
       "description": "A client request. ``id`` is chosen by the client and echoed in the reply.",
       "properties": {
         "data": {
-          "additionalProperties": true,
           "title": "Data",
           "type": "object"
         },
@@ -354,7 +388,6 @@
             "details": {
               "anyOf": [
                 {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 {
@@ -443,7 +476,6 @@
           "title": "Channel Id"
         },
         "data": {
-          "additionalProperties": true,
           "title": "Data",
           "type": "object"
         },

@@ -1,0 +1,16 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "event",
+    "version": 1,
+    "id": "evt_09",
+    "name": "typing.started",
+    "channel_id": "c_general",
+    "epoch": "ep_1",
+    "data": {
+      "channel_id": "c_general",
+      "user_id": "u_ada",
+      "expires_in_ms": 8000
+    }
+  }
+}

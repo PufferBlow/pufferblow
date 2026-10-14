@@ -960,6 +960,27 @@ class ActivityPubManager:
             "sender_avatar_url": getattr(user, "avatar_url", None),
         }
 
+    def local_dm_peer(self, conversation_id: str, viewer_user_id: str) -> str | None:
+        """The other participant of a DM, if ``viewer_user_id`` is in it and the peer is local.
+
+        A conversation id is derived from both participants' actor URIs, so recomputing it
+        proves the viewer belongs to the conversation without trusting the caller. Returns
+        ``None`` for a conversation the viewer is not in, a remote peer, or one the peer has
+        not answered yet (the peer is only known from their messages).
+        """
+        peer_user_id = self.database_handler.get_conversation_other_sender(
+            conversation_id=conversation_id, viewer_user_id=viewer_user_id
+        )
+        if peer_user_id is None:
+            return None
+        viewer = self.database_handler.get_activitypub_actor_by_user_id(user_id=viewer_user_id)
+        peer = self.database_handler.get_activitypub_actor_by_user_id(user_id=peer_user_id)
+        if viewer is None or peer is None or not peer.is_local:
+            return None
+        if self._conversation_id(viewer.actor_uri, peer.actor_uri) != conversation_id:
+            return None
+        return str(peer_user_id)
+
     async def notify_local_dm_peer(
         self, local_user_id: str, message_id: str, payload: dict, base_url: str
     ) -> None:

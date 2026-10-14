@@ -62,6 +62,11 @@ class InProcessPublisher(EventPublisher):
         if event.channel_id is None:
             return
 
+        if not event.sequenced:
+            frame = build_event(event.name, event.data, channel_id=event.channel_id, epoch=self.epoch)
+            await self._connections.deliver_channel_event(event.channel_id, frame)
+            return
+
         self._seq[event.channel_id] += 1
         frame = build_event(
             event.name,

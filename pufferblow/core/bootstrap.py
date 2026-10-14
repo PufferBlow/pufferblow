@@ -304,6 +304,7 @@ class APIInitializer:
                 messages=self.message_service,
                 authorizer=self.authorizer,
                 publisher=self.event_publisher,
+                dm_peer=self.activitypub_manager.local_dm_peer,
             ),
             idempotency_store=self.database_handler,
             principal_limiter=principal_limiter,

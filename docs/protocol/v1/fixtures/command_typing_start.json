@@ -1,0 +1,12 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_9",
+    "name": "typing.start",
+    "data": {
+      "channel_id": "c_general"
+    }
+  }
+}
