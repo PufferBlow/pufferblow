@@ -344,13 +344,17 @@ class WebSocketsManager:
             if isinstance(info, dict) and info.get("protocol", 0) >= 1
         )
 
-    def _channel_is_private(self, channel_id: str) -> bool:
+    def _private_channel_members(self, channel_id: str) -> set[str] | None:
+        """``None`` for a public channel; for a private one, the user ids on its member list."""
         if self.channels_manager is None:
-            return False
+            return None
         try:
-            return bool(self.channels_manager.is_private(channel_id=channel_id))
+            channel = self.channels_manager.get_channel(channel_id=channel_id)
         except Exception:
-            return True  # when unsure, do not leak
+            return set()  # when unsure, treat it as private with no members: do not leak
+        if channel is None or not channel.is_private:
+            return None
+        return {str(user_id) for user_id in channel.allowed_users or []}
 
     def _may_view_private(self, user_id: str) -> bool:
         if self.user_manager is None:
@@ -365,12 +369,12 @@ class WebSocketsManager:
     async def deliver_channel_event(self, channel_id: str, v1_frame: dict) -> None:
         """Send one committed channel event to every session subscribed to the channel.
 
-        Private channels are re-checked at delivery time so a revoked privilege stops
-        events immediately.
+        Private channels are re-checked at delivery time so a revoked privilege or a
+        removal from the member list stops events immediately.
         """
         from pufferblow.api.commands.metrics import metrics
 
-        is_private = self._channel_is_private(channel_id)
+        members = self._private_channel_members(channel_id)
         sent = failed = 0
 
         for websocket, info in list(self.active_connections.items()):
@@ -381,7 +385,10 @@ class WebSocketsManager:
             if context is None or channel_id not in context.subscriptions:
                 continue
 
-            if is_private and not self._may_view_private(str(info["user_id"])):
+            if members is not None and not (
+                str(context.principal.accountable_user_id) in members
+                or self._may_view_private(str(info["user_id"]))
+            ):
                 continue
 
             try:

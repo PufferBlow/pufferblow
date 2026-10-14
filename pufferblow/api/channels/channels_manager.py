@@ -109,6 +109,10 @@ class ChannelsManager:
         """
         self.database_handler.delete_channel(channel_id=channel_id)
 
+    def get_channel(self, channel_id: str) -> Channels | None:
+        """The channel's row, or ``None`` if it does not exist."""
+        return self.database_handler.get_channel_data(channel_id=channel_id)
+
     def check_channel(self, channel_id: str) -> bool:
         """
         Check the existsing of a channel

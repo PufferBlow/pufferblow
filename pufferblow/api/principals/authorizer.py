@@ -7,6 +7,8 @@ and an HTTP route are all judged by the same rules.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from loguru import logger
 
 from pufferblow.api.errors import ApiError, ErrorCode
@@ -20,12 +22,23 @@ class Authorizer:
 
     # ── queries ────────────────────────────────────────────────
 
+    def channel_reader(self, channel_id: str) -> Callable[[Principal], bool]:
+        """Who may read ``channel_id``, looked up once so many principals can be checked cheaply.
+
+        A private channel admits holders of ``view_private_channels`` and the users on the
+        channel's member list (``allowed_users``, managed by ``add_user``); a bot is judged
+        by its owner, since the list holds real user ids. A missing channel admits no one.
+        """
+        channel = self._channels.get_channel(channel_id=channel_id)
+        if channel is None:
+            return lambda _principal: False
+        if not channel.is_private:
+            return lambda _principal: True
+        members = {str(user_id) for user_id in channel.allowed_users or []}
+        return lambda principal: principal.has("view_private_channels") or str(principal.accountable_user_id) in members
+
     def can_read_channel(self, principal: Principal, channel_id: str) -> bool:
-        if not self._channels.check_channel(channel_id=channel_id):
-            return False
-        if self._channels.is_private(channel_id=channel_id):
-            return principal.has("view_private_channels")
-        return True
+        return self.channel_reader(channel_id)(principal)
 
     can_subscribe = can_read_channel
 
