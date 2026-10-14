@@ -97,3 +97,18 @@ def test_the_appearance_backfill_is_saved(db):
 
     stored = _fresh(db, Users, user_id=user_id)
     assert stored.accent_color and stored.avatar_seed == str(user_id)
+
+
+# ── channel members on PostgreSQL ────────────────────────────────
+
+
+@pytest.mark.parametrize("build", ["_add_channel_member_statement", "_remove_channel_member_statement"])
+def test_channel_member_ids_are_bound_parameters_not_sql(build):
+    from sqlalchemy.dialects import postgresql
+
+    hostile = "x'); DROP TABLE users; --"
+    compiled = getattr(DatabaseHandler, build)("c1", hostile).compile(dialect=postgresql.dialect())
+
+    assert hostile not in str(compiled)
+    assert hostile in compiled.params.values()
+    assert ("array_append" if "add" in build else "array_remove") in str(compiled)

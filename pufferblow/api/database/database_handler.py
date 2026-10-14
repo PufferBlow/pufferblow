@@ -3230,22 +3230,33 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 channel.allowed_users = allowed_users
                 session.add(channel)
             else:
-                stmt = (
-                    update(Channels)
-                    .values(
-                        allowed_users=text(
-                            "array_append(allowed_users, '%s')" % to_add_user_id
-                        )
-                    )
-                    .where(Channels.channel_id == channel_id)
-                )
-                session.execute(stmt)
+                session.execute(self._add_channel_member_statement(channel_id, to_add_user_id))
 
             session.commit()
 
         # Membership is part of the cached channel row — invalidate
         # so the next privilege check sees the new allowed_users list.
         self._invalidate_channel_cache(channel_id)
+
+    # The user id is a bound parameter: it used to be pasted into the SQL text, which let whoever
+    # could manage channel members inject SQL through `to_remove_user_id`.
+    @staticmethod
+    def _add_channel_member_statement(channel_id: str, user_id: str):
+        """PostgreSQL: append ``user_id`` to the channel's ``allowed_users`` array."""
+        return (
+            update(Channels)
+            .values(allowed_users=func.array_append(Channels.allowed_users, user_id))
+            .where(Channels.channel_id == channel_id)
+        )
+
+    @staticmethod
+    def _remove_channel_member_statement(channel_id: str, user_id: str):
+        """PostgreSQL: drop every ``user_id`` from the channel's ``allowed_users`` array."""
+        return (
+            update(Channels)
+            .values(allowed_users=func.array_remove(Channels.allowed_users, user_id))
+            .where(Channels.channel_id == channel_id)
+        )
 
     def remove_user_from_channel(self, to_remove_user_id: str, channel_id: str) -> None:
         """
@@ -3273,16 +3284,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 ]
                 session.add(channel)
             else:
-                stmt = (
-                    update(Channels)
-                    .values(
-                        allowed_users=text(
-                            "array_remove(allowed_users, '%s')" % to_remove_user_id
-                        )
-                    )
-                    .where(Channels.channel_id == channel_id)
-                )
-                session.execute(stmt)
+                session.execute(self._remove_channel_member_statement(channel_id, to_remove_user_id))
 
             session.commit()
 
@@ -4594,7 +4596,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     update(Channels)
                     .where(Channels.channel_id == channel_id)
                     .values(
-                        messages_ids=text("array_remove(messages_ids, '%s')" % message_id)
+                        messages_ids=func.array_remove(Channels.messages_ids, message_id)
                     ),
                 )
 
