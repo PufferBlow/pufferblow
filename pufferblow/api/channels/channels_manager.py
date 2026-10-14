@@ -113,6 +113,14 @@ class ChannelsManager:
         """The channel's row, or ``None`` if it does not exist."""
         return self.database_handler.get_channel_data(channel_id=channel_id)
 
+    def private_channel_ids(self) -> list[str]:
+        """Every private channel's id (the ones a privilege change can open or close)."""
+        return [
+            str(row[0].channel_id)
+            for row in self.database_handler.fetch_channels(user_id="")
+            if row[0].is_private
+        ]
+
     def check_channel(self, channel_id: str) -> bool:
         """
         Check the existsing of a channel

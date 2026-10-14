@@ -168,3 +168,34 @@ def test_sessions_already_subscribed_are_not_told_again():
 
     assert granted == 0
     assert socket.sent == []
+
+
+# ── privilege changes ────────────────────────────────────────────
+
+
+class ChannelsWithPrivateList(FakeChannels):
+    def private_channel_ids(self):
+        return [cid for cid, row in self.rows.items() if row.is_private]
+
+
+def test_a_privilege_change_moves_open_sessions_both_ways():
+    channels = ChannelsWithPrivateList(
+        general=_channel(private=False),
+        staff=_channel(private=True),
+    )
+    manager = WebSocketsManager(user_manager=FakeUsers())
+    manager.channels_manager = channels
+    authorizer = Authorizer(user_manager=None, channels_manager=channels)
+
+    promoted = _connect(manager, _user("bo"), "general")
+    demoted = _connect(manager, _user("cy", "view_private_channels"), "general", "staff")
+    # The role edit: bo gains view_private_channels, cy loses it.
+    manager.active_connections[promoted]["context"].revalidate = lambda: _user("bo", "view_private_channels")
+    manager.active_connections[demoted]["context"].revalidate = lambda: _user("cy")
+
+    asyncio.run(manager.refresh_channel_access(authorizer))
+
+    assert manager.active_connections[promoted]["context"].subscriptions == {"general", "staff"}
+    assert promoted.sent[-1]["data"] == {"channel_id": "staff", "access": "granted"}
+    assert manager.active_connections[demoted]["context"].subscriptions == {"general"}
+    assert demoted.sent[-1]["data"] == {"channel_id": "staff", "access": "revoked"}

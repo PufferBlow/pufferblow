@@ -20,8 +20,16 @@ from pufferblow.api.schemas import (
     RoleUpdateRequest,
     UserRolesUpdateRequest,
 )
+from pufferblow.core.bootstrap import api_initializer
 
 router = APIRouter(prefix="/api/v1/system")
+
+
+async def _refresh_channel_access() -> None:
+    """Let open sockets follow a privilege change now instead of on their next reconnect."""
+    manager = api_initializer.websockets_manager
+    if manager is not None and api_initializer.authorizer is not None:
+        await manager.refresh_channel_access(api_initializer.authorizer)
 
 
 def _slugify_role_name(role_name: str) -> str:
@@ -152,6 +160,9 @@ async def update_role_route(role_id: str, request: RoleUpdateRequest):
     if updated_role is None:
         raise HTTPException(status_code=404, detail="Role not found.")
 
+    # Everyone holding this role may have gained or lost private channels.
+    await _refresh_channel_access()
+
     log_activity(
         activity_type="role_updated",
         user_id=owner_user_id,
@@ -227,6 +238,8 @@ async def update_user_roles_route(target_user_id: str, request: UserRolesUpdateR
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await _refresh_channel_access()
 
     log_activity(
         activity_type="user_roles_updated",

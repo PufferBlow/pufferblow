@@ -439,6 +439,26 @@ class WebSocketsManager:
         logger.debug(f"Channel access granted | channel={channel_id} sessions={granted}")
         return granted
 
+    async def refresh_channel_access(self, authorizer) -> None:
+        """Apply a privilege change (a role edited or reassigned) to every open session.
+
+        Re-resolves each session's principal and drops channels it may no longer read, then
+        subscribes it to private channels it may now read, with the usual `access` notices.
+        Public channels are unaffected by privileges, so only private ones are granted.
+        """
+        from pufferblow.api.protocol.events import CHANNEL_UPDATED
+
+        await self.revalidate_subscriptions(authorizer)
+        if self.channels_manager is None:
+            return
+        for channel_id in self.channels_manager.private_channel_ids():
+            await self.grant_subscriptions(
+                authorizer,
+                channel_id,
+                name=CHANNEL_UPDATED,
+                data={"channel_id": channel_id, "access": "granted"},
+            )
+
     async def revalidate_subscriptions(self, authorizer, channel_id: str | None = None) -> int:
         """Drop subscriptions a connection is no longer allowed to hold.
 
