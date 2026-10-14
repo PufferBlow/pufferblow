@@ -344,7 +344,17 @@ async def edit_users_profile_route(request: EditProfileRequest):
             "status": normalized_status,
         }
 
-    if request.new_password is not None and request.old_password is not None:
+    if request.new_password is not None:
+        # The current password is what stands between a stolen session token and a taken-over
+        # account, so it is checked, not just required to be present.
+        if not request.old_password or not api_initializer.user_manager.check_user_password(
+            user_id=user_id, password=request.old_password
+        ):
+            raise ApiError(
+                ErrorCode.AUTH_RESET_PASSWORD_WRONG,
+                message=f"Password change for {user_id} refused: current password missing or wrong",
+                details={"field": "old_password"},
+            )
         api_initializer.user_manager.update_user_password(
             user_id=user_id, new_password=request.new_password
         )

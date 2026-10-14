@@ -83,3 +83,24 @@ def test_sign_in_is_a_post_and_the_query_form_is_deprecated():
     by_method = {method: route for route in signin for method in route.methods}
     assert "POST" in by_method
     assert by_method["GET"].deprecated is True
+
+
+# ── password change ──────────────────────────────────────────────
+
+
+def _change(old: str | None):
+    request = EditProfileRequest(auth_token="token", new_password="battery staple", old_password=old)
+    return asyncio.run(routes.edit_users_profile_route(request))
+
+
+def test_a_password_change_with_the_current_password_goes_through(users):
+    assert _change("correct horse")["message"] == "Password updated successfully"
+    assert users.changed_to == "battery staple"
+
+
+@pytest.mark.parametrize("old", ["wrong", None, ""])
+def test_a_password_change_without_the_right_current_password_is_refused(users, old):
+    with pytest.raises(ApiError) as caught:
+        _change(old)
+    assert caught.value.code == ErrorCode.AUTH_RESET_PASSWORD_WRONG
+    assert users.changed_to is None
