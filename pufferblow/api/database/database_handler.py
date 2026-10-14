@@ -1281,6 +1281,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     row.banner_kind = "solid"
 
             if user_rows or server_rows:
+                session.commit()
                 logger.info(
                     "Backfilled appearance defaults: users={users}, servers={servers}",
                     users=len(user_rows),
@@ -4038,6 +4039,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             if row is None or row.read_at is not None:
                 return False
             row.read_at = now
+            session.commit()
 
         # One fewer unread for this user — drop the cached count.
         self._invalidate_unread_notifications_count(str(user_id))
@@ -4148,8 +4150,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 row.muted = muted
                 row.mention_only = mention_only
                 row.updated_at = now
-            session.flush()
-            session.refresh(row)
+            session.commit()
         return row
 
     def delete_notification_preference(
