@@ -413,6 +413,32 @@ class WebSocketsManager:
             except Exception as exc:
                 logger.warning(f"User event delivery failed for {target}: {exc}")
 
+    async def grant_subscriptions(self, authorizer, channel_id: str, *, name: str, data: dict) -> int:
+        """Subscribe every open session that may now read ``channel_id`` and tell it so.
+
+        The counterpart of :meth:`revalidate_subscriptions`. Call after anything that can
+        give access (a channel created, made public, or shared with someone) so the change
+        streams without a reconnect. Each newly subscribed session gets one event ``name``
+        with ``data``, unsequenced like the revocation notice. Sessions already subscribed
+        are left alone. Returns how many sessions were subscribed.
+        """
+        from pufferblow.api.protocol.envelopes import build_event
+
+        may_read = authorizer.channel_reader(channel_id)
+        granted = 0
+        for websocket, info in list(self.active_connections.items()):
+            context = info.get("context") if isinstance(info, dict) else None
+            if context is None or channel_id in context.subscriptions or not may_read(context.principal):
+                continue
+            context.subscriptions.add(channel_id)
+            granted += 1
+            try:
+                await websocket.send_json(build_event(name, data, channel_id=channel_id))
+            except Exception as exc:
+                logger.warning(f"Channel grant notice failed for one client in channel {channel_id}: {exc}")
+        logger.debug(f"Channel access granted | channel={channel_id} sessions={granted}")
+        return granted
+
     async def revalidate_subscriptions(self, authorizer, channel_id: str | None = None) -> int:
         """Drop subscriptions a connection is no longer allowed to hold.
 

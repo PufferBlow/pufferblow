@@ -29,7 +29,7 @@ from pufferblow.api.dependencies import (
     check_channel_access,
     ensure_user_not_timed_out,
 )
-from pufferblow.api.protocol.events import CHANNEL_UPDATED, DomainEvent
+from pufferblow.api.protocol.events import CHANNEL_CREATED, CHANNEL_UPDATED, DomainEvent
 from pufferblow.core.bootstrap import api_initializer
 from pufferblow.api.logger.msgs import info
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
@@ -243,6 +243,19 @@ async def create_new_channel_route(request: CreateChannelRequest):
         logger.error(f"Channel creation failed: {str(e)}")
         raise
 
+    # Open sessions only subscribe at connect time; bring everyone who can see it in now.
+    await api_initializer.websockets_manager.grant_subscriptions(
+        api_initializer.authorizer,
+        str(channel_data.channel_id),
+        name=CHANNEL_CREATED,
+        data={
+            "channel_id": str(channel_data.channel_id),
+            "channel_name": channel_data.channel_name,
+            "channel_type": channel_data.channel_type,
+            "is_private": bool(channel_data.is_private),
+        },
+    )
+
     return {
         "status_code": 200,
         "message": "Channel created successfully",
@@ -300,9 +313,16 @@ async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
     )
 
     # Privacy may have changed: drop subscriptions that no longer qualify *before* announcing,
-    # so people who just lost access do not receive the announcement.
+    # so people who just lost access do not receive the announcement, and subscribe people who
+    # just gained it (the announcement below then reaches them too).
     await api_initializer.websockets_manager.revalidate_subscriptions(
         api_initializer.authorizer, channel_id
+    )
+    await api_initializer.websockets_manager.grant_subscriptions(
+        api_initializer.authorizer,
+        channel_id,
+        name=CHANNEL_UPDATED,
+        data={"channel_id": channel_id, "access": "granted"},
     )
     await api_initializer.event_publisher.publish_all(
         [
@@ -414,6 +434,12 @@ async def add_user_to_private_channel_route(
     api_initializer.channels_manager.add_user_to_channel(
         user_id=user_id, to_add_user_id=to_add_user_id, channel_id=channel_id
     )
+    await api_initializer.websockets_manager.grant_subscriptions(
+        api_initializer.authorizer,
+        channel_id,
+        name=CHANNEL_UPDATED,
+        data={"channel_id": channel_id, "access": "granted"},
+    )
 
     return {
         "status_code": 200,
@@ -474,6 +500,9 @@ async def remove_user_from_channel_route(
     # Remove user from channel
     api_initializer.channels_manager.remove_user_from_channel(
         user_id=user_id, channel_id=channel_id, to_remove_user_id=to_remove_user_id
+    )
+    await api_initializer.websockets_manager.revalidate_subscriptions(
+        api_initializer.authorizer, channel_id
     )
 
     return {

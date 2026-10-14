@@ -10,6 +10,7 @@ MESSAGE_UPDATED = "message.updated"
 MESSAGE_DELETED = "message.deleted"
 REACTION_ADDED = "reaction.added"
 REACTION_REMOVED = "reaction.removed"
+CHANNEL_CREATED = "channel.created"
 CHANNEL_UPDATED = "channel.updated"
 PRESENCE_CHANGED = "presence.changed"
 NOTIFICATION_CREATED = "notification.created"
@@ -20,6 +21,7 @@ EVENT_NAMES = (
     MESSAGE_DELETED,
     REACTION_ADDED,
     REACTION_REMOVED,
+    CHANNEL_CREATED,
     CHANNEL_UPDATED,
     PRESENCE_CHANGED,
     NOTIFICATION_CREATED,
