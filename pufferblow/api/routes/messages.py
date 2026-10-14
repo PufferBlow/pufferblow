@@ -10,6 +10,7 @@ This module handles all message-related operations including:
 
 from datetime import datetime
 from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
+from fastapi.encoders import jsonable_encoder
 from loguru import logger
 
 from pufferblow.api.schemas import (
@@ -86,6 +87,13 @@ async def parse_send_message_form(
     reply_to_message_id: str = Form(
         "", description="message_id (in the same channel) this message replies to, if any"
     ),
+    nonce: str = Form(
+        "",
+        description=(
+            "Client-generated idempotency key, as for the `message.create` command: a retry "
+            "with the same nonce returns the first result instead of posting again"
+        ),
+    ),
 ) -> tuple[SendMessageForm, list[UploadFile], list[str]]:
     """
     Parse multipart form data into a validated SendMessageForm.
@@ -101,6 +109,7 @@ async def parse_send_message_form(
         sent_at=sent_at,
         attachments=[],
         reply_to_message_id=reply_to_message_id.strip() or None,
+        nonce=nonce.strip() or None,
     )
     parsed_sticker_ids = [
         sid.strip() for sid in (sticker_ids or "").split(",") if sid.strip()
@@ -334,9 +343,8 @@ async def channel_send_message(
     validated_form, attachments, sticker_ids = form_data
     auth_token = validated_form.auth_token
     message = validated_form.message
-    sent_at = validated_form.sent_at
 
-    max_message_length, max_total_attachment_mb = _get_message_and_attachment_policy()
+    max_message_length, _ = _get_message_and_attachment_policy()
 
     # Check message size against instance settings
     if len(message) > max_message_length:
@@ -354,6 +362,44 @@ async def channel_send_message(
     principal = api_initializer.user_principal_resolver.resolve(auth_token)
     # Fail before any upload work if the sender could not post here anyway.
     api_initializer.authorizer.require_send(principal, channel_id)
+
+    nonce = validated_form.nonce
+    if nonce is None:
+        return await _send_channel_message(principal, channel_id, validated_form, attachments, sticker_ids)
+
+    # Same guarantee as the socket's `message.create`: a client retrying after a lost response gets
+    # the first result back instead of a second message. Keyed per channel so a nonce reused
+    # elsewhere is not mistaken for this send.
+    store = api_initializer.database_handler
+    operation = f"http.send_message:{channel_id}"
+    state, stored = store.reserve_idempotency_key(principal.id, operation, nonce)
+    if state == "completed":
+        return {**(stored or {}), "duplicate": True}
+    if state == "in_progress":
+        raise exceptions.HTTPException(
+            status_code=409, detail="This message is still being sent. Retry shortly."
+        )
+    try:
+        response = await _send_channel_message(principal, channel_id, validated_form, attachments, sticker_ids)
+    except BaseException:
+        # Nothing was committed, or we cannot tell: free the key so a retry runs for real.
+        store.release_idempotency_key(principal.id, operation, nonce)
+        raise
+    store.complete_idempotency_key(principal.id, operation, nonce, jsonable_encoder(response))
+    return response
+
+
+async def _send_channel_message(
+    principal,
+    channel_id: str,
+    validated_form: SendMessageForm,
+    attachments: list[UploadFile],
+    sticker_ids: list[str],
+) -> dict:
+    """Upload the attachments, then create the message and publish it."""
+    message = validated_form.message
+    sent_at = validated_form.sent_at
+    _, max_total_attachment_mb = _get_message_and_attachment_policy()
 
     attachment_objects: list[dict] = []
     if attachments and api_initializer.storage_manager is None:

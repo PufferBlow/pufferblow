@@ -414,6 +414,12 @@ class SendMessageForm(BaseModel):
     reply_to_message_id: str | None = Field(
         None, description="message_id (in the same channel) this message replies to"
     )
+    nonce: str | None = Field(
+        None,
+        min_length=1,
+        max_length=128,
+        description="Client-generated idempotency key; a retry with the same nonce never posts twice",
+    )
 
     @field_validator("auth_token")
     @classmethod
