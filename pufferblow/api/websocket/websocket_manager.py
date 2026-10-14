@@ -60,6 +60,12 @@ class WebSocketsManager:
         user_id = str(connection_info.get("user_id", "unknown"))
         return (user_id, "global")
 
+    def count_connections_from_ip(self, ip: str) -> int:
+        """Open connections from one client address."""
+        return sum(
+            1 for info in self.active_connections.values() if isinstance(info, dict) and info.get("ip") == ip
+        )
+
     def _count_connections_for_user(self, user_id: str) -> int:
         """Return active websocket connections count for a specific user."""
         target = str(user_id)
@@ -209,6 +215,7 @@ class WebSocketsManager:
         accessible_channels: list[str],
         *,
         context,
+        ip: str | None = None,
     ) -> None:
         """
         Accept a protocol session. ``context`` (principal, subscriptions) is required.
@@ -236,6 +243,7 @@ class WebSocketsManager:
                 "accessible_channels": accessible_channels,
                 "protocol": 1,
                 "context": context,
+                "ip": ip,
             }
 
             logger.info(

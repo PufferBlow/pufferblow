@@ -31,6 +31,18 @@ from pufferblow.core.bootstrap import api_initializer
 
 #: A user may hold this many simultaneous sockets (several tabs and devices are fine).
 MAX_CONNECTIONS_PER_USER = 10
+#: Sockets from one address, across accounts (a household or office NAT shares one).
+MAX_CONNECTIONS_PER_IP = 50
+#: Sockets this process will hold at all, so a flood can't exhaust memory and file handles.
+MAX_CONNECTIONS_TOTAL = 10_000
+
+
+def client_ip(websocket: WebSocket) -> str:
+    """The caller's address, by the same rule as the HTTP middleware (first X-Forwarded-For hop)."""
+    forwarded = websocket.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    return websocket.client.host if websocket.client else "unknown"
 
 PRESENCE_TYPES = {"user_status_changed", "status_update", "presence_update"}
 CLOSE_UNAUTHENTICATED = 4401
@@ -43,6 +55,15 @@ async def run_protocol_session(websocket: WebSocket, auth_token: str, version: i
     if version not in SUPPORTED_VERSIONS:
         metrics.incr("connections_rejected")
         raise exceptions.WebSocketException(code=1008, reason=f"Unsupported protocol version {version}.")
+
+    # Before authenticating: cheap, and it also slows token guessing over sockets.
+    ip = client_ip(websocket)
+    if len(manager.active_connections) >= MAX_CONNECTIONS_TOTAL:
+        metrics.incr("connections_rejected")
+        raise exceptions.WebSocketException(code=1013, reason="The server is at capacity. Try again later.")
+    if manager.count_connections_from_ip(ip) >= MAX_CONNECTIONS_PER_IP:
+        metrics.incr("connections_rejected")
+        raise exceptions.WebSocketException(code=1008, reason="Too many open connections from this address.")
 
     try:
         principal = resolver.resolve(auth_token)
@@ -72,7 +93,7 @@ async def run_protocol_session(websocket: WebSocket, auth_token: str, version: i
     )
 
     await manager.connect_global(
-        websocket=websocket, auth_token=auth_token, accessible_channels=list(subscriptions), context=ctx
+        websocket=websocket, auth_token=auth_token, accessible_channels=list(subscriptions), context=ctx, ip=ip
     )
     metrics.incr("connections_opened")
     logger.info(f"Protocol session opened | session={session_id} principal_kind={principal.kind} channels={len(subscriptions)}")
