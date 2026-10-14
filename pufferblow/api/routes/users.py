@@ -193,16 +193,29 @@ async def signup_new_user(request: SignupRequest):
     }
 
 
-@router.get("/signin", status_code=200)
-async def signin_user(query: SigninQuery = Depends()):
-    """Sign in to this instance with a username + password.
+@router.post("/signin", status_code=200)
+async def signin_user(body: SigninQuery):
+    """Sign in to this instance with a username + password, sent as a JSON body.
 
-    Accepts the credentials as query parameters — historical
-    shape that predates the body convention. Clients should treat
-    the password as sensitive (do not log the full URL).
+    Returns the same session-token pair as `/signup`. See `_sign_in` for the failure modes.
+    """
+    return _sign_in(body.username, body.password)
 
-    Returns the same session-token pair as `/signup`. Failure
-    modes:
+
+@router.get("/signin", status_code=200, deprecated=True)
+async def signin_user_with_query(query: SigninQuery = Depends()):
+    """Deprecated: the same sign-in with the credentials in the query string.
+
+    A password in the URL ends up in access logs, proxies and browser history. Kept so older
+    clients keep working; use `POST /signin`.
+    """
+    return _sign_in(query.username, query.password)
+
+
+def _sign_in(username: str, password: str) -> dict:
+    """Check the credentials and issue a session.
+
+    Failure modes:
 
       - 401 — wrong password.
       - 403 — account is banned, OR the account exists but
@@ -216,14 +229,14 @@ async def signin_user(query: SigninQuery = Depends()):
     # The server-side ``message`` field carries the specific reason
     # for logs so operators can still debug — only the public
     # surface stays generic.
-    if not api_initializer.user_manager.check_username(username=query.username):
+    if not api_initializer.user_manager.check_username(username=username):
         raise ApiError(
             ErrorCode.AUTH_INVALID_CREDENTIALS,
-            message=f"Sign-in attempt for unknown username {query.username!r}",
+            message=f"Sign-in attempt for unknown username {username!r}",
         )
 
     user, is_signin_successful, failure_reason = api_initializer.user_manager.sign_in(
-        username=query.username, password=query.password
+        username=username, password=password
     )
     if not is_signin_successful:
         if failure_reason == "instance_mismatch":
@@ -240,7 +253,7 @@ async def signin_user(query: SigninQuery = Depends()):
         # generic shape as "unknown username" above.
         raise ApiError(
             ErrorCode.AUTH_INVALID_CREDENTIALS,
-            message=f"Sign-in attempt with wrong password for {query.username!r}",
+            message=f"Sign-in attempt with wrong password for {username!r}",
         )
 
     api_initializer.database_handler.create_activity_audit_entry(
@@ -248,11 +261,11 @@ async def signin_user(query: SigninQuery = Depends()):
             activity_id=str(uuid.uuid4()),
             activity_type="user_signed_in",
             user_id=str(user.user_id),
-            title=f"User {query.username} signed in",
-            description=f"User {query.username} successfully signed in to their account",
+            title=f"User {username} signed in",
+            description=f"User {username} successfully signed in to their account",
             metadata_json=json.dumps(
                 {
-                    "username": query.username,
+                    "username": username,
                     "user_id": str(user.user_id),
                     "signin_method": "password",
                 }
