@@ -150,3 +150,51 @@ def test_two_connections_make_progress_at_the_same_time():
         assert time.perf_counter() - started < 0.55
 
     asyncio.run(main())
+
+
+def test_a_check_that_straddles_an_access_change_is_run_again():
+    async def main():
+        _, ctx, *_ = _setup()
+        calls: list[int] = []
+
+        def check():
+            calls.append(len(calls))
+            if len(calls) == 1:
+                time.sleep(0.1)  # the first answer is computed from permissions that then change
+            return len(calls)
+
+        async def revoke():
+            await asyncio.sleep(0.03)
+            ctx.access_version += 1  # what WebSocketsManager.revalidate_subscriptions does
+
+        asyncio.create_task(revoke())
+        assert await ctx.in_thread_unless_access_changed(check) == 2  # the stale first answer was discarded
+        assert len(calls) == 2
+
+    asyncio.run(main())
+
+
+def test_subscribe_does_not_resurrect_a_subscription_revoked_while_it_checked():
+    async def main():
+        class Authorizer:
+            allowed = True
+
+            def can_subscribe(self, *_a):
+                answer = self.allowed  # read first, then "query": the answer predates a revocation
+                time.sleep(0.1)
+                return answer
+
+        authorizer = Authorizer()
+        dispatcher, ctx, *_ = _setup(authorizer=authorizer)
+
+        async def revoke():
+            await asyncio.sleep(0.03)
+            authorizer.allowed = False
+            ctx.access_version += 1  # what WebSocketsManager.revalidate_subscriptions does
+
+        asyncio.create_task(revoke())
+        reply = (await dispatcher.dispatch(ctx, _command("channel.subscribe", {"channel_id": "c1"}))).reply
+        assert reply["type"] == "error"
+        assert ctx.subscriptions == set()
+
+    asyncio.run(main())

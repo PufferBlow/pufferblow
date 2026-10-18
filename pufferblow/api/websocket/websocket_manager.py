@@ -484,6 +484,8 @@ class WebSocketsManager:
             if context is None:
                 continue
 
+            # Tell any check running in a worker thread for this connection that its answer may be stale.
+            context.access_version += 1
             credential_ok = True
             try:
                 if context.revalidate is not None:

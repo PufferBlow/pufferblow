@@ -47,6 +47,19 @@ class ConnectionContext:
     #: Re-validates the connection's credential and returns the current principal, or raises.
     #: Closes over the token so the secret is never stored on the context or logged.
     revalidate: Callable[[], Principal] | None = None
+    #: Bumped (on the event loop) whenever access may have changed under this connection. A check
+    #: that ran in a worker thread is only trusted if this did not move while it ran.
+    access_version: int = 0
+
+    async def in_thread_unless_access_changed(self, fn: Callable[..., Any], *args: Any, attempts: int = 3) -> Any:
+        """Run ``fn`` in a worker thread; repeat it if access changed meanwhile, so a result
+        computed from stale permissions is never acted on."""
+        for _ in range(attempts):
+            version = self.access_version
+            result = await asyncio.to_thread(fn, *args)
+            if self.access_version == version:
+                return result
+        raise RuntimeError("Access kept changing while a check ran.")
 
 
 @dataclass
@@ -108,7 +121,7 @@ class CommandDispatcher:
             if ctx.revalidate is not None:
                 # Expired, revoked or banned credentials stop working mid-connection, and role
                 # changes take effect on the next command.
-                ctx.principal = await asyncio.to_thread(ctx.revalidate)  # a database lookup
+                ctx.principal = await ctx.in_thread_unless_access_changed(ctx.revalidate)  # a database lookup
 
             output, duplicate = await self._run(spec, ctx, data, envelope.name)
             reply = build_ack(envelope.id, output.result)

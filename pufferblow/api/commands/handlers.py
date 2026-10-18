@@ -62,7 +62,7 @@ def build_registry(
         return HandlerOutput(result=outcome.value, events=outcome.events)
 
     async def channel_subscribe(ctx: ConnectionContext, data: schema.ChannelRef) -> HandlerOutput:
-        if not await asyncio.to_thread(authorizer.can_subscribe, ctx.principal, data.channel_id):
+        if not await ctx.in_thread_unless_access_changed(authorizer.can_subscribe, ctx.principal, data.channel_id):
             # Same answer for "does not exist" and "not yours": existence is not disclosed.
             raise ApiError(ErrorCode.CHANNELS_NOT_FOUND, details={"channel_id": data.channel_id})
         ctx.subscriptions.add(data.channel_id)
