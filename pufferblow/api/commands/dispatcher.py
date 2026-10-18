@@ -9,6 +9,8 @@ is ever emitted for a mutation that failed.
 
 from __future__ import annotations
 
+import asyncio
+
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -106,7 +108,7 @@ class CommandDispatcher:
             if ctx.revalidate is not None:
                 # Expired, revoked or banned credentials stop working mid-connection, and role
                 # changes take effect on the next command.
-                ctx.principal = ctx.revalidate()
+                ctx.principal = await asyncio.to_thread(ctx.revalidate)  # a database lookup
 
             output, duplicate = await self._run(spec, ctx, data, envelope.name)
             reply = build_ack(envelope.id, output.result)
@@ -182,7 +184,7 @@ class CommandDispatcher:
             return await spec.handler(ctx, data), False
 
         principal_id = ctx.principal.id
-        state, stored = self._store.reserve_idempotency_key(principal_id, name, key)
+        state, stored = await asyncio.to_thread(self._store.reserve_idempotency_key, principal_id, name, key)
         if state == "completed":
             metrics.incr("duplicate_commands")
             return HandlerOutput(result=stored or {}), True
@@ -196,9 +198,9 @@ class CommandDispatcher:
             output = await spec.handler(ctx, data)
         except BaseException:
             # Nothing was committed, or we cannot tell: free the key so a retry runs for real.
-            self._store.release_idempotency_key(principal_id, name, key)
+            await asyncio.shield(asyncio.to_thread(self._store.release_idempotency_key, principal_id, name, key))
             raise
-        self._store.complete_idempotency_key(principal_id, name, key, output.result)
+        await asyncio.to_thread(self._store.complete_idempotency_key, principal_id, name, key, output.result)
         return output, False
 
     def _record(self, name: str, outcome: str, started: float, ctx: ConnectionContext, *, code: str | None = None) -> None:

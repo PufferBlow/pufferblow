@@ -3,10 +3,17 @@
 Each handler is a thin translation layer: it unpacks an already-validated
 payload, calls the shared service, and returns a result plus domain events.
 Business rules live in :mod:`pufferblow.api.services`, not here.
+
+The services and the authorizer are synchronous and talk to the database, so a handler hands
+them to a worker thread (``asyncio.to_thread``) instead of calling them on the event loop, where
+one slow query would stall every connection. Each database call opens its own session, so this is
+safe. Anything that touches loop-owned state (``ctx.subscriptions``, the publisher's sequence
+counters) stays on the loop, after the call returns.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 from pufferblow.api.commands.dispatcher import CommandSpec, ConnectionContext, HandlerOutput
@@ -28,7 +35,8 @@ def build_registry(
     user is part of, or ``None``; without it, typing in DMs is accepted but not delivered."""
 
     async def message_create(ctx: ConnectionContext, data: schema.MessageCreate) -> HandlerOutput:
-        outcome = messages.create(
+        outcome = await asyncio.to_thread(
+            messages.create,
             ctx.principal,
             data.channel_id,
             data.content,
@@ -38,23 +46,23 @@ def build_registry(
         return HandlerOutput(result={"message": outcome.value["message"]}, events=outcome.events)
 
     async def message_edit(ctx: ConnectionContext, data: schema.MessageEdit) -> HandlerOutput:
-        outcome = messages.edit(ctx.principal, data.channel_id, data.message_id, data.content)
+        outcome = await asyncio.to_thread(messages.edit, ctx.principal, data.channel_id, data.message_id, data.content)
         return HandlerOutput(result=outcome.value, events=outcome.events)
 
     async def message_delete(ctx: ConnectionContext, data: schema.MessageDelete) -> HandlerOutput:
-        outcome = messages.delete(ctx.principal, data.channel_id, data.message_id)
+        outcome = await asyncio.to_thread(messages.delete, ctx.principal, data.channel_id, data.message_id)
         return HandlerOutput(result=outcome.value, events=outcome.events)
 
     async def reaction_add(ctx: ConnectionContext, data: schema.ReactionChange) -> HandlerOutput:
-        outcome = messages.add_reaction(ctx.principal, data.channel_id, data.message_id, data.emoji)
+        outcome = await asyncio.to_thread(messages.add_reaction, ctx.principal, data.channel_id, data.message_id, data.emoji)
         return HandlerOutput(result=outcome.value, events=outcome.events)
 
     async def reaction_remove(ctx: ConnectionContext, data: schema.ReactionChange) -> HandlerOutput:
-        outcome = messages.remove_reaction(ctx.principal, data.channel_id, data.message_id, data.emoji)
+        outcome = await asyncio.to_thread(messages.remove_reaction, ctx.principal, data.channel_id, data.message_id, data.emoji)
         return HandlerOutput(result=outcome.value, events=outcome.events)
 
     async def channel_subscribe(ctx: ConnectionContext, data: schema.ChannelRef) -> HandlerOutput:
-        if not authorizer.can_subscribe(ctx.principal, data.channel_id):
+        if not await asyncio.to_thread(authorizer.can_subscribe, ctx.principal, data.channel_id):
             # Same answer for "does not exist" and "not yours": existence is not disclosed.
             raise ApiError(ErrorCode.CHANNELS_NOT_FOUND, details={"channel_id": data.channel_id})
         ctx.subscriptions.add(data.channel_id)
@@ -72,7 +80,7 @@ def build_registry(
         return HandlerOutput(result={"channel_id": data.channel_id, "subscribed": False})
 
     async def events_resync(ctx: ConnectionContext, data: schema.EventsResync) -> HandlerOutput:
-        recent = messages.recent(ctx.principal, data.channel_id, data.limit)
+        recent = await asyncio.to_thread(messages.recent, ctx.principal, data.channel_id, data.limit)
         return HandlerOutput(
             result={
                 "channel_id": data.channel_id,
@@ -88,8 +96,8 @@ def build_registry(
 
         if data.channel_id is not None:
             # Only someone who could send here may announce they are about to.
-            authorizer.require_send(ctx.principal, data.channel_id)
-            authorizer.require_not_timed_out(ctx.principal, "send messages")
+            await asyncio.to_thread(authorizer.require_send, ctx.principal, data.channel_id)
+            await asyncio.to_thread(authorizer.require_not_timed_out, ctx.principal, "send messages")
             event = DomainEvent(
                 name=TYPING_STARTED,
                 data={"channel_id": data.channel_id, **typing},
@@ -100,7 +108,7 @@ def build_registry(
 
         # A DM: the same answer whether the conversation is unknown, not yours, or with a
         # remote peer (typing is not federated), so nothing about it is disclosed.
-        peer = None if ctx.principal.is_bot or dm_peer is None else dm_peer(data.conversation_id, user_id)
+        peer = None if ctx.principal.is_bot or dm_peer is None else await asyncio.to_thread(dm_peer, data.conversation_id, user_id)
         if peer is None:
             return HandlerOutput(result={"delivered": False})
         event = DomainEvent(
