@@ -20,6 +20,7 @@ from pufferblow.api.routes.system_routes.server_runtime import (
     build_instance_health_payload,
 )
 from pufferblow.core.bootstrap import api_initializer
+from pufferblow.core.header_auth import HeaderAuthMiddleware
 from pufferblow.server.middlewares import (
     PrivateNetworkAccessMiddleware,
     RateLimitingMiddleware,
@@ -128,6 +129,9 @@ else:
         "CORS middleware disabled because [security].cors_origins or [security].cors_origin_regex is not set in ~/.pufferblow/config.toml"
     )
 api.add_middleware(PrivateNetworkAccessMiddleware)
+# Outermost of all: turns `Authorization: Bearer` (or the websocket bearer subprotocol) into the
+# `auth_token` parameter before the middleware above and the routes read it.
+api.add_middleware(HeaderAuthMiddleware)
 
 # Register the global error handlers BEFORE the routers so any
 # exception raised during route registration (e.g. an import-time

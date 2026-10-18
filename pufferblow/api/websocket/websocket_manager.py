@@ -230,7 +230,8 @@ class WebSocketsManager:
             None.
         """
         try:
-            await websocket.accept()
+            # A browser client offers `pufferblow.v1` next to its `bearer.<token>`; echo only the former.
+            await websocket.accept(subprotocol=websocket.scope.get("pufferblow.ws_subprotocol"))
 
             # The principal is the user or the bot; the token is not parsed to find out.
             user_id = context.principal.id
