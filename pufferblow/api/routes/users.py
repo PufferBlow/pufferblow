@@ -24,6 +24,7 @@ from pufferblow.api.utils.appearance import (
     generate_shuffle_seed,
     is_valid_hex_color,
 )
+from pufferblow.api.utils.default_art import plan_appearance_update
 from pufferblow.api.utils.is_able_to_update import is_able_to_update
 from pufferblow.core.bootstrap import api_initializer
 
@@ -450,16 +451,19 @@ async def update_profile_appearance_route(
     """Switch the viewer's appearance mode without uploading a new file.
 
     Body (all optional):
-        avatar_kind: 'identicon' | 'image'. Use 'identicon' to revert
-            from a custom upload back to the DiceBear-style identicon.
-            Setting 'image' here without a previously-uploaded
-            avatar_url falls back to identicon rendering client-side.
-        banner_kind: 'solid' | 'image'.
+        avatar_kind: 'identicon' | 'image'. 'identicon' is the default
+            puffer art: a real file the server hosts, written into
+            avatar_url. Use it to revert from a custom upload.
+            'image' is only honoured while there is an upload to go
+            back to.
+        banner_kind: 'default' | 'solid' | 'image'. 'default' is the
+            hosted default banner (written into banner_url); 'solid'
+            clears the banner image so accent_color shows.
         accent_color: hex '#RRGGBB' — applied when banner_kind='solid'.
             Picker UI is expected to enforce a palette, but any valid
             hex is accepted server-side.
-        shuffle_avatar_seed: when true, regenerate the identicon seed
-            so the same user gets a different identicon. Useful for
+        shuffle_avatar_seed: when true, regenerate the seed so the user
+            gets different default art. Useful for
             the 'I don't like my default' case.
     """
     user_id = get_current_user(auth_token)
@@ -485,20 +489,35 @@ async def update_profile_appearance_route(
 
     new_seed = generate_shuffle_seed() if shuffle_avatar_seed else None
 
-    api_initializer.database_handler.update_user_appearance(
-        user_id=user_id,
+    # The URLs follow the kinds, so a client that only reads avatar_url / banner_url is never out of step.
+    current = api_initializer.database_handler.get_user(user_id=user_id)
+    plan = plan_appearance_update(
+        stable_id=str(user_id),
+        current_seed=current.avatar_seed,
+        current_avatar_url=current.avatar_url,
+        current_banner_url=current.banner_url,
         avatar_kind=avatar_kind,
         banner_kind=banner_kind,
+        new_seed=new_seed,
+    )
+    api_initializer.database_handler.update_user_appearance(
+        user_id=user_id,
+        avatar_kind=plan.avatar_kind,
+        banner_kind=plan.banner_kind,
         accent_color=accent_color,
         avatar_seed=new_seed,
+        avatar_url=plan.avatar_url,
+        banner_url=plan.banner_url,
     )
     return {
         "status_code": 200,
         "message": "Appearance updated",
-        "avatar_kind": avatar_kind,
-        "banner_kind": banner_kind,
+        "avatar_kind": plan.avatar_kind,
+        "banner_kind": plan.banner_kind,
         "accent_color": accent_color,
         "avatar_seed": new_seed,
+        "avatar_url": plan.avatar_url,
+        "banner_url": plan.banner_url,
     }
 
 

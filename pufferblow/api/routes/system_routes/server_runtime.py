@@ -19,6 +19,7 @@ from pufferblow.api.utils.appearance import (
     generate_shuffle_seed,
     is_valid_hex_color,
 )
+from pufferblow.api.utils.default_art import plan_appearance_update
 from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.api.commands.metrics import metrics
@@ -621,12 +622,24 @@ async def update_server_appearance_route(
 
     new_seed = generate_shuffle_seed() if shuffle_avatar_seed else None
 
+    plan = plan_appearance_update(
+        stable_id=str(server.server_id),
+        current_seed=getattr(server, "avatar_seed", None),
+        current_avatar_url=getattr(server, "avatar_url", None),
+        current_banner_url=getattr(server, "banner_url", None),
+        avatar_kind=avatar_kind,
+        banner_kind=banner_kind,
+        new_seed=new_seed,
+    )
+    avatar_kind, banner_kind = plan.avatar_kind, plan.banner_kind
     database_handler.update_server_appearance(
         server_id=server.server_id,
         avatar_kind=avatar_kind,
         banner_kind=banner_kind,
         accent_color=accent_color,
         avatar_seed=new_seed,
+        avatar_url=plan.avatar_url,
+        banner_url=plan.banner_url,
     )
 
     log_activity(
@@ -651,6 +664,8 @@ async def update_server_appearance_route(
         "banner_kind": banner_kind,
         "accent_color": accent_color,
         "avatar_seed": new_seed,
+        "avatar_url": plan.avatar_url,
+        "banner_url": plan.banner_url,
     }
 
 

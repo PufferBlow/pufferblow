@@ -77,7 +77,8 @@ def generate_shuffle_seed() -> str:
 # appearance endpoints validate against the same set the column
 # constraints assume.
 VALID_AVATAR_KINDS = frozenset({"identicon", "image"})
-VALID_BANNER_KINDS = frozenset({"solid", "image"})
+# "identicon" (avatar) and "default" (banner) both mean the hosted default art; see utils/default_art.py.
+VALID_BANNER_KINDS = frozenset({"default", "solid", "image"})
 
 
 _HEX_COLOR_LEN = 7  # "#RRGGBB"

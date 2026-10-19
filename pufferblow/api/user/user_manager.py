@@ -28,6 +28,7 @@ from pufferblow.api.models.config_model import Config
 from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, OWNER_ROLE_ID
 from pufferblow.api.user.status import normalize_user_status
 from pufferblow.api.utils.appearance import derive_accent_color
+from pufferblow.api.utils.default_art import default_avatar_url, default_banner_url
 
 
 # ── LQIP URL resolution ───────────────────────────────────────────────
@@ -155,10 +156,14 @@ class UserManager:
         # across users on the same instance). avatar_seed defaults to
         # the user_id so the identicon is stable until the user clicks
         # "shuffle" in the appearance settings.
+        # The default art is a real file the server hosts; the URL goes in avatar_url / banner_url so
+        # every client shows the same picture, official or not.
         new_user.avatar_kind = "identicon"
-        new_user.banner_kind = "solid"
+        new_user.banner_kind = "default"
         new_user.accent_color = derive_accent_color(user_id)
         new_user.avatar_seed = user_id
+        new_user.avatar_url = default_avatar_url(user_id)
+        new_user.banner_url = default_banner_url(user_id)
         new_user.joined_servers_ids = [
             self.database_handler.get_server_id(),
         ]

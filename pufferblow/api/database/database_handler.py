@@ -106,6 +106,13 @@ def _retry_on_disconnect(
     raise last_exc
 
 
+def _as_uuid(value):
+    """``value`` as a ``uuid.UUID``: the ``users.user_id`` column is a UUID, and SQLite will not bind a plain string to it."""
+    import uuid as _uuid
+
+    return value if isinstance(value, _uuid.UUID) else _uuid.UUID(str(value))
+
+
 class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin):
     """Database handler for PufferBlow's API"""
     def __init__(
@@ -1240,6 +1247,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         from pufferblow.api.database.tables.server import Server as _ServerTable
         from pufferblow.api.database.tables.users import Users as _UsersTable
         from pufferblow.api.utils.appearance import derive_accent_color
+        from pufferblow.api.utils.default_art import default_avatar_url, default_banner_url
 
         with self.database_session() as session:
             user_rows = (
@@ -1247,6 +1255,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 .filter(
                     (_UsersTable.accent_color.is_(None))
                     | (_UsersTable.avatar_seed.is_(None))
+                    | (_UsersTable.avatar_url.is_(None))
+                    | (_UsersTable.avatar_url == "")
+                    | (_UsersTable.banner_url.is_(None))
+                    | (_UsersTable.banner_url == "")
                 )
                 .all()
             )
@@ -1260,12 +1272,22 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     row.avatar_kind = "identicon"
                 if not row.banner_kind:
                     row.banner_kind = "solid"
+                # Real files for the default art, so every client can show them.
+                if row.avatar_kind == "identicon" and not row.avatar_url:
+                    row.avatar_url = default_avatar_url(row.avatar_seed)
+                if row.banner_kind in ("solid", "default") and not row.banner_url:
+                    row.banner_kind = "default"
+                    row.banner_url = default_banner_url(row.avatar_seed)
 
             server_rows = (
                 session.query(_ServerTable)
                 .filter(
                     (_ServerTable.accent_color.is_(None))
                     | (_ServerTable.avatar_seed.is_(None))
+                    | (_ServerTable.avatar_url.is_(None))
+                    | (_ServerTable.avatar_url == "")
+                    | (_ServerTable.banner_url.is_(None))
+                    | (_ServerTable.banner_url == "")
                 )
                 .all()
             )
@@ -1279,6 +1301,11 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     row.avatar_kind = "identicon"
                 if not row.banner_kind:
                     row.banner_kind = "solid"
+                if row.avatar_kind == "identicon" and not row.avatar_url:
+                    row.avatar_url = default_avatar_url(row.avatar_seed)
+                if row.banner_kind in ("solid", "default") and not row.banner_url:
+                    row.banner_kind = "default"
+                    row.banner_url = default_banner_url(row.avatar_seed)
 
             if user_rows or server_rows:
                 session.commit()
@@ -2007,12 +2034,16 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         banner_kind: str | None = None,
         accent_color: str | None = None,
         avatar_seed: str | None = None,
+        avatar_url: str | None = None,
+        banner_url: str | None = None,
     ) -> None:
         """Patch the user's appearance preferences.
 
-        Any subset of the four fields can be provided. None means "leave
-        unchanged." The route layer is responsible for input validation
-        (see ``pufferblow.api.utils.appearance``).
+        Any subset of the fields can be provided. None means "leave
+        unchanged" (an empty string clears a URL). The route layer is
+        responsible for input validation (see ``pufferblow.api.utils.appearance``)
+        and for choosing the URLs that match the kinds
+        (``pufferblow.api.utils.default_art.plan_appearance_update``).
         """
         updated_at = datetime.datetime.now(datetime.UTC)
         values: dict = {"updated_at": updated_at}
@@ -2024,6 +2055,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             values["accent_color"] = accent_color
         if avatar_seed is not None:
             values["avatar_seed"] = avatar_seed
+        if avatar_url is not None:
+            values["avatar_url"] = avatar_url
+        if banner_url is not None:
+            values["banner_url"] = banner_url
         if len(values) == 1:
             # Nothing meaningful to update — caller passed all-None.
             return
@@ -2031,7 +2066,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             stmt = (
                 update(Users)
                 .values(**values)
-                .where(Users.user_id == user_id)
+                .where(Users.user_id == _as_uuid(user_id))
             )
             session.execute(stmt)
             session.commit()

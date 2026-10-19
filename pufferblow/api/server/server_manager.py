@@ -11,6 +11,7 @@ from pufferblow.api.database.tables.server import Server
 
 # Appearance defaults
 from pufferblow.api.utils.appearance import derive_accent_color
+from pufferblow.api.utils.default_art import default_avatar_url, default_banner_url
 
 
 class ServerManager:
@@ -74,9 +75,11 @@ class ServerManager:
             # color/identicon stay stable across instance restarts and
             # are recognizably "this domain" across federation peers).
             avatar_kind="identicon",
-            banner_kind="solid",
+            banner_kind="default",
             accent_color=derive_accent_color(server_id),
             avatar_seed=server_id,
+            avatar_url=default_avatar_url(server_id),
+            banner_url=default_banner_url(server_id),
         )
 
         # Create the server row first

@@ -339,22 +339,45 @@ carries `banner_url` + `banner_lqip_url`.
 
 ### `PUT /api/v1/users/profile/appearance`
 
-Switch avatar / banner mode without uploading a new file. Useful
-for reverting to an identicon or picking a new accent color.
+Switch avatar / banner mode without uploading a new file, shuffle the
+default art, or pick a new accent color.
 
 ```json
 {
   "auth_token": "<token>",
-  "avatar_kind": "identicon",  // or "image"
-  "banner_kind": "solid",      // or "image"
-  "accent_color": "#3b82f6",   // applies when banner_kind=solid
-  "shuffle_avatar_seed": true  // regenerate identicon seed
+  "avatar_kind": "identicon",  // the default art, or "image" (an upload)
+  "banner_kind": "default",    // the default art, "solid" (accent colour only), or "image"
+  "accent_color": "#3b82f6",
+  "shuffle_avatar_seed": true  // pick different default art
 }
 ```
 
-All fields are optional; only the ones present change. Setting
-`avatar_kind` to `image` without a previously-uploaded avatar
-falls back to identicon rendering on the client.
+All fields are optional; only the ones present change. The response
+carries the resulting `avatar_url` / `banner_url`, which always match
+the kinds: `identicon` / `default` write the hosted default image into
+the URL, `solid` clears `banner_url`, and `image` is only honoured while
+there is an upload to go back to. See
+[Default avatars and banners](#default-avatars-and-banners).
+
+#### Default avatars and banners
+
+Every user and server has an `avatar_url` and `banner_url` from the moment
+it exists. Until someone uploads their own, they point at images the
+instance hosts itself, picked from the id (12 tones x 6 expressions; a
+banner shares its avatar's tone). They are plain files, so any client,
+official or not, shows them by following the URL it is given:
+
+```
+GET /assets/avatars/pb-avatar-<expression>-<tone>.svg   (or .png, 512 px)
+GET /assets/banners/pb-banner-<expression>-<tone>.svg   (or .png, 1500x500)
+```
+
+No credential is needed. The files are immutable and cached for a year.
+Like `/storage/<hash>` paths, the URLs are relative to the instance;
+join them to its origin. Tones: ink, graphite, slate, ash, silver, paper,
+brass, coral, rose, violet, sky, sage. Expressions: default, happy, wink,
+sleepy, surprised, grumpy. Existing accounts and servers are filled in on
+the first start after an upgrade.
 
 ### `POST /api/v1/users/profile/reset-auth-token`
 
@@ -1063,8 +1086,8 @@ alone.
 ### `PUT /api/v1/system/server-appearance`
 
 Switch server avatar / banner mode without uploading. Same shape
-as the per-user `profile/appearance` route. Requires
-`manage_server_settings`.
+and URL handling as the per-user `profile/appearance` route (including
+the hosted default art). Requires `manage_server_settings`.
 
 ### `GET /api/v1/system/instance-health`
 
