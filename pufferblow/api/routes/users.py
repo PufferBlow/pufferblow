@@ -25,6 +25,14 @@ from pufferblow.api.utils.appearance import (
     is_valid_hex_color,
 )
 from pufferblow.api.utils.default_art import plan_appearance_update
+from pufferblow.api.utils.profile_settings import (
+    ABOUT_MAX,
+    CUSTOM_STATUS_MAX,
+    PRONOUNS_MAX,
+    ProfileSettingsError,
+    check_text_length,
+    merge_profile_settings,
+)
 from pufferblow.api.utils.is_able_to_update import is_able_to_update
 from pufferblow.core.bootstrap import api_initializer
 
@@ -59,6 +67,14 @@ import re
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{3,32}$")
 _PASSWORD_MIN_LENGTH = 8
 _PASSWORD_MAX_LENGTH = 256
+
+
+def _checked_text(field: str, value: str, limit: int) -> str:
+    """A profile text field, trimmed, or a clear 400 naming the field and its limit."""
+    try:
+        return check_text_length(field, value, limit)
+    except ProfileSettingsError as exc:
+        raise ApiError(ErrorCode.VALIDATION_FIELD_RANGE, message=str(exc), details={"field": field, "max": limit}) from exc
 
 
 def _validate_username_format(username: str) -> None:
@@ -362,8 +378,17 @@ async def edit_users_profile_route(request: EditProfileRequest):
         return {"status_code": 200, "message": "Password updated successfully"}
 
     if request.about is not None:
-        api_initializer.user_manager.update_user_about(user_id=user_id, new_about=request.about)
+        about = _checked_text("about", request.about, ABOUT_MAX)
+        api_initializer.user_manager.update_user_about(user_id=user_id, new_about=about)
         return {"status_code": 200, "message": "About updated successfully"}
+
+    if request.pronouns is not None or request.custom_status is not None:
+        pronouns = None if request.pronouns is None else _checked_text("pronouns", request.pronouns, PRONOUNS_MAX)
+        custom_status = None if request.custom_status is None else _checked_text("custom_status", request.custom_status, CUSTOM_STATUS_MAX)
+        api_initializer.database_handler.update_user_profile_text(
+            user_id=user_id, pronouns=pronouns, custom_status=custom_status
+        )
+        return {"status_code": 200, "message": "Profile updated successfully", "pronouns": pronouns, "custom_status": custom_status}
 
     raise exceptions.HTTPException(status_code=400, detail="No update payload was provided")
 
@@ -447,6 +472,7 @@ async def update_profile_appearance_route(
     banner_kind: str | None = Body(default=None),
     accent_color: str | None = Body(default=None),
     shuffle_avatar_seed: bool = Body(default=False),
+    profile_settings: dict | None = Body(default=None),
 ):
     """Switch the viewer's appearance mode without uploading a new file.
 
@@ -465,6 +491,10 @@ async def update_profile_appearance_route(
         shuffle_avatar_seed: when true, regenerate the seed so the user
             gets different default art. Useful for
             the 'I don't like my default' case.
+        profile_settings: a (partial) object of profile customisation
+            choices: frame, tone, tone2, card_theme, banner_pattern,
+            name_font, motion and sections. Only the keys sent change; see
+            ``pufferblow.api.utils.profile_settings`` for the allowed values.
     """
     user_id = get_current_user(auth_token)
 
@@ -489,8 +519,15 @@ async def update_profile_appearance_route(
 
     new_seed = generate_shuffle_seed() if shuffle_avatar_seed else None
 
-    # The URLs follow the kinds, so a client that only reads avatar_url / banner_url is never out of step.
     current = api_initializer.database_handler.get_user(user_id=user_id)
+    new_settings = None
+    if profile_settings is not None:
+        try:
+            new_settings = merge_profile_settings(current.profile_settings, profile_settings)
+        except ProfileSettingsError as exc:
+            raise ApiError(ErrorCode.VALIDATION_FIELD_RANGE, message=str(exc), details={"field": exc.field}) from exc
+
+    # The URLs follow the kinds, so a client that only reads avatar_url / banner_url is never out of step.
     plan = plan_appearance_update(
         stable_id=str(user_id),
         current_seed=current.avatar_seed,
@@ -508,10 +545,12 @@ async def update_profile_appearance_route(
         avatar_seed=new_seed,
         avatar_url=plan.avatar_url,
         banner_url=plan.banner_url,
+        profile_settings=new_settings,
     )
     return {
         "status_code": 200,
         "message": "Appearance updated",
+        "profile_settings": new_settings,
         "avatar_kind": plan.avatar_kind,
         "banner_kind": plan.banner_kind,
         "accent_color": accent_color,

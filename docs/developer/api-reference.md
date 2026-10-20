@@ -268,6 +268,9 @@ Returns:
     "banner_kind": "solid",
     "accent_color": "#3b82f6",
     "avatar_seed": "...",
+    "pronouns": "she/her",              // null when not set
+    "custom_status": "grinding to Phantom",  // null when not set
+    "profile_settings": { ... },        // see "Profile customisation"; always complete
     "status": "online",
     "roles_ids": [...],
     "resolved_roles": [...],
@@ -297,16 +300,22 @@ fields:
   "status": "afk",               // one of: online, idle, afk, dnd
   "new_password": "...",         // requires `old_password`
   "old_password": "...",
-  "about": "Lover of mango pickle."
+  "about": "Lover of mango pickle.",   // at most 190 characters
+  "pronouns": "she/her",               // at most 40; "" clears it
+  "custom_status": "grinding to Phantom"  // at most 60; "" clears it
 }
 ```
 
 Returns `{ "status_code": 200, "message": "..." }`. The route
 short-circuits on the first set field, so to update both username
-AND bio, call it twice.
+AND bio, call it twice. `pronouns` and `custom_status` may be sent
+together (or one at a time); an omitted one is left alone and `""`
+clears it. Text is trimmed.
 
 - 409 — new username already taken.
 - 401 — `old_password` doesn't match (for password changes).
+- 400 (`validation.field_range`) — `about`, `pronouns` or `custom_status`
+  is over its limit; `details` carries `field` and `max`.
 
 ### `POST /api/v1/users/profile/avatar`
 
@@ -351,7 +360,8 @@ default art, or pick a new accent color.
   "avatar_kind": "identicon",  // the default art, or "image" (an upload)
   "banner_kind": "default",    // the default art, "solid" (accent colour only), or "image"
   "accent_color": "#3b82f6",
-  "shuffle_avatar_seed": true  // pick different default art
+  "shuffle_avatar_seed": true,  // pick different default art
+  "profile_settings": { "frame": "spines", "sections": { "accounts": true } }
 }
 ```
 
@@ -361,6 +371,32 @@ the kinds: `identicon` / `default` write the hosted default image into
 the URL, `solid` clears `banner_url`, and `image` is only honoured while
 there is an upload to go back to. See
 [Default avatars and banners](#default-avatars-and-banners).
+
+#### Profile customisation
+
+`profile_settings` is the one surface a person is allowed to paint. Every
+option is a choice from a short list (never free text or a free colour), so
+any client can render a profile and none can be made unreadable. Send only
+the keys that change; `sections` merges one section at a time. A person who
+chose nothing has the defaults, and `profile_settings` in a profile is
+always the complete object.
+
+| Key | Values | Default |
+| --- | --- | --- |
+| `frame` | `none`, `ring`, `spines`, `bubbles` (drawn around the avatar) | `none` |
+| `tone` | `brass`, `coral`, `rose`, `violet`, `sky`, `sage`, or `null` (derive it from the handle) | `null` |
+| `tone2` | same as `tone`; the second colour of a `duo` card | `null` |
+| `card_theme` | `solid`, `duo`, `mix`, `plain` | `solid` |
+| `banner_pattern` | `ripple`, `burst`, `halftone`, `crowd`, or `null` (derive it from the handle) | `null` |
+| `name_font` | `marcellus`, `barlow`, `condensed`, `mono` | `barlow` |
+| `motion` | `puff`, `still` (whether the avatar moves on hover) | `puff` |
+| `sections` | `{ play, mains, accounts, badges }`, each `true`/`false` | play, mains, badges on |
+
+Clients mix the chosen colour into a dark card at a low, fixed strength, so
+white text stays readable whatever is chosen. The update is all-or-nothing:
+an unknown key or a value outside its list is a 400 (`validation.field_range`)
+whose `details.field` names it (`sections.play`, `tone`, ...), and nothing is
+saved, including any `accent_color` or kind sent with it.
 
 #### Default avatars and banners
 

@@ -2037,6 +2037,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         avatar_seed: str | None = None,
         avatar_url: str | None = None,
         banner_url: str | None = None,
+        profile_settings: dict | None = None,
     ) -> None:
         """Patch the user's appearance preferences.
 
@@ -2060,6 +2061,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             values["avatar_url"] = avatar_url
         if banner_url is not None:
             values["banner_url"] = banner_url
+        if profile_settings is not None:
+            values["profile_settings"] = profile_settings
         if len(values) == 1:
             # Nothing meaningful to update — caller passed all-None.
             return
@@ -2070,6 +2073,26 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 .where(Users.user_id == _as_uuid(user_id))
             )
             session.execute(stmt)
+            session.commit()
+
+    def update_user_profile_text(
+        self,
+        *,
+        user_id: str,
+        pronouns: str | None = None,
+        custom_status: str | None = None,
+    ) -> None:
+        """Set pronouns and/or the custom status line. ``None`` leaves a field alone; "" clears it."""
+        values: dict = {}
+        if pronouns is not None:
+            values["pronouns"] = pronouns or None
+        if custom_status is not None:
+            values["custom_status"] = custom_status or None
+        if not values:
+            return
+        values["updated_at"] = datetime.datetime.now(datetime.UTC)
+        with self.database_session() as session:
+            session.execute(update(Users).values(**values).where(Users.user_id == _as_uuid(user_id)))
             session.commit()
 
     def update_server_appearance(

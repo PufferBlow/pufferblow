@@ -106,6 +106,8 @@ class EditProfileRequest(BaseModel):
     new_password: str | None = None
     old_password: str | None = None
     about: str | None = None
+    pronouns: str | None = None
+    custom_status: str | None = None
 
 
 class EditProfileQuery(BaseModel):

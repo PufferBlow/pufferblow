@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 # Base
 from pufferblow.api.database.tables.declarative_base import Base
+from pufferblow.api.utils.profile_settings import effective_profile_settings
 
 
 class Users(Base):
@@ -66,6 +67,11 @@ class Users(Base):
     )
     accent_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     avatar_seed: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Profile customisation (see ``pufferblow.api.utils.profile_settings``). ``profile_settings`` is
+    # one JSON object of choices from short lists; null means "all defaults".
+    pronouns: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    custom_status: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    profile_settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     inbox_id: Mapped[UUID | None] = mapped_column(
         SA_UUID(as_uuid=True), nullable=True
     )
@@ -118,6 +124,9 @@ class Users(Base):
             "banner_kind": self.banner_kind,
             "accent_color": self.accent_color,
             "avatar_seed": self.avatar_seed,
+            "pronouns": self.pronouns,
+            "custom_status": self.custom_status,
+            "profile_settings": effective_profile_settings(self.profile_settings),
             "status": self.status,
             "origin_server": self.origin_server,
             "inbox_id": self.inbox_id,
