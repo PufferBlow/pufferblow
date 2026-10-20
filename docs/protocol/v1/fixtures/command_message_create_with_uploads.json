@@ -1,0 +1,17 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_13",
+    "name": "message.create",
+    "data": {
+      "channel_id": "c_general",
+      "content": "photos from the trip",
+      "upload_ids": [
+        "upl_Zq81xK0aTn3w"
+      ],
+      "nonce": "n_7d2"
+    }
+  }
+}

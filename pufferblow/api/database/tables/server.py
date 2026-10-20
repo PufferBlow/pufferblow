@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
-from pufferblow.api.utils.current_date import date_in_gmt
 
 
 class Server(Base):
@@ -42,7 +41,7 @@ class Server(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=date_in_gmt, nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
     def __repr__(self) -> str:

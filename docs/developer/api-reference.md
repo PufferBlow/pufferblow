@@ -222,21 +222,24 @@ Response on success (201):
 - 409 — username already exists.
 - 503 — operator hasn't run `pufferblow setup` yet.
 
-### `GET /api/v1/users/signin`
+### `POST /api/v1/users/signin`
 
-Sign in with username + password. Credentials passed as query
-parameters (historical shape). Treat the password as sensitive —
-do not log full URLs.
+Sign in with username + password, sent as a JSON body so the password
+never lands in a URL, a proxy log or browser history.
 
-```
-GET /api/v1/users/signin?username=alice&password=...
+```json
+{ "username": "alice", "password": "..." }
 ```
 
 Response matches signup. Failure modes:
 
-- 401 — wrong password.
+- 400 — an empty `username` or `password` (a `validation.*` error).
+- 401 — wrong password **or** unknown username, with the same answer
+  (`auth.invalid_credentials`) so a name cannot be probed for.
 - 403 — account is banned, or belongs to a different instance.
-- 404 — username doesn't exist on this instance.
+
+`GET /api/v1/users/signin?username=&password=` still works for older
+clients but is deprecated: it puts the password in the URL.
 
 ### `POST /api/v1/users/profile`
 
@@ -1093,7 +1096,10 @@ the hosted default art). Requires `manage_server_settings`.
 
 Liveness probe. Returns `{ "status_code": 200, "status": "ok",
 "components": { ... } }`. No auth required — useful for
-monitoring.
+monitoring. The `realtime` object reports the open socket count and
+the protocol counters (connections, commands by outcome, latency,
+rate limiting, delivery); each counter is described in
+[Commands and events](../architecture/commands-and-events.md#observability).
 
 ### `GET /api/v1/system/server-stats`
 
@@ -1334,6 +1340,40 @@ receiver can delete pings sent to them.
 ```
 DELETE /api/v1/ping/<ping_id>?auth_token=<token>
 ```
+
+---
+
+## Bots
+
+Bots are automated accounts that act for the instance owner and can never do more than the owner can.
+Only the **instance owner** manages them. A bot signs in to the realtime socket with its token as
+`auth_token` (see [the protocol](../protocol/v1.md#bots)); its token is not accepted by the rest of the HTTP API.
+
+### `POST /api/v1/bots`
+
+Create a bot. The `token` in the response is shown **once** (only a hash is stored) and cannot be recovered.
+
+```json
+{ "auth_token": "<owner token>", "name": "greeter", "scopes": ["send_messages"] }
+```
+
+`scopes` is any subset of `send_messages` and `view_private_channels` (empty: the bot can read public channels and
+do nothing else). Administrative privileges cannot be granted to a bot: asking for one is a 400 that lists the
+allowed scopes. A bot's effective privileges are its owner's intersected with its scopes.
+
+Returns `201` with `{ bot: { bot_id, name, owner_user_id, scopes }, token }`.
+
+### `GET /api/v1/bots?auth_token=`
+
+The instance's bots, newest first, revoked ones included: `{ bots: [{ bot_id, name, owner_user_id, scopes,
+enabled, revoked, created_at }] }`. Tokens are never returned.
+
+### `DELETE /api/v1/bots/{bot_id}?auth_token=`
+
+Revoke a bot. Its token stops working at once: a connected bot is refused on its next command (and on its next
+`ping`), and cannot reconnect. Idempotent (`revoked: false` the second time); an unknown id is a 404.
+
+Non-owners get 403 on all three routes.
 
 ---
 

@@ -1,51 +1,34 @@
+"""Listing the channels a user can see."""
+
+import pytest
 from fastapi.testclient import TestClient
 
-from pufferblow.tests.conftest import ValueStorage
-
 route = "/api/v1/channels/list/"
+NOT_A_TOKEN = "abcd"
+UNKNOWN_USER_TOKEN = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.apo0widnjtr456yjabmtoa02pgh6547heydbnh1ph"
 
 
-def test_list_server_channels(client: TestClient):
-    """Test the list channels route"""
-    data = {"auth_token": ValueStorage.auth_token}
-
-    response = client.get(route, params=data)
+def test_list_server_channels(client: TestClient, account):
+    response = client.post(route, json={"auth_token": account.auth_token})
 
     assert response.status_code == 200
+    assert isinstance(response.json()["channels"], list)
 
 
-def test_auth_token_bad_format(client: TestClient):
-    """Tests the exceptions raised when the given auth_token have a bad format"""
-    data = {"auth_token": ValueStorage.bad_formated_auth_token}
-
-    response = client.get(route, params=data)
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Bad auth_token format. Please check your auth_token and try again."
-    }
+def test_listing_is_a_post_not_a_get(client: TestClient, account):
+    assert client.get(route, params={"auth_token": account.auth_token}).status_code == 405
 
 
-def test_user_not_found(client: TestClient):
-    """Tests the exceptions that will get raised due the false auth_token passed"""
-    data = {
-        "auth_token": ValueStorage.moke_auth_token,
-    }
+@pytest.mark.parametrize("token", [NOT_A_TOKEN, UNKNOWN_USER_TOKEN])
+def test_a_bad_or_unknown_token_is_refused(client: TestClient, token):
+    response = client.post(route, json={"auth_token": token})
 
-    response = client.get(route, params=data)
-
-    assert response.status_code == 404
-    assert response.json() == {
-        "error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
-    }
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "auth.invalid_token"
 
 
 def test_empty_auth_token(client: TestClient):
-    """Tests pydantic validation for empty auth_token"""
-    data = {
-        "auth_token": "",
-    }
+    response = client.post(route, json={"auth_token": ""})
 
-    response = client.get(route, params=data)
-
-    assert response.status_code == 422  # Pydantic validation error
+    assert response.status_code == 400
+    assert response.json()["error_code"].startswith("validation.")

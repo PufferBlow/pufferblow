@@ -81,12 +81,6 @@ class MessageService:
 
     # ── helpers ────────────────────────────────────────────────
 
-    def _require_user_principal(self, principal: Principal) -> None:
-        # Reactions reference a user row directly (no bot-authored column, unlike
-        # messages), so a bot cannot react yet — only post, edit and delete.
-        if principal.is_bot:
-            raise ApiError(ErrorCode.AUTH_PRIVILEGE_DENIED, user_message="Bots cannot react to messages yet.")
-
     def _bot_sender_profile(self, bot_id: str) -> dict[str, Any]:
         bot_row = self._db.get_bot(bot_id)
         return {
@@ -324,7 +318,7 @@ class MessageService:
         if str(row.channel_id) != str(channel_id):
             raise ApiError(ErrorCode.MESSAGES_NOT_FOUND, details={"message_id": message_id})
 
-        self._authz.require_delete(principal, channel_id, str(row.sender_id))
+        self._authz.require_delete(principal, channel_id, str(row.sender_id), getattr(row, "sender_bot_id", None))
         self._messages.delete_message(message_id=message_id, channel_id=channel_id)
 
         data = {"id": message_id, "channel_id": channel_id, "deleted_by": principal.id}
@@ -354,17 +348,17 @@ class MessageService:
         return value
 
     def add_reaction(self, principal: Principal, channel_id: str, message_id: str, emoji: str) -> ServiceResult:
-        self._require_user_principal(principal)
         value = self._normalise_emoji(emoji)
 
         self._authz.require_send(principal, channel_id, "react to messages")
         self._load_message(channel_id, message_id)
 
-        newly_added = self._messages.add_reaction(message_id=message_id, user_id=principal.id, emoji=value)
+        newly_added = self._messages.add_reaction(
+            message_id=message_id, user_id=principal.id, emoji=value, as_bot=principal.is_bot
+        )
         return self._reaction_result(principal, channel_id, message_id, value, REACTION_ADDED, changed=newly_added)
 
     def remove_reaction(self, principal: Principal, channel_id: str, message_id: str, emoji: str) -> ServiceResult:
-        self._require_user_principal(principal)
         value = (emoji or "").strip()
         if not value:
             raise ApiError(ErrorCode.VALIDATION_FIELD_REQUIRED, user_message="`emoji` cannot be empty.")
@@ -372,7 +366,9 @@ class MessageService:
         self._authz.require_channel_access(principal, channel_id)
         self._load_message(channel_id, message_id)
 
-        removed = self._messages.remove_reaction(message_id=message_id, user_id=principal.id, emoji=value)
+        removed = self._messages.remove_reaction(
+            message_id=message_id, user_id=principal.id, emoji=value, as_bot=principal.is_bot
+        )
         return self._reaction_result(principal, channel_id, message_id, value, REACTION_REMOVED, changed=removed)
 
     def _reaction_result(

@@ -1,0 +1,16 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "ack",
+    "version": 1,
+    "id": "cmd_10",
+    "data": {
+      "status": "completed",
+      "result": {
+        "upload_id": "upl_Zq81xK0aTn3w",
+        "chunk_size": 32768,
+        "size": 84213
+      }
+    }
+  }
+}

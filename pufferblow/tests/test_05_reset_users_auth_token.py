@@ -1,87 +1,34 @@
+"""Resetting session tokens needs the current password."""
+
+import pytest
 from fastapi.testclient import TestClient
 
-from pufferblow.tests.conftest import ValueStorage
-
 route = "/api/v1/users/profile/reset-auth-token"
+NOT_A_TOKEN = "abcd"
+UNKNOWN_USER_TOKEN = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.apo0widnjtr456yjabmtoa02pgh6547heydbnh1ph"
 
 
-def test_reset_users_auth_token(client: TestClient):
-    """Tests the functionallity to reset a user's auth_token"""
-    data = {
-        "auth_token": ValueStorage.auth_token,
-        "password": ValueStorage.new_password,  # Because the password got changed in the last test
-    }
-
-    response = client.put(route, params=data)
+def test_reset_users_auth_token(client: TestClient, account):
+    response = client.post(route, json={"auth_token": account.auth_token, "password": account.password})
 
     assert response.status_code == 200
-    assert (
-        response.json()["message"] == "auth_token rested successfully"
-        and response.json()["auth_token"]
-    )
-
-    ValueStorage.auth_token = response.json()[
-        "auth_token"
-    ]  # Changing the auth_token into the new one
+    body = response.json()
+    assert body["message"] == "auth_token reset successfully"
+    assert body["auth_token"] and body["refresh_token"]
 
 
-def test_user_is_suspended_exception(client: TestClient):
-    """Test the exceptions that will get raised in case
-    the user is suspended from reseting their auth_token
-    """
-    data = {
-        "auth_token": ValueStorage.auth_token,
-        "password": ValueStorage.new_password,  # Because the password got changed in the last test
-    }
-
-    response = client.put(route, params=data)
+def test_password_incorrect_exception(client: TestClient, account):
+    response = client.post(route, json={"auth_token": account.auth_token, "password": "not-the-password"})
 
     assert response.status_code == 403
-    assert response.json() == {
-        "detail": "Cannot reset authentication token. Suspension time has not elapsed."
-    }
+    body = response.json()
+    assert body["error_code"] == "auth.reset_password_wrong"
+    assert body["details"]["field"] == "password"
 
 
-def test_password_incorrect_exception(client: TestClient):
-    """Test the exception that will get raised in case
-    the password is not correct
-    """
-    data = {
-        "auth_token": ValueStorage.auth_token,
-        "password": ValueStorage.password,  # The old password the we have changed in test number #3
-    }
-
-    response = client.put(route, params=data)
+@pytest.mark.parametrize("token", [NOT_A_TOKEN, UNKNOWN_USER_TOKEN])
+def test_a_bad_or_unknown_token_is_refused(client: TestClient, token):
+    response = client.post(route, json={"auth_token": token, "password": "12345678"})
 
     assert response.status_code == 401
-    assert response.json() == {"error": "Invalid password. Please try again later."}
-
-
-def test_auth_token_bad_format(client: TestClient):
-    """Tests the exceptions raised when the given auth_token have a bad format"""
-    data = {
-        "auth_token": ValueStorage.bad_formated_auth_token,
-        "password": ValueStorage.new_password,
-    }
-
-    response = client.put(route, params=data)
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Bad auth_token format. Please check your auth_token and try again."
-    }
-
-
-def test_user_not_found(client: TestClient):
-    """Tests the exceptions that will get raised due the false auth_token passed"""
-    data = {
-        "auth_token": ValueStorage.moke_auth_token,
-        "password": ValueStorage.new_password,
-    }
-
-    response = client.put(route, params=data)
-
-    assert response.status_code == 404
-    assert response.json() == {
-        "error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
-    }
+    assert response.json()["error_code"] == "auth.invalid_token"

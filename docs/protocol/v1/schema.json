@@ -106,6 +106,14 @@
           "maxItems": 10,
           "title": "Sticker Ids",
           "type": "array"
+        },
+        "upload_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Upload Ids",
+          "type": "array"
         }
       },
       "required": [
@@ -262,6 +270,89 @@
       },
       "title": "TypingStart",
       "type": "object"
+    },
+    "upload.abort": {
+      "additionalProperties": false,
+      "properties": {
+        "upload_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Upload Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id"
+      ],
+      "title": "UploadAbort",
+      "type": "object"
+    },
+    "upload.begin": {
+      "additionalProperties": false,
+      "description": "Start sending a file. The answer carries the ``upload_id`` and the largest chunk to send.",
+      "properties": {
+        "content_type": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Type"
+        },
+        "name": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "size": {
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "size"
+      ],
+      "title": "UploadBegin",
+      "type": "object"
+    },
+    "upload.chunk": {
+      "additionalProperties": false,
+      "description": "The next piece of a file, base64 encoded. Chunks go in order starting at ``index`` 0.",
+      "properties": {
+        "data": {
+          "maxLength": 48000,
+          "minLength": 1,
+          "title": "Data",
+          "type": "string"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "upload_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Upload Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id",
+        "index",
+        "data"
+      ],
+      "title": "UploadChunk",
+      "type": "object"
     }
   },
   "error_codes": [
@@ -295,6 +386,7 @@
               "title": "Duplicate"
             },
             "result": {
+              "additionalProperties": true,
               "title": "Result",
               "type": "object"
             },
@@ -343,6 +435,7 @@
       "description": "A client request. ``id`` is chosen by the client and echoed in the reply.",
       "properties": {
         "data": {
+          "additionalProperties": true,
           "title": "Data",
           "type": "object"
         },
@@ -388,6 +481,7 @@
             "details": {
               "anyOf": [
                 {
+                  "additionalProperties": true,
                   "type": "object"
                 },
                 {
@@ -476,6 +570,7 @@
           "title": "Channel Id"
         },
         "data": {
+          "additionalProperties": true,
           "title": "Data",
           "type": "object"
         },

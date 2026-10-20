@@ -1,5 +1,7 @@
 import os
 import tempfile
+import uuid
+from dataclasses import dataclass
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,9 +47,47 @@ def client():
         with TestClient(api) as test_client:
             yield test_client
     finally:
-        # Cleanup test database
+        # Close the pool first: on Windows an open SQLite connection keeps the file from being deleted.
+        handler = getattr(api_initializer, "database_handler", None)
+        if handler is not None:
+            handler.database_engine.dispose()
         if os.path.exists(temp_db.name):
-            os.unlink(temp_db.name)
+            try:
+                os.unlink(temp_db.name)
+            except PermissionError:
+                pass  # a straggling connection; the temp file is cleaned with the temp directory
+
+
+@dataclass
+class Account:
+    """A signed-up user, as the tests need to refer to them."""
+
+    username: str
+    password: str
+    auth_token: str
+    refresh_token: str
+    user_id: str
+
+
+@pytest.fixture
+def make_account(client: TestClient):
+    """Sign up a fresh user. Every test has its own database, so tests make the accounts they use."""
+
+    def _make(prefix: str = "user", password: str = "12345678") -> Account:
+        username = f"{prefix}_{uuid.uuid4().hex[:8]}"
+        response = client.post("/api/v1/users/signup", json={"username": username, "password": password})
+        assert response.status_code == 201, response.text
+        tokens = response.json()
+        profile = client.post("/api/v1/users/profile", json={"auth_token": tokens["auth_token"]})
+        assert profile.status_code == 200, profile.text
+        return Account(username, password, tokens["auth_token"], tokens["refresh_token"], profile.json()["user_data"]["user_id"])
+
+    return _make
+
+
+@pytest.fixture
+def account(make_account) -> Account:
+    return make_account()
 
 
 # Global storage class

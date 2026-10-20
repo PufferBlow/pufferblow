@@ -710,11 +710,12 @@ async def test_sequence_numbers_are_per_channel(client: TestClient):
     ctx = _context(token, channel_a, channel_b)
     sock = _attach(ctx)
 
+    replies = []
     for channel in (channel_a, channel_a, channel_b, channel_a):
-        await _run(ctx, _command("message.create", {"channel_id": channel, "content": "x"}))
+        replies.append(await _run(ctx, _command("message.create", {"channel_id": channel, "content": "x"})))
 
     seqs = [(e["channel_id"], e["seq"]) for e in sock.events("message.created")]
-    assert seqs == [(channel_a, 1), (channel_a, 2), (channel_b, 1), (channel_a, 3)]
+    assert seqs == [(channel_a, 1), (channel_a, 2), (channel_b, 1), (channel_a, 3)], replies
 
 
 async def test_every_connection_of_a_user_receives_the_event(client: TestClient):
@@ -1009,7 +1010,7 @@ async def test_a_bot_can_post_edit_and_delete_its_own_messages(client: TestClien
     assert _message_count(channel) == 0
 
 
-async def test_bots_still_cannot_react_pending_a_reactions_schema_change(client: TestClient):
+async def test_a_bot_can_react_and_the_reaction_is_the_bots(client: TestClient):
     token = _signup(client)
     channel = _new_channel(token)
     created = api_initializer.bot_manager.create_bot(extract_user_id(token), "poster", ["send_messages"])
@@ -1018,7 +1019,25 @@ async def test_bots_still_cannot_react_pending_a_reactions_schema_change(client:
 
     message_id = (await _run(ctx, _command("message.create", {"channel_id": channel, "content": "react to me"})))["data"]["result"]["message"]["id"]
     reply = await _run(ctx, _command("reaction.add", {"channel_id": channel, "message_id": message_id, "emoji": "👍"}))
-    assert _error_code(reply) == ProtocolErrorCode.PERMISSION_DENIED
+
+    assert reply["type"] == "ack"
+    [summary] = reply["data"]["result"]["reactions"]
+    assert summary["user_ids"] == [bot.id] and summary["viewer_reacted"] is True
+
+
+async def test_identical_messages_never_collide_on_their_id(client: TestClient):
+    """Message ids used to be derived from a slice of the text plus one random letter, so repeated
+    short messages collided about one time in 52 and the second insert failed."""
+    token = _signup(client)
+    channel = _new_channel(token)
+    ctx = _context(token, channel)
+
+    ids = set()
+    for index in range(25):
+        reply = await _run(ctx, _command("message.create", {"channel_id": channel, "content": "x"}, f"cmd_{index}"))
+        assert reply["type"] == "ack", reply
+        ids.add(reply["data"]["result"]["message"]["id"])
+    assert len(ids) == 25
 
 
 def test_websocket_accepts_a_bot_token_and_the_message_carries_the_bot_identity(client: TestClient):

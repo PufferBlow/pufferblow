@@ -82,6 +82,8 @@ nav:
   - Developer:
       - developer/index.md
       - Server architecture: developer/architecture.md
+      - Commands and events (internals): architecture/commands-and-events.md
+      - Command/event protocol v1: protocol/v1.md
       - Roles & privileges: developer/roles.md
       - API reference: developer/api-reference.md
       - Client (web + desktop): developer/client.md

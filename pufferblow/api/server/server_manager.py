@@ -127,11 +127,6 @@ class ServerManager:
         Returns:
             bool: True if it exists, otherwise False is returned.
         """
-        # Skip server checks for SQLite tests since the server table is excluded
-        database_uri = str(self.database_handler.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return False
-
         server = self.database_handler.get_server()
 
         return server is not None

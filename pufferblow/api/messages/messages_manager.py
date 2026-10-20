@@ -295,16 +295,16 @@ class MessagesManager:
 
     # --- Reactions -------------------------------------------------------
 
-    def add_reaction(self, message_id: str, user_id: str, emoji: str) -> bool:
+    def add_reaction(self, message_id: str, user_id: str, emoji: str, *, as_bot: bool = False) -> bool:
         """Apply a reaction. Returns True if newly added, False if no-op."""
         return self.database_handler.add_message_reaction(
-            message_id=message_id, user_id=user_id, emoji=emoji
+            message_id=message_id, user_id=user_id, emoji=emoji, as_bot=as_bot
         )
 
-    def remove_reaction(self, message_id: str, user_id: str, emoji: str) -> bool:
+    def remove_reaction(self, message_id: str, user_id: str, emoji: str, *, as_bot: bool = False) -> bool:
         """Remove a reaction. Returns True if removed, False if not present."""
         return self.database_handler.remove_message_reaction(
-            message_id=message_id, user_id=user_id, emoji=emoji
+            message_id=message_id, user_id=user_id, emoji=emoji, as_bot=as_bot
         )
 
     def get_reaction_summary(
@@ -623,22 +623,18 @@ class MessagesManager:
 
     def _generate_message_id(self, user_id: str, message: str) -> str:
         """
-        Generate a unique `message_id` based of the sender user's `user_id`
-        and a slice from the original message
+        Generate a unique `message_id`.
 
-        Args:
-            user_id (str): The sender user's `user_id`.
-            message (str): A slice of the original message.
+        A random UUID. The id used to be a UUIDv5 of the sender, a random-length slice of the text and
+        a single random letter, so two messages with the same start from the same sender had a 1 in 52
+        chance of the same id; the second insert then failed on the unique key and the sender got an
+        "internal error" (short and repeated messages such as "x" were hit most). ``user_id`` and
+        ``message`` are accepted for compatibility and no longer influence the id.
 
         Returns:
-            str: The generated `user_id`.
+            str: The generated id.
         """
-        data = f"{user_id}{message}{''.join([char for char in random.choices(string.ascii_letters)])}"  # Adding random charachters to the username
-
-        hashed_data_salt = hashlib.md5(data.encode()).hexdigest()
-        generated_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, hashed_data_salt)
-
-        return str(generated_uuid)
+        return str(uuid.uuid4())
 
     def _build_message_record(
         self,

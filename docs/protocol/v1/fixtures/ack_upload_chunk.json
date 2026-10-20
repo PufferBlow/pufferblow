@@ -1,0 +1,18 @@
+{
+  "direction": "server_to_client",
+  "frame": {
+    "type": "ack",
+    "version": 1,
+    "id": "cmd_11",
+    "data": {
+      "status": "completed",
+      "result": {
+        "upload_id": "upl_Zq81xK0aTn3w",
+        "received": 32768,
+        "size": 84213,
+        "complete": false,
+        "duplicate": false
+      }
+    }
+  }
+}

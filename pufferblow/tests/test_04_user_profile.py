@@ -1,81 +1,60 @@
+"""Reading a profile."""
+
+import pytest
 from fastapi.testclient import TestClient
 
-from pufferblow.tests.conftest import ValueStorage
-
 route = "/api/v1/users/profile"
+NOT_A_TOKEN = "abcd"
+UNKNOWN_USER_TOKEN = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.apo0widnjtr456yjabmtoa02pgh6547heydbnh1ph"
+NOBODY = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
-def test_user_profile(client: TestClient):
-    """Tests the user profile route"""
-    data = {
-        "user_id": ValueStorage.auth_token.split(".")[0],
-        "auth_token": ValueStorage.auth_token,
-    }
-
-    response = client.get(route, params=data)
-    response_data = response.json()
+def test_user_profile(client: TestClient, account):
+    response = client.post(route, json={"auth_token": account.auth_token, "user_id": account.user_id})
 
     assert response.status_code == 200
-    assert response_data[
-        "user_data"
-    ]  # Response contains the data of the user requested
+    data = response.json()["user_data"]
+    assert data["username"] == account.username and data["user_id"] == account.user_id
 
 
-def test_auth_token_bad_format(client: TestClient):
-    """Tests the exceptions raised when the given auth_token have a bad format"""
-    data = {
-        "user_id": ValueStorage.auth_token.split(".")[0],
-        "auth_token": ValueStorage.bad_formated_auth_token,
-    }
-
-    response = client.get(route, params=data)
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Bad auth_token format. Please check your auth_token and try again."
-    }
+def test_without_a_user_id_it_is_your_own_profile(client: TestClient, account):
+    assert client.post(route, json={"auth_token": account.auth_token}).json()["user_data"]["user_id"] == account.user_id
 
 
-def test_user_not_found(client: TestClient):
-    """Tests the exceptions that will get raised due the false auth_token passed"""
-    data = {
-        "user_id": ValueStorage.auth_token.split(".")[0],
-        "auth_token": ValueStorage.moke_auth_token,
-    }
+def test_someone_else_s_profile_is_readable_and_has_no_credentials(client: TestClient, account, make_account):
+    other = make_account("other")
 
-    response = client.get(route, params=data)
+    data = client.post(route, json={"auth_token": account.auth_token, "user_id": other.user_id}).json()["user_data"]
 
-    assert response.status_code == 404
-    assert response.json() == {
-        "error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
-    }
+    assert data["username"] == other.username
+    for secret in ("password", "auth_token", "raw_auth_token"):
+        assert secret not in data
 
 
-def test_targeted_user_not_found(client: TestClient):
-    """Tests the exceptions that will get raised if the targeted user was not found"""
-    data = {"user_id": ValueStorage.moke_user_id, "auth_token": ValueStorage.auth_token}
+def test_a_new_account_has_default_art_in_its_profile(client: TestClient, account):
+    data = client.post(route, json={"auth_token": account.auth_token}).json()["user_data"]
+    assert data["avatar_url"].startswith("/assets/avatars/") and data["banner_url"].startswith("/assets/banners/")
 
-    response = client.get(route, params=data)
+
+@pytest.mark.parametrize("token", [NOT_A_TOKEN, UNKNOWN_USER_TOKEN])
+def test_a_bad_or_unknown_token_is_refused(client: TestClient, token):
+    response = client.post(route, json={"auth_token": token})
+
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "auth.invalid_token"
+
+
+@pytest.mark.parametrize("target", [NOBODY, "not-an-id"])
+def test_targeted_user_not_found(client: TestClient, account, target):
+    """Asking for someone who does not exist is a 404, not a crash."""
+    response = client.post(route, json={"auth_token": account.auth_token, "user_id": target})
 
     assert response.status_code == 404
-    assert response.json() == {
-        "error": f"The target user's user_id='{ValueStorage.moke_user_id}' not found. Please make sure to pass the correct one"
-    }
+    assert response.json()["error_code"] == "resource.not_found"
 
 
 def test_empty_auth_token(client: TestClient):
-    """Tests pydantic validation for empty auth_token"""
-    data = {"user_id": ValueStorage.auth_token.split(".")[0], "auth_token": ""}
+    response = client.post(route, json={"auth_token": ""})
 
-    response = client.get(route, params=data)
-
-    assert response.status_code == 422  # Pydantic validation error
-
-
-def test_empty_user_id(client: TestClient):
-    """Tests pydantic validation for empty user_id"""
-    data = {"user_id": "", "auth_token": ValueStorage.auth_token}
-
-    response = client.get(route, params=data)
-
-    assert response.status_code == 422  # Pydantic validation error
+    assert response.status_code == 400
+    assert response.json()["error_code"].startswith("validation.")

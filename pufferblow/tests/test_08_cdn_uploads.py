@@ -8,6 +8,12 @@ from PIL import Image
 from pufferblow.tests.conftest import ValueStorage
 
 
+def _says(response) -> str:
+    """The human-readable text of an error, whichever envelope produced it."""
+    body = response.json()
+    return " ".join(str(body.get(key, "")) for key in ("detail", "message", "user_message")).lower()
+
+
 class TestStorageUploads:
     """Test cases for storage-backed file upload functionality."""
 
@@ -100,7 +106,7 @@ class TestStorageUploads:
         response = client.post("/api/v1/users/profile/avatar", data=data, files=files)
 
         assert response.status_code == 400
-        assert "not allowed" in response.json()["detail"]
+        assert "not allowed" in _says(response)
 
     def test_upload_avatar_invalid_mime_error(self, client: TestClient):
         """Test invalid MIME type error"""
@@ -113,9 +119,9 @@ class TestStorageUploads:
 
         response = client.post("/api/v1/users/profile/avatar", data=data, files=files)
 
-        # This should trigger MIME type validation
-        # Note: The actual response depends on magic detection
-        assert response.status_code in [200, 400]  # 200 if magic allows, 400 if not
+        # A text file named .png is not a picture, whatever its extension says
+        assert response.status_code == 400
+        assert "not an image" in _says(response)
 
     def test_upload_avatar_no_file_error(self, client: TestClient):
         """Test missing file error"""
@@ -124,7 +130,8 @@ class TestStorageUploads:
         response = client.post("/api/v1/users/profile/avatar", data=data)
 
         # Should fail because file is required
-        assert response.status_code == 422  # Pydantic validation error
+        assert response.status_code == 400
+        assert response.json()["error_code"].startswith("validation.")
 
     def test_upload_avatar_invalid_auth_token(self, client: TestClient):
         """Test invalid auth token error"""
@@ -138,7 +145,8 @@ class TestStorageUploads:
 
         response = client.post("/api/v1/users/profile/avatar", data=data, files=files)
 
-        assert response.status_code == 404
+        assert response.status_code == 401
+        assert response.json()["error_code"] == "auth.invalid_token"
 
     def test_storage_file_serving(self, client: TestClient):
         """Test that uploaded files are served correctly"""
@@ -188,10 +196,7 @@ class TestStorageUploads:
 
             # If the dimension check triggers, there will be an error
             if response.status_code == 400:
-                assert response.json()["detail"] in {
-                    "Image dimensions too large",
-                    "Invalid image file",
-                }
+                assert "dimensions too large" in _says(response) or "invalid image" in _says(response)
 
         except MemoryError:
             # PIL might fail to create very large images - that's expected

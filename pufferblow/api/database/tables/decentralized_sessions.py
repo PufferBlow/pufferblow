@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID as SA_UUID
+from pufferblow.api.database.tables.uuid_type import SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base

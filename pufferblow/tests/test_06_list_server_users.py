@@ -1,51 +1,32 @@
+"""Listing the instance's users."""
+
+import pytest
 from fastapi.testclient import TestClient
 
-from pufferblow.tests.conftest import ValueStorage
-
 route = "/api/v1/users/list"
+NOT_A_TOKEN = "abcd"
+UNKNOWN_USER_TOKEN = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.apo0widnjtr456yjabmtoa02pgh6547heydbnh1ph"
 
 
-def test_list_users(client: TestClient):
-    """Test the list users route"""
-    data = {"auth_token": ValueStorage.auth_token}
+def test_list_users(client: TestClient, account, make_account):
+    other = make_account("other")
 
-    response = client.get(route, params=data)
+    response = client.get(route, params={"auth_token": account.auth_token})
 
     assert response.status_code == 200
+    text = response.text
+    assert account.username in text and other.username in text
+    for secret in ("password", "raw_auth_token"):
+        assert secret not in text
 
 
-def test_auth_token_bad_format(client: TestClient):
-    """Tests the exceptions raised when the given auth_token have a bad format"""
-    data = {"auth_token": ValueStorage.bad_formated_auth_token}
-
-    response = client.get(route, params=data)
+@pytest.mark.parametrize("token", [NOT_A_TOKEN, UNKNOWN_USER_TOKEN])
+def test_a_token_that_is_not_one_is_refused(client: TestClient, token):
+    response = client.get(route, params={"auth_token": token})
 
     assert response.status_code == 400
-    assert response.json() == {
-        "error": "Bad auth_token format. Please check your auth_token and try again."
-    }
-
-
-def test_user_not_found(client: TestClient):
-    """Tests the exceptions that will get raised due the false auth_token passed"""
-    data = {
-        "auth_token": ValueStorage.moke_auth_token,
-    }
-
-    response = client.get(route, params=data)
-
-    assert response.status_code == 404
-    assert response.json() == {
-        "error": "'auth_token' expired/unvalid or 'user_id' doesn't exists. Please try again."
-    }
+    assert "auth_token" in response.json()["error"]
 
 
 def test_empty_auth_token(client: TestClient):
-    """Tests pydantic validation for empty auth_token"""
-    data = {
-        "auth_token": "",
-    }
-
-    response = client.get(route, params=data)
-
-    assert response.status_code == 422  # Pydantic validation error
+    assert client.get(route, params={"auth_token": ""}).status_code == 422  # fails validation

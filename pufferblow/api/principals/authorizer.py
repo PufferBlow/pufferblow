@@ -99,9 +99,22 @@ class Authorizer:
                 user_message="Only the original author can edit this message.",
             )
 
-    def require_delete(self, principal: Principal, channel_id: str, sender_id: str) -> None:
+    def require_delete(
+        self, principal: Principal, channel_id: str, sender_id: str, sender_bot_id: str | None = None
+    ) -> None:
+        """The author, or anyone holding ``delete_messages``.
+
+        A bot's messages are stored under its owner (``sender_id``), so for a bot principal the
+        owner's id is *not* proof of authorship: it may delete only what it posted itself
+        (``sender_bot_id``), never a message its owner wrote. A user may delete their own, and
+        their bots', messages.
+        """
         self.require_channel_access(principal, channel_id)
-        if str(sender_id) != principal.accountable_user_id and not principal.has("delete_messages"):
+        if principal.is_bot:
+            is_author = bool(sender_bot_id) and principal.id.split(":", 1)[1] == str(sender_bot_id)
+        else:
+            is_author = str(sender_id) == principal.id
+        if not is_author and not principal.has("delete_messages"):
             raise ApiError(
                 ErrorCode.AUTH_PRIVILEGE_DENIED,
                 user_message="You are not authorized to delete this message",

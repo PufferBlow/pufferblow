@@ -19,6 +19,8 @@ from pufferblow.api.friends import FriendsManager
 from pufferblow.api.bots.bot_manager import BotManager
 from pufferblow.api.commands.dispatcher import CommandDispatcher
 from pufferblow.api.commands.handlers import build_registry
+from pufferblow.api.services.attachments import store_attachments
+from pufferblow.api.uploads.staging import UploadStaging
 from pufferblow.api.commands.ratelimit import MemcacheRateLimiter
 from pufferblow.api.events.publisher import InProcessPublisher
 from pufferblow.api.messages.messages_manager import MessagesManager
@@ -78,6 +80,7 @@ class APIInitializer:
         self.principal_resolver: AnyPrincipalResolver | None = None
         self.bot_manager: BotManager | None = None
         self.event_publisher: InProcessPublisher | None = None
+        self.upload_staging: UploadStaging | None = None
         self.message_service: MessageService | None = None
         self.command_dispatcher: CommandDispatcher | None = None
         self.voice_session_manager: VoiceSessionManager | None = None
@@ -278,7 +281,7 @@ class APIInitializer:
         )
         self.principal_resolver = AnyPrincipalResolver(self.user_principal_resolver, self.bot_principal_resolver)
 
-        self.event_publisher = InProcessPublisher(self.websockets_manager)
+        self.event_publisher = InProcessPublisher(self.websockets_manager, seq_store=self.database_handler)
         self.message_service = MessageService(
             messages_manager=self.messages_manager,
             channels_manager=self.channels_manager,
@@ -299,12 +302,26 @@ class APIInitializer:
         is_sqlite = str(self.database_handler.database_engine.url).startswith("sqlite://")
         principal_limiter = None if is_sqlite else MemcacheRateLimiter(self.config)
 
+        policy = message_policy(self.database_handler, self.storage_manager, self.config)
+
+        async def store_message_attachments(principal, channel_id, files):
+            _, max_total_mb = policy()
+            return await store_attachments(principal, channel_id, files, max_total_mb=max_total_mb)
+
+        # Files sent over the socket wait here until the message that carries them is created. Without
+        # storage on the instance there is nothing to send them to, so the commands are not offered.
+        self.upload_staging = (
+            UploadStaging(lambda: policy()[1] * 1024 * 1024) if self.storage_manager is not None else None
+        )
+
         self.command_dispatcher = CommandDispatcher(
             build_registry(
                 messages=self.message_service,
                 authorizer=self.authorizer,
                 publisher=self.event_publisher,
                 dm_peer=self.activitypub_manager.local_dm_peer,
+                staging=self.upload_staging,
+                store_attachments=store_message_attachments,
             ),
             idempotency_store=self.database_handler,
             principal_limiter=principal_limiter,

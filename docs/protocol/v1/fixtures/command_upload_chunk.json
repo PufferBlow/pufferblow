@@ -1,0 +1,14 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_11",
+    "name": "upload.chunk",
+    "data": {
+      "upload_id": "upl_Zq81xK0aTn3w",
+      "index": 0,
+      "data": "iVBORw0KGgoAAAANSUhEUgAA"
+    }
+  }
+}

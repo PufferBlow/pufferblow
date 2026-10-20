@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, PrimaryKeyConstraint, String
-from sqlalchemy.dialects.postgresql import UUID as SA_UUID
+from pufferblow.api.database.tables.uuid_type import SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
@@ -76,3 +76,33 @@ class MessageReactions(Base):
             f"user_id={self.user_id!r}, emoji={self.emoji!r}, "
             f"created_at={self.created_at!r})"
         )
+
+
+class BotMessageReactions(Base):
+    """One reaction by one bot on one message with one emoji.
+
+    Bots are not users (no row in ``users``), so their reactions cannot live in ``message_reactions``,
+    whose ``user_id`` references that table. ``bot_id`` is the bot principal's id (``bot:<uuid>``), the same
+    value that appears in a reaction summary's ``user_ids``. The composite key gives the same
+    "once per emoji per message" rule users have.
+    """
+
+    __tablename__ = "bot_message_reactions"
+
+    message_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("messages.message_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    bot_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    emoji: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("message_id", "bot_id", "emoji", name="pk_bot_message_reactions"),
+    )

@@ -216,15 +216,13 @@ class StorageManager:
 
         # Update last_referenced timestamp
         try:
-            database_uri = str(self.database_handler.database_engine.url)
-            if not database_uri.startswith("sqlite://"):
-                with self.database_handler.database_session() as session:
-                    session.execute(
-                        update(FileObjects)
-                        .where(FileObjects.file_hash == file_hash)
-                        .values(last_referenced=datetime.now(timezone.utc))
-                    )
-                    session.commit()
+            with self.database_handler.database_session() as session:
+                session.execute(
+                    update(FileObjects)
+                    .where(FileObjects.file_hash == file_hash)
+                    .values(last_referenced=datetime.now(timezone.utc))
+                )
+                session.commit()
         except Exception as exc:
             logger.warning(f"Failed to update last_referenced for {file_hash}: {exc}")
 
@@ -406,6 +404,11 @@ class StorageManager:
                 status_code=400,
                 detail=f"File extension '{extension}' not allowed. Allowed: {', '.join(allowed_extensions)}",
             )
+
+        # Profile and server art must be pictures: a text file named avatar.png is not one, whatever
+        # its extension says (the content decides, not the name).
+        if category in ("avatars", "banners") and not mime_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="The file is not an image.")
 
         # Validate image integrity using in-memory buffer (avoids corrupting file handle)
         if mime_type.startswith("image/") and extension in self.IMAGE_EXTENSIONS:

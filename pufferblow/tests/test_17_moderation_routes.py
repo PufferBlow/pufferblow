@@ -158,7 +158,7 @@ def test_timeout_blocks_sending_messages_until_cleared(client: TestClient):
         message="should not send while timed out",
     )
     assert blocked_send.status_code == 403
-    assert "timed out" in blocked_send.json()["detail"].lower()
+    assert "timed out" in " ".join(str(v) for v in blocked_send.json().values()).lower()
 
     clear_response = client.delete(
         f"/api/v1/moderation/users/{target_user.user_id}/timeout",

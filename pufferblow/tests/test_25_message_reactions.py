@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pufferblow.api.errors import ApiError
+from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.core.bootstrap import api_initializer
 
 
@@ -27,9 +28,14 @@ def _make_user(client: TestClient) -> str:
 
 
 def _first_channel_id(client: TestClient, auth_token: str) -> str | None:
-    response = client.get(LIST_CHANNELS_ROUTE, params={"auth_token": auth_token})
+    response = client.post(LIST_CHANNELS_ROUTE, json={"auth_token": auth_token})
     assert response.status_code == 200, response.text
     channels = response.json().get("channels", [])
+    if not channels:
+        api_initializer.channels_manager.create_channel(
+            user_id=extract_user_id(auth_token), channel_name=f"general_{uuid.uuid4().hex[:6]}", is_private=False, channel_type="text"
+        )
+        channels = client.post(LIST_CHANNELS_ROUTE, json={"auth_token": auth_token}).json().get("channels", [])
     return channels[0]["channel_id"] if channels else None
 
 
@@ -142,7 +148,7 @@ def test_over_long_emoji_rejected(client: TestClient):
         return
     message_id = _send(client, channel_id, auth_token, "long target")
 
-    too_long = "a" * 64
+    too_long = "a" * 65  # the limit is 64
     with pytest.raises(ApiError):
         _add(client, channel_id, message_id, auth_token, too_long)
 

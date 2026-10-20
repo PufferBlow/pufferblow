@@ -103,7 +103,7 @@ def test_send_message_uses_instance_max_message_length(client: TestClient):
         api_initializer.database_handler.get_server_settings = original_get_server_settings
 
     assert response.status_code == 400
-    assert "instance limit" in response.json()["detail"].lower()
+    assert "instance limit" in " ".join(str(v) for v in response.json().values()).lower()
 
 
 def test_send_message_attachment_rejections_surface_as_client_errors(client: TestClient):
@@ -134,7 +134,7 @@ def test_send_message_attachment_rejections_surface_as_client_errors(client: Tes
         api_initializer.database_handler.get_server_settings = original_get_server_settings
 
     assert response.status_code == 400
-    assert "not allowed" in response.json()["detail"].lower()
+    assert "not allowed" in " ".join(str(v) for v in response.json().values()).lower()
 
 
 def test_send_message_with_an_allowed_attachment_succeeds(client: TestClient):

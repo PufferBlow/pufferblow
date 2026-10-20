@@ -64,7 +64,10 @@ class SlowAuthorizer:
 def _setup(messages=None, authorizer=None, revalidate=None):
     messages = messages or SlowMessages()
     authorizer = authorizer or SlowAuthorizer()
-    publisher = SimpleNamespace(current_seq=lambda _c: 0, epoch="ep")
+    async def ensure_loaded(_channel_id):
+        return None
+
+    publisher = SimpleNamespace(current_seq=lambda _c: 0, ensure_loaded=ensure_loaded, epoch="ep")
     dispatcher = CommandDispatcher(build_registry(messages=messages, authorizer=authorizer, publisher=publisher))
     principal = Principal(id="u1", kind="user", privileges=frozenset({"send_messages"}))
     ctx = ConnectionContext(principal=principal, session_id="s", connection_key="k", subscriptions=set(), revalidate=revalidate)

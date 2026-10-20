@@ -14,6 +14,8 @@ counters) stays on the loop, after the call returns.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 from collections.abc import Callable
 
 from pufferblow.api.commands.dispatcher import CommandSpec, ConnectionContext, HandlerOutput
@@ -22,6 +24,7 @@ from pufferblow.api.principals.authorizer import Authorizer
 from pufferblow.api.protocol import commands as schema
 from pufferblow.api.protocol.events import TYPING_EXPIRES_MS, TYPING_STARTED, DomainEvent
 from pufferblow.api.services.messages import MessageService
+from pufferblow.api.uploads.staging import CHUNK_BYTES, UploadStaging
 
 
 def build_registry(
@@ -30,20 +33,55 @@ def build_registry(
     authorizer: Authorizer,
     publisher,
     dm_peer: Callable[[str, str], str | None] | None = None,
+    staging: UploadStaging | None = None,
+    store_attachments: Callable | None = None,
 ) -> dict[str, CommandSpec]:
     """``dm_peer(conversation_id, user_id)`` returns the other, local participant of a DM the
-    user is part of, or ``None``; without it, typing in DMs is accepted but not delivered."""
+    user is part of, or ``None``; without it, typing in DMs is accepted but not delivered.
+
+    ``staging`` and ``store_attachments`` (``async (principal, channel_id, files) -> [attachment dicts]``)
+    switch on sending files over the socket: ``upload.begin`` / ``upload.chunk`` / ``upload.abort`` and
+    ``upload_ids`` on ``message.create``. Without them those commands are not registered."""
 
     async def message_create(ctx: ConnectionContext, data: schema.MessageCreate) -> HandlerOutput:
+        attachments: list[dict] = []
+        if data.upload_ids:
+            if staging is None or store_attachments is None:
+                raise ApiError(ErrorCode.VALIDATION_FIELD_TYPE, user_message="Sending files over the socket is not available here.")
+            # Refuse before any storage work if the sender could not post here anyway.
+            await ctx.in_thread_unless_access_changed(authorizer.require_send, ctx.principal, data.channel_id)
+            files = staging.collect(ctx.principal.id, data.upload_ids)
+            attachments = await store_attachments(ctx.principal, data.channel_id, files)
         outcome = await asyncio.to_thread(
             messages.create,
             ctx.principal,
             data.channel_id,
             data.content,
             sticker_ids=data.sticker_ids,
+            attachments=attachments,
             reply_to_message_id=data.reply_to_message_id,
         )
+        if data.upload_ids and staging is not None:
+            staging.discard(ctx.principal.id, data.upload_ids)  # kept until here so a failed send can be retried
         return HandlerOutput(result={"message": outcome.value["message"]}, events=outcome.events)
+
+    async def upload_begin(ctx: ConnectionContext, data: schema.UploadBegin) -> HandlerOutput:
+        upload = staging.begin(ctx.principal.id, data.name, data.content_type, data.size)
+        return HandlerOutput(result={"upload_id": upload.upload_id, "chunk_size": CHUNK_BYTES, "size": upload.size})
+
+    async def upload_chunk(ctx: ConnectionContext, data: schema.UploadChunk) -> HandlerOutput:
+        try:
+            raw = base64.b64decode(data.data, validate=True)
+        except (binascii.Error, ValueError):
+            raise ApiError(ErrorCode.VALIDATION_FIELD_TYPE, user_message="`data` is not valid base64.", details={"field": "data"}) from None
+        upload, duplicate = staging.append(ctx.principal.id, data.upload_id, data.index, raw)
+        return HandlerOutput(
+            result={"upload_id": upload.upload_id, "received": upload.received, "size": upload.size, "complete": upload.complete, "duplicate": duplicate}
+        )
+
+    async def upload_abort(ctx: ConnectionContext, data: schema.UploadAbort) -> HandlerOutput:
+        staging.abort(ctx.principal.id, data.upload_id)
+        return HandlerOutput(result={"upload_id": data.upload_id, "aborted": True})
 
     async def message_edit(ctx: ConnectionContext, data: schema.MessageEdit) -> HandlerOutput:
         outcome = await asyncio.to_thread(messages.edit, ctx.principal, data.channel_id, data.message_id, data.content)
@@ -66,6 +104,7 @@ def build_registry(
             # Same answer for "does not exist" and "not yours": existence is not disclosed.
             raise ApiError(ErrorCode.CHANNELS_NOT_FOUND, details={"channel_id": data.channel_id})
         ctx.subscriptions.add(data.channel_id)
+        await publisher.ensure_loaded(data.channel_id)  # so `seq` is the channel's real position after a restart
         return HandlerOutput(
             result={
                 "channel_id": data.channel_id,
@@ -81,6 +120,7 @@ def build_registry(
 
     async def events_resync(ctx: ConnectionContext, data: schema.EventsResync) -> HandlerOutput:
         recent = await asyncio.to_thread(messages.recent, ctx.principal, data.channel_id, data.limit)
+        await publisher.ensure_loaded(data.channel_id)
         return HandlerOutput(
             result={
                 "channel_id": data.channel_id,
@@ -132,4 +172,10 @@ def build_registry(
         CommandSpec("events.resync", schema.EventsResync, events_resync),
         CommandSpec("typing.start", schema.TypingStart, typing_start),
     ]
+    if staging is not None:
+        specs += [
+            CommandSpec("upload.begin", schema.UploadBegin, upload_begin),
+            CommandSpec("upload.chunk", schema.UploadChunk, upload_chunk),
+            CommandSpec("upload.abort", schema.UploadAbort, upload_abort),
+        ]
     return {spec.name: spec for spec in specs}

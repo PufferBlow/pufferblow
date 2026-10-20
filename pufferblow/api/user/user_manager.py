@@ -1,5 +1,6 @@
 import base64
 import datetime
+import hmac
 import hashlib
 import json
 import random
@@ -25,6 +26,8 @@ from pufferblow.api.logger.msgs import debug, info
 
 # Models
 from pufferblow.api.models.config_model import Config
+from pufferblow.api.errors import ApiError, ErrorCode
+from pufferblow.api.security.password_digest import hash_password, verify_password
 from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, OWNER_ROLE_ID
 from pufferblow.api.user.status import normalize_user_status
 from pufferblow.api.utils.appearance import derive_accent_color
@@ -203,10 +206,6 @@ class UserManager:
             user_id=user.user_id, data=user.auth_token, associated_to="auth_token"
         )
 
-        user_password = self._decrypt_data(
-            user_id=user.user_id, data=user.password, associated_to="password"
-        )
-
         current_instance = f"{self.config.API_HOST}:{self.config.API_PORT}"
         if str(user.origin_server) != current_instance:
             return (None, False, "instance_mismatch")
@@ -214,10 +213,25 @@ class UserManager:
         if self.is_banned(str(user.user_id)):
             return (None, False, "banned")
 
-        if password == user_password:
+        if self._password_matches(user_id=user.user_id, stored=user.password, given=password):
             return (user, True, None)
 
         return (None, False, "invalid_password")
+
+    def _password_matches(self, user_id, stored: str, given: str) -> bool:
+        """Whether ``given`` is the password ``stored`` was made from.
+
+        On Postgres the stored value is encrypted and is decrypted to compare. The SQLite test database
+        has no keys, so it keeps a salted scrypt digest instead (see ``DatabaseHandler.sign_up`` and
+        ``security/password_digest.py``) and the comparison is made against that.
+        """
+        if self._is_sqlite():
+            return verify_password(stored, given)
+        decrypted = self._decrypt_data(user_id=user_id, data=stored, associated_to="password")
+        return hmac.compare_digest(decrypted.encode(), given.encode())
+
+    def _is_sqlite(self) -> bool:
+        return str(self.database_handler.database_engine.url).startswith("sqlite://")
 
     @staticmethod
     def _normalize_target_domain(target: str) -> str:
@@ -405,9 +419,11 @@ class UserManager:
         Returns:
             dict: The user's profile metadata in a dict format.
         """
-        user_data = self.database_handler.get_user(
-            user_id=user_id,
-        ).to_dict()
+        user = self.database_handler.get_user(user_id=user_id)
+        if user is None:
+            # An id nobody has (or that is not an id at all): a 404, not a crash.
+            raise ApiError(ErrorCode.RESOURCE_NOT_FOUND, details={"resource": "user", "user_id": str(user_id)[:64]})
+        user_data = user.to_dict()
 
         # Block-privacy scrub. Runs after `to_dict()` so we redact
         # ALREADY-SERIALISED fields (cheaper than re-fetching) and
@@ -886,16 +902,7 @@ class UserManager:
             bool: True if the given `password` matches the user's saved hashed `password`, otherwise False.
         """
         user_data = self.database_handler.get_user(user_id=user_id)
-        ciphered_user_password = user_data.password
-
-        raw_password = self._decrypt_data(
-            user_id=user_id, associated_to="password", data=ciphered_user_password
-        )
-
-        if raw_password != password:
-            return False
-
-        return True
+        return self._password_matches(user_id=user_id, stored=user_data.password, given=password)
 
     def update_username(self, user_id: str, new_username: str) -> None:
         """
@@ -1164,13 +1171,17 @@ class UserManager:
         Returns:
             `None`.
         """
-        ciphered_new_password, key = self.encrypt_manager.encrypt(data=new_password)
-        ciphered_new_password = base64.b64encode(ciphered_new_password).decode("ascii")
+        if self._is_sqlite():
+            # The test database keeps a digest and no keys (see `DatabaseHandler.sign_up`).
+            ciphered_new_password = hash_password(new_password)
+        else:
+            ciphered_new_password, key = self.encrypt_manager.encrypt(data=new_password)
+            ciphered_new_password = base64.b64encode(ciphered_new_password).decode("ascii")
 
-        key.user_id = user_id
-        key.associated_to = "password"
+            key.user_id = user_id
+            key.associated_to = "password"
 
-        self.database_handler.update_key(key)
+            self.database_handler.update_key(key)
         self.database_handler.update_user_password(
             user_id=user_id, ciphered_new_password=ciphered_new_password
         )

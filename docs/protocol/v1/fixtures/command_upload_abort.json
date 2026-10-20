@@ -1,0 +1,12 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_12",
+    "name": "upload.abort",
+    "data": {
+      "upload_id": "upl_Zq81xK0aTn3w"
+    }
+  }
+}

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 
 from pufferblow.api.database.tables.bots import Bots
+from pufferblow.api.database.tables.channel_event_seq import ChannelEventSeq
 from pufferblow.api.database.tables.command_idempotency import CommandIdempotency
 
 #: A ``pending`` reservation older than this belongs to a command whose process died.
@@ -19,6 +20,24 @@ def _aware(value: datetime) -> datetime:
 
 
 class DatabaseProtocolMixin:
+    # ── event sequence high-water marks ────────────────────────
+
+    def get_channel_event_high_water(self, channel_id: str) -> int:
+        """The highest sequence number reserved for a channel's events so far (0 if none)."""
+        with self.database_session() as session:
+            row = session.get(ChannelEventSeq, str(channel_id))
+            return int(row.high_water) if row is not None else 0
+
+    def set_channel_event_high_water(self, channel_id: str, high_water: int) -> None:
+        """Record a new high-water mark. It only ever moves up."""
+        with self.database_session() as session:
+            row = session.get(ChannelEventSeq, str(channel_id))
+            if row is None:
+                session.add(ChannelEventSeq(channel_id=str(channel_id), high_water=int(high_water)))
+            elif int(high_water) > int(row.high_water):
+                row.high_water = int(high_water)
+            session.commit()
+
     # ── idempotency ────────────────────────────────────────────
 
     def reserve_idempotency_key(self, principal_id: str, operation: str, key: str) -> tuple[str, dict | None]:
@@ -104,6 +123,14 @@ class DatabaseProtocolMixin:
             if row is not None:
                 session.expunge(row)
             return row
+
+    def list_bots(self) -> list[Bots]:
+        """Every bot, newest first (revoked ones included, flagged by ``revoked_at``)."""
+        with self.database_session() as session:
+            rows = session.query(Bots).order_by(Bots.created_at.desc()).all()
+            for row in rows:
+                session.expunge(row)
+            return rows
 
     def revoke_bot(self, bot_id: str) -> bool:
         with self.database_session() as session:

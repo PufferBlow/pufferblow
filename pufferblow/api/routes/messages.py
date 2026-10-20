@@ -8,10 +8,8 @@ This module handles all message-related operations including:
 - Deleting messages
 """
 
-from datetime import datetime
 from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
 from fastapi.encoders import jsonable_encoder
-from loguru import logger
 
 from pufferblow.api.schemas import (
     LoadMessagesResponse,
@@ -40,6 +38,7 @@ from pufferblow.api.dependencies import (
     check_channel_access,
     get_current_user,
 )
+from pufferblow.api.services.attachments import store_attachments
 from pufferblow.core.bootstrap import api_initializer
 
 # Create router for message-related endpoints
@@ -53,18 +52,6 @@ def _get_message_and_attachment_policy() -> tuple[int, int]:
     return message_policy(
         api_initializer.database_handler, api_initializer.storage_manager, api_initializer.config
     )()
-
-
-def _measure_upload_size(file: UploadFile) -> int:
-    """Measure an uploaded file without consuming its stream permanently."""
-    if hasattr(file.file, "getbuffer"):
-        return len(file.file.getbuffer())
-
-    current_position = file.file.tell()
-    file.file.seek(0, 2)
-    size = file.file.tell()
-    file.file.seek(current_position)
-    return size
 
 
 # Dependency to parse form data into Pydantic model
@@ -401,80 +388,9 @@ async def _send_channel_message(
     sent_at = validated_form.sent_at
     _, max_total_attachment_mb = _get_message_and_attachment_policy()
 
-    attachment_objects: list[dict] = []
-    if attachments and api_initializer.storage_manager is None:
-        raise exceptions.HTTPException(
-            status_code=503,
-            detail="File uploads are disabled on this server.",
-        )
-    if attachments:
-        total_attachment_bytes = sum(_measure_upload_size(file) for file in attachments)
-        if total_attachment_bytes > max_total_attachment_mb * 1024 * 1024:
-            raise exceptions.HTTPException(
-                status_code=400,
-                detail=(
-                    "Combined attachment size exceeds the instance limit of "
-                    f"{max_total_attachment_mb}MB."
-                ),
-            )
-        for file in attachments:
-            if file.filename:
-                try:
-                    storage_url, is_duplicate, filename, mime_type, file_size = (
-                        await api_initializer.storage_manager.upload_file(
-                            file=file,
-                            user_id=principal.id,
-                            reference_type="message_attachment",
-                            check_duplicates=True,
-                        )
-                    )
-                    # Resolve LQIP URL for image attachments so the
-                    # client can paint a placeholder while the full
-                    # asset streams in. Non-image attachments
-                    # (videos, audio, PDFs, etc.) just get None
-                    # here — the AttachmentBubble renders its
-                    # type-specific placeholder for those.
-                    lqip_url = None
-                    if mime_type.startswith("image/") and mime_type != "image/gif":
-                        from pufferblow.api.user.user_manager import (
-                            _resolve_storage_lqip_url,
-                        )
-                        lqip_url = _resolve_storage_lqip_url(
-                            storage_url, api_initializer.database_handler
-                        )
-                    attachment_objects.append({
-                        "url": storage_url,
-                        "lqip_url": lqip_url,
-                        "filename": filename,
-                        "type": mime_type,
-                        "size": file_size,
-                    })
-
-                    try:
-                        api_initializer.database_handler.create_activity({
-                            "event_type": "message_attachment",
-                            "description": f"Attachment '{filename}' uploaded for message in channel {channel_id}",
-                            "metadata": {
-                                "file_url": storage_url,
-                                "file_size": file_size,
-                                "file_type": mime_type,
-                                "channel_id": channel_id,
-                                "is_duplicate": is_duplicate,
-                            },
-                            "user_id": principal.id,
-                            "timestamp": datetime.utcnow().isoformat(),
-                        })
-                    except Exception as e:
-                        logger.warning(f"Failed to log attachment upload activity: {str(e)}")
-
-                except exceptions.HTTPException:
-                    raise
-                except Exception as e:
-                    logger.error(f"Failed to upload attachment '{file.filename}': {str(e)}")
-                    raise exceptions.HTTPException(
-                        status_code=500,
-                        detail=f"Failed to upload attachment '{file.filename}'. Please try again.",
-                    )
+    attachment_objects = await store_attachments(
+        principal, channel_id, attachments, max_total_mb=max_total_attachment_mb
+    )
 
     # Persisting, sticker resolution, mention notifications and the real-time event all live in
     # the shared MessageService, so this route and the WebSocket `message.create` command behave

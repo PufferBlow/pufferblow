@@ -4,6 +4,9 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from pufferblow.api.utils.extract_user_id import extract_user_id
+from pufferblow.core.bootstrap import api_initializer
+
 
 SIGNUP_ROUTE = "/api/v1/users/signup"
 LIST_CHANNELS_ROUTE = "/api/v1/channels/list/"
@@ -19,10 +22,18 @@ def _make_user(client: TestClient) -> tuple[str, str]:
 
 
 def _list_channels(client: TestClient, auth_token: str) -> list[dict]:
-    """Return the channel list visible to the given token."""
-    response = client.get(LIST_CHANNELS_ROUTE, params={"auth_token": auth_token})
+    """The channels the token can see; a public text channel is created first if the instance has none."""
+    response = client.post(LIST_CHANNELS_ROUTE, json={"auth_token": auth_token})
     assert response.status_code == 200, response.text
-    return response.json().get("channels", [])
+    channels = response.json().get("channels", [])
+    if not channels:
+        api_initializer.channels_manager.create_channel(
+            user_id=extract_user_id(auth_token), channel_name=f"general_{uuid.uuid4().hex[:6]}", is_private=False, channel_type="text"
+        )
+        response = client.post(LIST_CHANNELS_ROUTE, json={"auth_token": auth_token})
+        channels = response.json().get("channels", [])
+        assert channels, "the test channel is not visible"
+    return channels
 
 
 def _seed_messages(
@@ -62,7 +73,7 @@ def test_search_rejects_query_too_short(client: TestClient):
 
     status, body = _search(client, channel_id, auth_token=auth_token, q="a")
     assert status == 400
-    assert "at least" in body.get("detail", "").lower()
+    assert "at least" in body.get("message", "").lower()
 
 
 def test_search_rejects_limit_out_of_range(client: TestClient):
@@ -76,7 +87,7 @@ def test_search_rejects_limit_out_of_range(client: TestClient):
         client, channel_id, auth_token=auth_token, q="hello", limit=999
     )
     assert status == 400
-    assert "limit" in body.get("detail", "").lower()
+    assert "limit" in body.get("message", "").lower()
 
 
 def test_search_finds_matching_message(client: TestClient):

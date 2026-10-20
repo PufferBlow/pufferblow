@@ -1,39 +1,49 @@
+"""Sign-up."""
+
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
-
-# Middlewares
-from pufferblow.tests.conftest import ValueStorage
-
 
 route = "/api/v1/users/signup"
 
 
 def test_signup(client: TestClient):
-    """Test signup."""
-    data = {"username": ValueStorage.username, "password": ValueStorage.password}
-
-    response = client.post(route, json=data)
-    response_data = response.json()
+    response = client.post(route, json={"username": f"user_{uuid.uuid4().hex[:8]}", "password": "12345678"})
 
     assert response.status_code == 201
+    body = response.json()
+    assert body["auth_token"] and body["refresh_token"] and body["token_type"]
 
-    ValueStorage.auth_token = response_data["auth_token"]
+
+def test_the_new_account_can_use_its_token_straight_away(client: TestClient, account):
+    response = client.post("/api/v1/users/profile", json={"auth_token": account.auth_token})
+    assert response.status_code == 200
+    assert response.json()["user_data"]["username"] == account.username
 
 
 def test_signup_username_duplicate_exception(client: TestClient):
-    """Test the exception that will get raised if the username
-    used is repeated or duplicated
-    """
-    username = f"duplicate_{uuid.uuid4().hex[:8]}"
-    data = {"username": username, "password": ValueStorage.password}
+    """A name already taken is refused, however often it is tried."""
+    data = {"username": f"duplicate_{uuid.uuid4().hex[:8]}", "password": "12345678"}
 
-    first_response = client.post(route, json=data)
-    assert first_response.status_code == 201
-
+    assert client.post(route, json=data).status_code == 201
     response = client.post(route, json=data)
 
     assert response.status_code == 409
-    assert response.json() == {
-        "detail": "username already exists. Please change it and try again later",
-    }
+    assert response.json()["error_code"] == "auth.username_taken"
+
+
+def test_a_short_password_is_refused_and_says_why(client: TestClient):
+    response = client.post(route, json={"username": f"user_{uuid.uuid4().hex[:8]}", "password": "1"})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error_code"] == "auth.password_too_weak"
+    assert body["details"]["field"] == "password"
+
+
+@pytest.mark.parametrize("name", ["everyone", "Everyone", " everyone "])
+def test_the_everyone_mention_cannot_be_a_username(client: TestClient, name: str):
+    response = client.post(route, json={"username": name, "password": "12345678"})
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "auth.username_invalid"

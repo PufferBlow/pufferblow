@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 import uuid
+from types import SimpleNamespace
 from typing import Any, Callable, TypeVar
 
 import sqlalchemy
@@ -44,7 +45,7 @@ from pufferblow.api.database.tables.friendships import Friendships
 from pufferblow.api.database.tables.instance_runtime_config import InstanceRuntimeConfig
 from pufferblow.api.database.tables.keys import Keys
 from pufferblow.api.database.tables.media_sfu_instances import MediaSFUInstance  # noqa: F401  (registers the table)
-from pufferblow.api.database.tables.message_reactions import MessageReactions
+from pufferblow.api.database.tables.message_reactions import BotMessageReactions, MessageReactions
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
 from pufferblow.api.database.tables.messages import Messages
 from pufferblow.api.database.tables.notification_preferences import NotificationPreferences
@@ -277,9 +278,6 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 # Tables with UUID columns that SQLite doesn't handle properly for tests
                 "server_stickers",
                 "server_gifs",
-                # File reference system tables (for testing, we'll use basic hashing without references)
-                "file_objects",
-                "file_references",
                 # Chart data table uses advanced date functions that SQLite doesn't handle well
                 "chart_data",
                 "decentralized_auth_challenges",
@@ -1376,9 +1374,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 # For SQLite tests, use simple hash
                 import hashlib
 
-                hashed_password = hashlib.sha256(user_data.password.encode()).digest()
-                hashed_auth = hashlib.sha256(user_data.auth_token.encode()).digest()
-                user_data.password = base64.b64encode(hashed_password).decode("ascii")
+                from pufferblow.api.security.password_digest import hash_password
+
+                hashed_auth = hashlib.sha256(user_data.auth_token.encode()).digest()  # a long random token, not a password
+                user_data.password = hash_password(user_data.password)
                 user_data.auth_token = base64.b64encode(hashed_auth).decode("ascii")
 
             # Create auth token entry
@@ -1424,7 +1423,9 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             try:
                 normalized_user_id = uuid.UUID(str(user_id))
             except (TypeError, ValueError):
-                normalized_user_id = user_id
+                # Not an id at all, so nobody has it (and the database would reject the comparison).
+                logger.debug(debug.DEBUG_USER_NOT_FOUND(user_id=user_id, username=username))
+                return None
 
         # Cache lookup is only safe for by-id reads. A by-username
         # call may be checking signin-time freshness (e.g. password
@@ -2149,7 +2150,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         Returns:
             `None`.
         """
-        updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             key = session.merge(key)
@@ -3873,10 +3874,27 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
     # --- Message reactions -----------------------------------------------
 
     def add_message_reaction(
-        self, message_id: str, user_id: str, emoji: str
+        self, message_id: str, user_id: str, emoji: str, *, as_bot: bool = False
     ) -> bool:
         """Insert a reaction row. Returns True when newly added, False when the
-        row already existed (idempotent toggle on)."""
+        row already existed (idempotent toggle on). ``user_id`` is a bot principal's id
+        when ``as_bot`` (bots keep their reactions in their own table)."""
+        if as_bot:
+            with self.database_session() as session:
+                if (
+                    session.query(BotMessageReactions)
+                    .filter(
+                        BotMessageReactions.message_id == message_id,
+                        BotMessageReactions.bot_id == user_id,
+                        BotMessageReactions.emoji == emoji,
+                    )
+                    .first()
+                    is not None
+                ):
+                    return False
+                session.add(BotMessageReactions(message_id=message_id, bot_id=user_id, emoji=emoji))
+                session.commit()
+            return True
         with self.database_session() as session:
             existing = (
                 session.query(MessageReactions)
@@ -3900,10 +3918,23 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         return True
 
     def remove_message_reaction(
-        self, message_id: str, user_id: str, emoji: str
+        self, message_id: str, user_id: str, emoji: str, *, as_bot: bool = False
     ) -> bool:
         """Delete a reaction row. Returns True when a row was removed, False
         when no such reaction existed (idempotent toggle off)."""
+        if as_bot:
+            with self.database_session() as session:
+                deleted = (
+                    session.query(BotMessageReactions)
+                    .filter(
+                        BotMessageReactions.message_id == message_id,
+                        BotMessageReactions.bot_id == user_id,
+                        BotMessageReactions.emoji == emoji,
+                    )
+                    .delete(synchronize_session=False)
+                )
+                session.commit()
+            return bool(deleted)
         with self.database_session() as session:
             deleted = (
                 session.query(MessageReactions)
@@ -3938,6 +3969,17 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             )
             for row in rows:
                 grouped.setdefault(row.message_id, []).append(row)
+
+            # Bots' reactions look the same to a reader: the reactor id is the bot principal's id.
+            bot_rows = (
+                session.query(BotMessageReactions)
+                .filter(BotMessageReactions.message_id.in_(message_ids))
+                .all()
+            )
+            for row in bot_rows:
+                grouped.setdefault(row.message_id, []).append(
+                    SimpleNamespace(message_id=row.message_id, user_id=row.bot_id, emoji=row.emoji, created_at=row.created_at)
+                )
         return grouped
 
     # --- Notifications ---------------------------------------------------
@@ -4824,11 +4866,6 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         Returns:
             None.
         """
-        # Skip server creation for SQLite tests since the server table is excluded
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         with self.database_session() as session:
             session.add(server)
             session.commit()

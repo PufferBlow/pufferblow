@@ -456,11 +456,6 @@ class DatabaseMetricsFilesMixin:
         """
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
-        # For SQLite tests where server table is not created, skip
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         with self.database_session() as session:
             stmt = update(Server).values(avatar_url=avatar_url, updated_at=updated_at)
 
@@ -478,11 +473,6 @@ class DatabaseMetricsFilesMixin:
             None.
         """
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
-
-        # For SQLite tests where server table is not created, skip
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
 
         with self.database_session() as session:
             stmt = update(Server).values(banner_url=banner_url, updated_at=updated_at)
@@ -516,11 +506,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             None
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         file_obj = FileObjects(
             file_hash=file_hash,
             ref_count=ref_count,
@@ -554,11 +539,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             None
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         file_ref = FileReferences(
             reference_id=reference_id,
             file_hash=file_hash,
@@ -580,11 +560,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             None
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         with self.database_session() as session:
             stmt = (
                 update(FileObjects)
@@ -604,11 +579,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             None
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         with self.database_session() as session:
             stmt = (
                 update(FileObjects)
@@ -631,11 +601,6 @@ class DatabaseMetricsFilesMixin:
             None
         """
         from pathlib import Path
-
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
 
         with self.database_session() as session:
             if db_files is None:
@@ -738,11 +703,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             List[str]: List of referenced file URLs
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return []
-
         with self.database_session() as session:
             # Get all referenced file hashes
             results = (
@@ -846,11 +806,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             None
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         updated_at = date_in_gmt(format="%Y-%m-%d %H:%M:%S")
 
         with self.database_session() as session:
@@ -879,11 +834,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             None
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         with self.database_session() as session:
             stmt = (
                 update(FileReferences)
@@ -903,11 +853,6 @@ class DatabaseMetricsFilesMixin:
         Returns:
             FileObjects | None: The file object if found, None otherwise
         """
-        # Skip for SQLite tests where file tables are not created
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return None
-
         with self.database_session() as session:
             stmt = select(FileObjects).where(FileObjects.file_hash == file_hash)
             result = session.execute(stmt).fetchone()
@@ -924,10 +869,6 @@ class DatabaseMetricsFilesMixin:
 
         No-op on SQLite (file_objects isn't materialized there).
         """
-        database_uri = str(self.database_engine.url)
-        if database_uri.startswith("sqlite://"):
-            return
-
         with self.database_session() as session:
             stmt = (
                 update(FileObjects)

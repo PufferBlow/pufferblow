@@ -1,0 +1,14 @@
+{
+  "direction": "client_to_server",
+  "frame": {
+    "type": "command",
+    "version": 1,
+    "id": "cmd_10",
+    "name": "upload.begin",
+    "data": {
+      "name": "photo.png",
+      "content_type": "image/png",
+      "size": 84213
+    }
+  }
+}
