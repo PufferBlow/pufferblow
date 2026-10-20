@@ -15,7 +15,8 @@ files from the brand sheet.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 ASSET_ROOT = Path(__file__).resolve().parents[2] / "assets" / "default-art"
@@ -61,6 +62,58 @@ def is_default_art_url(url: str | None) -> bool:
     path = url.split("?", 1)[0].split("#", 1)[0]
     marker = path.find("/assets/")
     return marker != -1 and path[marker:].startswith((AVATAR_URL_PREFIX, BANNER_URL_PREFIX))
+
+
+_ART_NAME = re.compile(r"^(?P<head>.*?/assets/(?:avatars|banners)/pb-(?:avatar|banner)-)(?P<expression>[a-z]+)-(?P<tone>[a-z]+)(?P<tail>\.(?:svg|png).*)$")
+
+
+def retarget_default_art(url: str | None, *, expression: str | None = None, tone: str | None = None) -> str | None:
+    """The same hosted default image with another face and/or colour, or ``None`` if ``url`` is not default art.
+
+    A value that is not one of the set is ignored, so a bad name can never produce a URL to a file
+    that does not exist.
+    """
+    match = _ART_NAME.match(url or "")
+    if not match or not is_default_art_url(url):
+        return None
+    face = expression if expression in EXPRESSIONS else match["expression"]
+    colour = tone if tone in TONES else match["tone"]
+    return f"{match['head']}{face}-{colour}{match['tail']}"
+
+
+def apply_chosen_look(
+    plan: "AppearancePlan",
+    *,
+    seed: str,
+    avatar_kind: str | None,
+    banner_kind: str | None,
+    current_avatar_url: str | None,
+    current_banner_url: str | None,
+    expression: str | None,
+    tone: str | None,
+    had_choice: bool,
+) -> "AppearancePlan":
+    """Make the hosted default art follow the face and colour a person chose.
+
+    The art is a real file every client shows, so choosing a face or a colour has to change the URL, not
+    just how the official client draws it. Only default art is touched: an uploaded picture stays.
+    Clearing the choice (``had_choice`` and nothing chosen now) goes back to the art the seed gets.
+    ``avatar_kind`` / ``banner_kind`` are the kinds that will be in force after this update.
+    """
+    avatar_url, banner_url = plan.avatar_url, plan.banner_url
+    if expression or tone:
+        if avatar_kind != "image":
+            retargeted = retarget_default_art(avatar_url or current_avatar_url, expression=expression, tone=tone)
+            avatar_url = retargeted or avatar_url
+        if tone and banner_kind == "default":
+            retargeted = retarget_default_art(banner_url or current_banner_url, tone=tone)
+            banner_url = retargeted or banner_url
+    elif had_choice:
+        if avatar_kind != "image" and avatar_url is None and is_default_art_url(current_avatar_url):
+            avatar_url = default_avatar_url(seed)
+        if banner_kind == "default" and banner_url is None and is_default_art_url(current_banner_url):
+            banner_url = default_banner_url(seed)
+    return replace(plan, avatar_url=avatar_url, banner_url=banner_url)
 
 
 def asset_file(folder: str, filename: str) -> Path | None:

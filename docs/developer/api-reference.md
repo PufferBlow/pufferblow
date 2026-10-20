@@ -393,7 +393,13 @@ always the complete object.
 | `motion` | `puff`, `still` (whether the avatar moves on hover) | `puff` |
 | `sections` | `{ play, mains, accounts, badges }`, each `true`/`false` | play, mains, badges on |
 
-Clients mix the chosen colour into a dark card at a low, fixed strength, so
+Choosing an `expression` or a `tone` also moves the hosted default art: while
+the avatar is the default art (`avatar_kind: "identicon"`), `avatar_url` becomes
+the matching `/assets/avatars/pb-avatar-<expression>-<tone>.svg` (and a default
+banner takes the `tone`), so a client that knows nothing about profile settings
+still shows the face and colour that were chosen. An uploaded picture is never
+replaced, and clearing the choice (`null`) returns to the art the account was
+given. Clients mix the chosen colour into a dark card at a low, fixed strength, so
 white text stays readable whatever is chosen. The update is all-or-nothing:
 an unknown key or a value outside its list is a 400 (`validation.field_range`)
 whose `details.field` names it (`sections.play`, `tone`, ...), and nothing is

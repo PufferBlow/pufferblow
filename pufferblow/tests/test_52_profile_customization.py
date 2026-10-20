@@ -207,3 +207,51 @@ def test_the_migration_adds_the_columns_to_an_older_users_table():
             module.upgrade()  # idempotent
         columns = {c["name"] for c in sa.inspect(connection).get_columns("users")}
     assert {"pronouns", "custom_status", "profile_settings"} <= columns
+
+
+# ── the hosted art follows the chosen face and colour ─────────────
+
+
+def test_retargeting_changes_only_the_face_and_colour_and_only_for_default_art():
+    from pufferblow.api.utils.default_art import retarget_default_art
+
+    assert retarget_default_art("/assets/avatars/pb-avatar-happy-ink.svg", expression="wink", tone="sky") == "/assets/avatars/pb-avatar-wink-sky.svg"
+    assert retarget_default_art("/assets/avatars/pb-avatar-happy-ink.svg", tone="sage") == "/assets/avatars/pb-avatar-happy-sage.svg"
+    assert retarget_default_art("https://chat.example/assets/banners/pb-banner-wink-ash.png?v=1", tone="coral") == "https://chat.example/assets/banners/pb-banner-wink-coral.png?v=1"
+    assert retarget_default_art("/storage/" + "a" * 64, tone="sky") is None  # an upload is never touched
+    assert retarget_default_art(None, tone="sky") is None
+    # a name outside the set is ignored, never turned into a URL to a file that does not exist
+    assert retarget_default_art("/assets/avatars/pb-avatar-happy-ink.svg", expression="furious", tone="neon") == "/assets/avatars/pb-avatar-happy-ink.svg"
+
+
+def test_choosing_a_face_and_colour_changes_the_avatar_url_every_client_sees(client: TestClient, account):
+    reply = client.put(
+        "/api/v1/users/profile/appearance",
+        json={"auth_token": account.auth_token, "profile_settings": {"expression": "wink", "tone": "violet"}},
+    )
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["avatar_url"] == "/assets/avatars/pb-avatar-wink-violet.svg"
+    profile = _profile(client, account.auth_token)
+    assert profile["avatar_url"] == "/assets/avatars/pb-avatar-wink-violet.svg"
+    assert profile["banner_url"].endswith("-violet.svg")  # the banner takes the colour too
+    assert client.get(profile["avatar_url"]).status_code == 200  # and it is a real file
+
+
+def test_clearing_the_choice_goes_back_to_the_art_the_account_was_given(client: TestClient, account):
+    before = _profile(client, account.auth_token)
+    client.put("/api/v1/users/profile/appearance", json={"auth_token": account.auth_token, "profile_settings": {"expression": "grumpy", "tone": "rose"}})
+
+    client.put("/api/v1/users/profile/appearance", json={"auth_token": account.auth_token, "profile_settings": {"expression": None, "tone": None}})
+
+    after = _profile(client, account.auth_token)
+    assert after["avatar_url"] == before["avatar_url"] and after["banner_url"] == before["banner_url"]
+
+
+def test_a_chosen_face_does_not_overwrite_an_uploaded_avatar(client: TestClient, account):
+    from pufferblow.core.bootstrap import api_initializer
+
+    api_initializer.database_handler.update_user_appearance(user_id=account.user_id, avatar_kind="image", avatar_url="/storage/" + "b" * 64)
+
+    client.put("/api/v1/users/profile/appearance", json={"auth_token": account.auth_token, "profile_settings": {"expression": "wink", "tone": "sky"}})
+
+    assert _profile(client, account.auth_token)["avatar_url"] == "/storage/" + "b" * 64

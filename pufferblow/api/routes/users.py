@@ -24,9 +24,10 @@ from pufferblow.api.utils.appearance import (
     generate_shuffle_seed,
     is_valid_hex_color,
 )
-from pufferblow.api.utils.default_art import plan_appearance_update
+from pufferblow.api.utils.default_art import apply_chosen_look, plan_appearance_update
 from pufferblow.api.utils.profile_settings import (
     ABOUT_MAX,
+    effective_profile_settings,
     CUSTOM_STATUS_MAX,
     PRONOUNS_MAX,
     ProfileSettingsError,
@@ -537,6 +538,20 @@ async def update_profile_appearance_route(
         banner_kind=banner_kind,
         new_seed=new_seed,
     )
+    if new_settings is not None:
+        # The default art follows the face and colour they chose, so every client shows it.
+        before = effective_profile_settings(current.profile_settings)
+        plan = apply_chosen_look(
+            plan,
+            seed=new_seed or current.avatar_seed or str(user_id),
+            avatar_kind=plan.avatar_kind or current.avatar_kind,
+            banner_kind=plan.banner_kind or current.banner_kind,
+            current_avatar_url=current.avatar_url,
+            current_banner_url=current.banner_url,
+            expression=new_settings["expression"],
+            tone=new_settings["tone"],
+            had_choice=bool(before["expression"] or before["tone"]),
+        )
     api_initializer.database_handler.update_user_appearance(
         user_id=user_id,
         avatar_kind=plan.avatar_kind,
