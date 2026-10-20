@@ -383,12 +383,13 @@ always the complete object.
 
 | Key | Values | Default |
 | --- | --- | --- |
+| `expression` | the face the avatar wears: `default`, `happy`, `wink`, `sleepy`, `surprised`, `grumpy`, or `null` (derive it from the handle) | `null` |
 | `frame` | `none`, `ring`, `spines`, `bubbles` (drawn around the avatar) | `none` |
 | `tone` | `brass`, `coral`, `rose`, `violet`, `sky`, `sage`, or `null` (derive it from the handle) | `null` |
-| `tone2` | same as `tone`; the second colour of a `duo` card | `null` |
-| `card_theme` | `solid`, `duo`, `mix`, `plain` | `solid` |
-| `banner_pattern` | `ripple`, `burst`, `halftone`, `crowd`, or `null` (derive it from the handle) | `null` |
-| `name_font` | `marcellus`, `barlow`, `condensed`, `mono` | `barlow` |
+| `tone2` | same as `tone`; the second colour of a `duo` card or banner | `null` |
+| `card_theme` | `mono` (no tint), `tinted` (the colour mixed into the card), `duo` (fading into `tone2`) | `mono` |
+| `banner_pattern` | `ripple`, `burst`, `halftone`, `crowd`, `duo` (a gradient from `tone` to `tone2`), or `null` (derive it from the handle). An uploaded banner is `banner_kind: "image"`. | `null` |
+| `name_font` | `marcellus`, `barlow`, `condensed` | `barlow` |
 | `motion` | `puff`, `still` (whether the avatar moves on hover) | `puff` |
 | `sections` | `{ play, mains, accounts, badges }`, each `true`/`false` | play, mains, badges on |
 

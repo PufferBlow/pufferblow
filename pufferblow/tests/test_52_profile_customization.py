@@ -48,10 +48,11 @@ def test_sections_are_switched_one_at_a_time():
     assert result["sections"] == {"play": True, "mains": True, "accounts": True, "badges": True}
 
 
-def test_the_colour_and_pattern_can_go_back_to_the_one_derived_from_the_handle():
-    chosen = merge_profile_settings(None, {"tone": "coral", "banner_pattern": "burst"})
-    back = merge_profile_settings(chosen, {"tone": None, "banner_pattern": None})
-    assert back["tone"] is None and back["banner_pattern"] is None
+def test_the_face_colour_and_pattern_can_go_back_to_the_ones_derived_from_the_handle():
+    chosen = merge_profile_settings(None, {"expression": "wink", "tone": "coral", "banner_pattern": "duo"})
+    assert chosen["expression"] == "wink" and chosen["banner_pattern"] == "duo"
+    back = merge_profile_settings(chosen, {"expression": None, "tone": None, "banner_pattern": None})
+    assert back["expression"] is None and back["tone"] is None and back["banner_pattern"] is None
 
 
 @pytest.mark.parametrize(
@@ -59,7 +60,10 @@ def test_the_colour_and_pattern_can_go_back_to_the_one_derived_from_the_handle()
     [
         ({"frame": "flames"}, "frame"),  # not in the list
         ({"tone": "#ff0000"}, "tone"),  # colours are names, never free hex values
-        ({"card_theme": None}, "card_theme"),  # only the colours and the pattern may be null
+        ({"card_theme": "solid"}, "card_theme"),  # not one of mono / tinted / duo
+        ({"card_theme": None}, "card_theme"),  # only the face, the colours and the pattern may be null
+        ({"expression": "furious"}, "expression"),
+        ({"name_font": "mono"}, "name_font"),
         ({"name_font": "comic sans"}, "name_font"),
         ({"motion": "spin"}, "motion"),
         ({"unknown": 1}, "unknown"),  # not stored: the column is not a place for arbitrary data
@@ -120,7 +124,7 @@ def test_settings_are_saved_and_come_back_in_the_profile_and_the_list(client: Te
 
     mine = _profile(client, account.auth_token)["profile_settings"]
     assert mine["frame"] == "bubbles" and mine["tone"] == "sage" and mine["sections"]["accounts"] is True
-    assert mine["card_theme"] == "solid"  # untouched
+    assert mine["card_theme"] == "mono"  # untouched
 
     listed = client.get("/api/v1/users/list", params={"auth_token": account.auth_token}).json()["users"]
     assert next(u for u in listed if u["username"] == account.username)["profile_settings"]["frame"] == "bubbles"

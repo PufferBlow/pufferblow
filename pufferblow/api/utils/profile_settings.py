@@ -17,10 +17,13 @@ from typing import Any
 
 # The six identity colours (see the design language). Names, not hex values: a client maps them.
 TONES = ("brass", "coral", "rose", "violet", "sky", "sage")
+EXPRESSIONS = ("default", "happy", "wink", "sleepy", "surprised", "grumpy")
 FRAMES = ("none", "ring", "spines", "bubbles")
-CARD_THEMES = ("solid", "duo", "mix", "plain")
-BANNER_PATTERNS = ("ripple", "burst", "halftone", "crowd")
-NAME_FONTS = ("marcellus", "barlow", "condensed", "mono")
+# mono: no tint. tinted: the colour mixed into the card. duo: the colour fading into the second one.
+CARD_THEMES = ("mono", "tinted", "duo")
+# The four patterns, or "duo": a gradient between the two colours. An uploaded banner is banner_kind "image".
+BANNER_PATTERNS = ("ripple", "burst", "halftone", "crowd", "duo")
+NAME_FONTS = ("marcellus", "barlow", "condensed")
 MOTIONS = ("puff", "still")
 SECTIONS = ("play", "mains", "accounts", "badges")
 
@@ -29,10 +32,11 @@ CUSTOM_STATUS_MAX = 60
 ABOUT_MAX = 190
 
 DEFAULT_PROFILE_SETTINGS: dict[str, Any] = {
+    "expression": None,
     "frame": "none",
     "tone": None,
     "tone2": None,
-    "card_theme": "solid",
+    "card_theme": "mono",
     "banner_pattern": None,
     "name_font": "barlow",
     "motion": "puff",
@@ -40,6 +44,7 @@ DEFAULT_PROFILE_SETTINGS: dict[str, Any] = {
 }
 
 _CHOICES: dict[str, tuple[str, ...]] = {
+    "expression": EXPRESSIONS,
     "frame": FRAMES,
     "tone": TONES,
     "tone2": TONES,
@@ -48,8 +53,8 @@ _CHOICES: dict[str, tuple[str, ...]] = {
     "name_font": NAME_FONTS,
     "motion": MOTIONS,
 }
-# These may be null: "use the colour/pattern derived from my handle".
-_NULLABLE = {"tone", "tone2", "banner_pattern"}
+# These may be null: "use the face/colour/pattern derived from my handle".
+_NULLABLE = {"expression", "tone", "tone2", "banner_pattern"}
 
 
 class ProfileSettingsError(ValueError):
