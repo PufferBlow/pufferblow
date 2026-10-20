@@ -15,6 +15,7 @@ from pufferblow.api.background_tasks.background_tasks_manager import (
 )
 from pufferblow.api.config.config_handler import ConfigHandler
 from pufferblow.api.errors import register_error_handlers
+from pufferblow.api.health.monitor import health_sampling, monitor
 from pufferblow.api.routes.register import register_routers
 from pufferblow.api.routes.system_routes.server_runtime import (
     build_instance_health_payload,
@@ -67,7 +68,9 @@ async def lifespan(app: FastAPI):
 
     _mount_static_routes()
 
-    async with lifespan_background_tasks():
+    async with lifespan_background_tasks(), health_sampling(
+        build_instance_health_payload, lambda: getattr(api_initializer, "database_handler", None)
+    ):
         logger.success("Server ready — accepting requests")
         yield
 
@@ -210,6 +213,8 @@ async def request_logging_middleware(request: Request, call_next):
     elapsed_ms = int((perf_counter() - started_at) * 1000)
     status_code = response.status_code
     response.headers["X-Request-ID"] = request_id
+    if not path.startswith(("/healthz", "/readyz", "/assets/")):
+        monitor.latency.record(elapsed_ms)  # the chart is about real requests, not the checks themselves
 
     line = f"« {status_code} {method} {path} in {elapsed_ms}ms"
     exit_logger = request_logger.bind(

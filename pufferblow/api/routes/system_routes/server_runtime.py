@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from datetime import datetime, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
@@ -23,6 +25,8 @@ from pufferblow.api.utils.default_art import plan_appearance_update
 from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.api.commands.metrics import metrics
+from pufferblow.api.dependencies import require_admin
+from pufferblow.api.health.monitor import UPTIME_DAYS, monitor, uptime_percent
 from pufferblow.core.bootstrap import api_initializer
 
 from .shared import (
@@ -176,6 +180,77 @@ def build_instance_health_payload() -> dict:
             "counters": metrics.snapshot(),
         },
     }
+
+
+def _timed(probe):
+    """``(what the probe returned, how many milliseconds it took)``."""
+    started = time.perf_counter()
+    result = probe()
+    return result, round((time.perf_counter() - started) * 1000, 1)
+
+
+def _resources() -> dict | None:
+    """CPU, memory and disk use as percentages, or None where psutil is not available."""
+    try:
+        import psutil
+
+        return {
+            "cpu": round(psutil.cpu_percent(interval=None), 1),
+            "memory": round(psutil.virtual_memory().percent, 1),
+            "disk": round(psutil.disk_usage(os.path.abspath(os.sep)).percent, 1),
+        }
+    except Exception:
+        return None
+
+
+def build_instance_health_details() -> dict:
+    """Everything the status page shows. Only for admins: it carries the version, timings and peers."""
+    health = build_instance_health_payload()
+    database, database_ms = _timed(_check_database_health)
+    sfu, sfu_ms = _timed(_fetch_media_sfu_health)
+
+    storage_path = getattr(getattr(api_initializer, "config", None), "STORAGE_PATH", None)
+    storage_ok = bool(storage_path) and os.path.isdir(storage_path) and os.access(storage_path, os.W_OK)
+
+    connections = health["realtime"]["connections"]
+    checks = {
+        "database": {"status": "ok" if database["connected"] else "down", "ms": database_ms, "note": database["error"] or "Answering queries"},
+        "storage": {"status": "ok" if storage_ok else "down", "ms": 0, "note": "Writable" if storage_ok else "The storage folder is missing or not writable"},
+        "realtime": {"status": "ok" if api_initializer.is_ready("websockets_manager") else "down", "ms": 0, "note": f"{connections} connected"},
+    }
+    if sfu["enabled"]:
+        checks["voice"] = {"status": "ok" if sfu["status"] == "ok" else "down", "ms": sfu_ms, "note": sfu["error"] or "Media server answering"}
+
+    state = get_server_state()
+    days = monitor.uptime_days(api_initializer.database_handler, UPTIME_DAYS)
+    database_handler = api_initializer.database_handler
+    return {
+        **health,
+        "version": getattr(getattr(api_initializer, "config", None), "VERSION", "1.0.0"),
+        "instance": getattr(state.server, "server_name", None),
+        "uptime_s": monitor.uptime_seconds,
+        "checks": checks,
+        "latency": {**monitor.latency.summary(), "series": monitor.latency.series()},
+        "resources": _resources(),
+        "uptime_days": days,
+        "uptime_percent": uptime_percent(days),
+        "incidents": database_handler.list_health_incidents(20),
+        "peers": database_handler.list_federation_hosts(),
+    }
+
+
+@router.get("/api/v1/system/health", status_code=200)
+async def instance_health_details_route(auth_token: str):
+    """The detailed health of this instance, for its admins (the status page).
+
+    ``/healthz`` stays the small answer anyone can ask. This one adds the version, how long the process
+    has been up, per-check timings, request latency over the last day, resource use, 90 days of uptime,
+    recent incidents and the instances this one is linked to.
+    """
+    require_admin(auth_token)
+    import asyncio
+
+    return {"status_code": 200, "health": await asyncio.to_thread(build_instance_health_details)}
 
 
 def _build_server_info_payload(state: ServerState) -> dict:

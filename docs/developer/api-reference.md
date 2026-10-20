@@ -1144,6 +1144,44 @@ the protocol counters (connections, commands by outcome, latency,
 rate limiting, delivery); each counter is described in
 [Commands and events](../architecture/commands-and-events.md#observability).
 
+### `GET /api/v1/system/health?auth_token=`
+
+The detailed health of the instance, for its admins (the status page).
+`/healthz` and `instance-health` stay the small answers anyone can ask; this
+one adds what an operator needs, and is refused (403) to everyone else.
+
+```json
+{
+  "status_code": 200,
+  "health": {
+    "status": "ok",                      // everything in /healthz, plus:
+    "version": "0.9.2",
+    "instance": "switchyard.works",
+    "uptime_s": 2591204,                 // of this process
+    "checks": {                          // database, storage, realtime, and voice when it is enabled
+      "database": { "status": "ok", "ms": 4.1, "note": "Answering queries" }
+    },
+    "latency": {                         // real requests; health checks and static assets are not counted
+      "p50": 12.0, "p95": 88.0, "samples": 4021, "window_seconds": 3600,
+      "series": [{ "t": 1792000000, "count": 310, "p50": 11, "p95": 90 }]   // 5-minute buckets, last 24 h
+    },
+    "resources": { "cpu": 23.5, "memory": 61.2, "disk": 48.0 },             // null without psutil
+    "uptime_days": [{ "day": "2026-10-20", "checks": 1440, "ratio": 0.9993 }],  // 90 days; ratio null = not watched
+    "uptime_percent": 99.98,
+    "incidents": [{ "incident_id": "...", "title": "Trouble with database", "state": "resolved", "started_at": "...", "ended_at": "..." }],
+    "peers": [{ "host": "mesh.garden", "follows": 2, "last_activity": "..." }]
+  }
+}
+```
+
+The instance checks itself once a minute. Each check counts toward the day it
+happened on (a check "works" when nothing in `status` is degraded), and an
+incident opens when a check finds something wrong and resolves when one passes
+again. Latency lives in memory and starts again with the process; the uptime
+days and incidents are stored. `peers` are the instances linked by an accepted
+follow: delivery queues and reachability are not tracked, and the health check
+never dials out to other instances.
+
 ### `GET /api/v1/system/server-stats`
 
 Public counters: users registered, channels, messages. No auth.
