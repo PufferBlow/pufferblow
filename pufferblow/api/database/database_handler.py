@@ -16,6 +16,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from pufferblow.api.database.metrics_files_mixin import DatabaseMetricsFilesMixin
 from pufferblow.api.database.runtime_config_mixin import DatabaseRuntimeConfigMixin
+from pufferblow.api.database.channel_org_mixin import DatabaseChannelOrgMixin
 from pufferblow.api.database.health_mixin import DatabaseHealthMixin
 from pufferblow.api.database.protocol_mixin import DatabaseProtocolMixin
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
@@ -30,6 +31,7 @@ from pufferblow.api.database.tables.auth_tokens import AuthTokens
 from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 from pufferblow.api.database.tables.bots import Bots  # noqa: F401  (registers the table)
 from pufferblow.api.database.tables.command_idempotency import CommandIdempotency  # noqa: F401  (registers the table)
+from pufferblow.api.database.tables.channel_organization import PinnedMessages
 from pufferblow.api.database.tables.channels import Channels
 from pufferblow.api.database.tables.chart_data import ChartData
 from pufferblow.api.database.tables.decentralized_sessions import (
@@ -115,7 +117,7 @@ def _as_uuid(value):
     return value if isinstance(value, _uuid.UUID) else _uuid.UUID(str(value))
 
 
-class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin):
+class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin, DatabaseChannelOrgMixin):
     """Database handler for PufferBlow's API"""
     def __init__(
         self, database_engine: sqlalchemy.create_engine, encrypt_manager: Encrypt, config: Config
@@ -3235,11 +3237,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         channel_id: str,
         channel_name: str | None = None,
         is_private: bool | None = None,
+        topic: str | None = None,
+        category_id: str | None = None,
+        position: int | None = None,
     ) -> Channels | None:
         """
         Update mutable metadata on a channel.
 
-        Deliberately scoped to ``channel_name`` and ``is_private``;
+        ``None`` leaves a field alone; for ``topic`` and ``category_id`` an empty string clears it.
+        Deliberately scoped to the name, privacy, topic, category and position;
         ``channel_type`` is NOT writable through this path because
         flipping text<->voice would orphan messages or participant
         records depending on direction. Switching medium is treated
@@ -3258,6 +3264,12 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 channel.channel_name = channel_name
             if is_private is not None:
                 channel.is_private = bool(is_private)
+            if topic is not None:
+                channel.topic = topic or None
+            if category_id is not None:
+                channel.category_id = category_id or None
+            if position is not None:
+                channel.position = int(position)
             session.add(channel)
             session.commit()
             session.refresh(channel)
@@ -4682,6 +4694,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             stmts = [
                 delete(Messages).where(Messages.message_id == message_id),
                 delete(Keys).where(Keys.message_id == message_id),
+                delete(PinnedMessages).where(PinnedMessages.message_id == message_id),
             ]
 
             if self._is_sqlite():

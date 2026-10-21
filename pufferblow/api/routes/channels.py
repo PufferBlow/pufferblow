@@ -16,8 +16,11 @@ from datetime import datetime
 from fastapi import APIRouter, exceptions
 from loguru import logger
 
+from pufferblow.api.database.channel_org_mixin import MAX_PINS_PER_CHANNEL, CategoryNameTaken
 from pufferblow.api.schemas import (
     AuthTokenQuery,
+    CategoryOrderRequest,
+    CategoryRequest,
     CreateChannelRequest,
     UpdateChannelRequest,
     VoiceChannelJoinResponse,
@@ -297,10 +300,20 @@ async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
                 detail="Channel name already exists, please choose a different name.",
             )
 
+    # `category_id` can be sent as null to take a channel out of its category, which a missing field cannot say.
+    category_id = request.category_id
+    if "category_id" in request.model_fields_set:
+        category_id = category_id or ""
+        if category_id and not api_initializer.database_handler.category_exists(category_id):
+            raise exceptions.HTTPException(status_code=404, detail=f"Category '{category_id}' not found.")
+
     updated = api_initializer.database_handler.update_channel_metadata(
         channel_id=channel_id,
         channel_name=request.channel_name,
         is_private=request.is_private,
+        topic=None if request.topic is None else request.topic.strip(),
+        category_id=category_id,
+        position=request.position,
     )
     if updated is None:
         raise exceptions.HTTPException(
@@ -332,6 +345,9 @@ async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
                     "channel_id": channel_id,
                     "channel_name": updated.channel_name,
                     "is_private": bool(updated.is_private),
+                    "topic": updated.topic,
+                    "category_id": updated.category_id,
+                    "position": updated.position,
                 },
                 channel_id=channel_id,
             )
@@ -343,6 +359,105 @@ async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
         "message": "Channel updated successfully",
         "channel_data": updated.to_dict(),
     }
+
+
+# ── categories ────────────────────────────────────────────────
+
+
+@router.get("/categories", status_code=200)
+async def list_categories_route(auth_token: str):
+    """The channel categories, in order. Any signed-in member may read them; channels point at one with ``category_id``."""
+    get_current_user(auth_token)
+    return {"status_code": 200, "categories": api_initializer.database_handler.list_categories()}
+
+
+@router.post("/categories", status_code=201)
+async def create_category_route(request: CategoryRequest):
+    """Add a category at the end (needs ``edit_channels``). 409 if the name is taken."""
+    require_privilege(request.auth_token, "edit_channels")
+    try:
+        category = api_initializer.database_handler.create_category(request.name.strip())
+    except CategoryNameTaken:
+        raise exceptions.HTTPException(status_code=409, detail="A category with that name already exists.")
+    return {"status_code": 201, "category": category}
+
+
+@router.put("/categories/order", status_code=200)
+async def reorder_categories_route(request: CategoryOrderRequest):
+    """Put the named categories first, in the given order (needs ``edit_channels``)."""
+    require_privilege(request.auth_token, "edit_channels")
+    return {"status_code": 200, "categories": api_initializer.database_handler.reorder_categories(request.category_ids)}
+
+
+@router.put("/categories/{category_id}", status_code=200)
+async def rename_category_route(category_id: str, request: CategoryRequest):
+    """Rename a category (needs ``edit_channels``)."""
+    require_privilege(request.auth_token, "edit_channels")
+    try:
+        category = api_initializer.database_handler.update_category(category_id, request.name.strip())
+    except CategoryNameTaken:
+        raise exceptions.HTTPException(status_code=409, detail="A category with that name already exists.")
+    if category is None:
+        raise exceptions.HTTPException(status_code=404, detail=f"Category '{category_id}' not found.")
+    return {"status_code": 200, "category": category}
+
+
+@router.delete("/categories/{category_id}", status_code=200)
+async def delete_category_route(category_id: str, auth_token: str):
+    """Delete a category (needs ``edit_channels``). Its channels stay, uncategorised."""
+    require_privilege(auth_token, "edit_channels")
+    if not api_initializer.database_handler.delete_category(category_id):
+        raise exceptions.HTTPException(status_code=404, detail=f"Category '{category_id}' not found.")
+    return {"status_code": 200, "message": "Category deleted"}
+
+
+# ── pins ──────────────────────────────────────────────────────
+
+
+async def _announce_pins(channel_id: str, message_id: str, pinned: bool) -> None:
+    await api_initializer.event_publisher.publish_all(
+        [DomainEvent(name=CHANNEL_UPDATED, data={"channel_id": channel_id, "pin": {"message_id": message_id, "pinned": pinned}}, channel_id=channel_id)]
+    )
+
+
+@router.get("/{channel_id}/pins", status_code=200)
+async def list_pins_route(channel_id: str, auth_token: str):
+    """The channel's pinned messages, newest pin first. Anyone who can read the channel can read its pins."""
+    user_id = get_current_user(auth_token)
+    check_channel_access(user_id=user_id, channel_id=channel_id)
+    rows = api_initializer.database_handler.list_pinned(channel_id)
+    hydrated = api_initializer.messages_manager._hydrate_messages([(message, user) for message, user, _ in rows], viewer_user_id=user_id)
+    pins = []
+    for message, (_, _, pin) in zip(hydrated, rows):
+        pins.append({**message, **pin})
+    return {"status_code": 200, "pins": pins, "limit": MAX_PINS_PER_CHANNEL}
+
+
+@router.put("/{channel_id}/messages/{message_id}/pin", status_code=200)
+async def pin_message_route(channel_id: str, message_id: str, auth_token: str):
+    """Pin a message (needs ``moderate_content``). Idempotent; a channel holds up to 50 pins."""
+    user_id = require_privilege(auth_token, "moderate_content")
+    check_channel_access(user_id=user_id, channel_id=channel_id)
+    message = api_initializer.database_handler.get_message_by_id(message_id)
+    if message is None or str(message.channel_id) != channel_id:
+        raise exceptions.HTTPException(status_code=404, detail="That message is not in this channel.")
+    outcome = api_initializer.database_handler.pin_message(channel_id, message_id, str(user_id))
+    if outcome == "full":
+        raise exceptions.HTTPException(status_code=409, detail=f"A channel can have at most {MAX_PINS_PER_CHANNEL} pins. Unpin one first.")
+    if outcome == "pinned":
+        await _announce_pins(channel_id, message_id, True)
+    return {"status_code": 200, "pinned": True, "already": outcome == "already"}
+
+
+@router.delete("/{channel_id}/messages/{message_id}/pin", status_code=200)
+async def unpin_message_route(channel_id: str, message_id: str, auth_token: str):
+    """Unpin a message (needs ``moderate_content``). Idempotent."""
+    user_id = require_privilege(auth_token, "moderate_content")
+    check_channel_access(user_id=user_id, channel_id=channel_id)
+    removed = api_initializer.database_handler.unpin_message(channel_id, message_id)
+    if removed:
+        await _announce_pins(channel_id, message_id, False)
+    return {"status_code": 200, "pinned": False, "removed": removed}
 
 
 @router.delete("/{channel_id}/delete")

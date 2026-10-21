@@ -174,6 +174,24 @@ class UpdateChannelRequest(BaseModel):
     auth_token: str = Field(min_length=1)
     channel_name: str | None = Field(default=None, min_length=1)
     is_private: bool | None = None
+    #: One line about what the channel is for; "" clears it.
+    topic: str | None = Field(default=None, max_length=256)
+    #: The category to put it in; "" or null takes it out of its category.
+    category_id: str | None = None
+    #: Its order among the channels of its category, smallest first.
+    position: int | None = Field(default=None, ge=0, le=100000)
+
+
+class CategoryRequest(BaseModel):
+    """Create or rename a channel category."""
+    auth_token: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=64)
+
+
+class CategoryOrderRequest(BaseModel):
+    """Put these categories first, in this order."""
+    auth_token: str = Field(min_length=1)
+    category_ids: list[str] = Field(max_length=200)
 
 
 class CreateChannelResponse(BaseModel):

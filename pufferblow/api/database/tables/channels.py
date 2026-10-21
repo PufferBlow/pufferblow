@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import ARRAY, JSON, Boolean, DateTime, String
+from sqlalchemy import ARRAY, JSON, Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
@@ -26,6 +26,11 @@ class Channels(Base):
     participant_ids: Mapped[list[str] | None] = mapped_column(
         ARRAY(String).with_variant(JSON(), "sqlite"), default=list
     )  # Active voice participants
+    # Organisation: the category it sits in (see tables/channel_organization.py), its order within
+    # that category, and one line about what it is for. All optional for a channel.
+    category_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    topic: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -53,6 +58,9 @@ class Channels(Base):
             "is_private": self.is_private,
             "allowed_users": self.allowed_users,
             "participant_ids": self.participant_ids,
+            "category_id": self.category_id,
+            "position": self.position,
+            "topic": self.topic,
             "created_at": self.created_at,
         }
 

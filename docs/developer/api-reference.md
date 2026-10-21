@@ -531,6 +531,9 @@ Returns:
       "messages_count": 1234,
       "members_count": 17,
       "channel_visibility": "public",
+      "category_id": null,          // the category it sits in, or null
+      "position": 0,                // its order within the category, smallest first
+      "topic": null,                // one line about what it is for, or null
       "created_at": "..."
     }
   ]
@@ -576,18 +579,54 @@ Returns:
 
 ### `PUT /api/v1/channels/{channel_id}/update`
 
-Edit a channel's name or privacy. Channel type CANNOT be
+Edit a channel's name, privacy, topic or place. Channel type CANNOT be
 changed in place — delete and recreate to switch text ↔ voice.
 
 ```json
 {
   "auth_token": "<token>",
   "channel_name": "new-name",    // optional
-  "is_private": true             // optional
+  "is_private": true,            // optional
+  "topic": "Patch talk",         // optional, at most 256 characters; "" clears it
+  "category_id": "<id>",         // optional; null or "" takes it out of its category
+  "position": 2                  // optional; its order within the category
 }
 ```
 
-Requires `manage_channels`.
+Requires `edit_channels`. Only the fields present change (a missing `category_id`
+leaves the category alone; an explicit `null` removes it). An unknown category is
+a 404. The `channel.updated` event carries the new `topic`, `category_id` and
+`position`.
+
+### Categories
+
+Categories group channels in the sidebar ("Information", "Community"). They are
+instance-wide; a channel points at one with `category_id`. Anyone signed in can
+read them; changing them needs `edit_channels`.
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/channels/categories?auth_token=` | `{ categories: [{ category_id, name, position }] }`, in order |
+| `POST /api/v1/channels/categories` `{auth_token, name}` | Add one at the end (201). `name` is trimmed, 1-64 characters, unique (409 if taken) |
+| `PUT /api/v1/channels/categories/{category_id}` `{auth_token, name}` | Rename (404 if unknown, 409 on a clash) |
+| `PUT /api/v1/channels/categories/order` `{auth_token, category_ids}` | Put these first, in this order; any not named keep their order after them |
+| `DELETE /api/v1/channels/categories/{category_id}?auth_token=` | Delete. Its channels stay, uncategorised |
+
+Categories are not announced over the socket: clients read them again when they
+open the channel list.
+
+### Pins
+
+A channel keeps a short list of pinned messages (at most 50).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/channels/{channel_id}/pins?auth_token=` | `{ pins: [...], limit }`: the pinned messages, newest pin first, each in the usual message shape plus `pinned_by` and `pinned_at`. Anyone who can read the channel can read its pins |
+| `PUT /api/v1/channels/{channel_id}/messages/{message_id}/pin?auth_token=` | Pin a message. Needs `moderate_content`. Idempotent (`already: true` the second time); 404 if the message is not in this channel; 409 when the channel already has 50 |
+| `DELETE /api/v1/channels/{channel_id}/messages/{message_id}/pin?auth_token=` | Unpin. Needs `moderate_content`. Idempotent (`removed: false` the second time) |
+
+Pinning and unpinning send a `channel.updated` event with
+`data.pin = { message_id, pinned }`. Deleting a message unpins it.
 
 ### `DELETE /api/v1/channels/{channel_id}/delete`
 
