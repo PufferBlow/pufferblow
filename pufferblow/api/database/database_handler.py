@@ -17,6 +17,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from pufferblow.api.database.metrics_files_mixin import DatabaseMetricsFilesMixin
 from pufferblow.api.database.runtime_config_mixin import DatabaseRuntimeConfigMixin
 from pufferblow.api.database.channel_org_mixin import DatabaseChannelOrgMixin
+from pufferblow.api.database.federation_mixin import DatabaseFederationMixin
 from pufferblow.api.database.health_mixin import DatabaseHealthMixin
 from pufferblow.api.database.protocol_mixin import DatabaseProtocolMixin
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
@@ -117,7 +118,7 @@ def _as_uuid(value):
     return value if isinstance(value, _uuid.UUID) else _uuid.UUID(str(value))
 
 
-class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin, DatabaseChannelOrgMixin):
+class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin, DatabaseChannelOrgMixin, DatabaseFederationMixin):
     """Database handler for PufferBlow's API"""
     def __init__(
         self, database_engine: sqlalchemy.create_engine, encrypt_manager: Encrypt, config: Config

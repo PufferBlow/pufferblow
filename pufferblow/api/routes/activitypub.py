@@ -12,6 +12,7 @@ from loguru import logger
 
 from pufferblow.api.dependencies import get_current_user
 from pufferblow.api.errors import ApiError
+from pufferblow.api.federation.peers import FederationRefused
 from pufferblow.api.schemas import (
     ActivityPubFollowRequest,
     DirectMessageForwardRequest,
@@ -301,6 +302,16 @@ async def _verify_and_parse_inbox_request(request: Request) -> dict:
     return payload
 
 
+async def _process_inbox(payload: dict, base_url: str, target_actor_uri: str | None) -> dict:
+    """Hand a verified activity to the manager; a peer this instance does not federate with gets a 403."""
+    try:
+        return await api_initializer.activitypub_manager.process_inbox_activity(
+            activity=payload, base_url=base_url, target_actor_uri=target_actor_uri
+        )
+    except FederationRefused as exc:
+        raise HTTPException(status_code=403, detail=f"{exc.host} is not federating with this instance")
+
+
 @router.post("/ap/users/{user_id}/inbox", status_code=202)
 async def actor_inbox(user_id: str, request: Request):
     """
@@ -315,11 +326,7 @@ async def actor_inbox(user_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Local actor not found")
 
     payload = await _verify_and_parse_inbox_request(request)
-    result = await api_initializer.activitypub_manager.process_inbox_activity(
-        activity=payload,
-        base_url=base_url,
-        target_actor_uri=actor.actor_uri,
-    )
+    result = await _process_inbox(payload, base_url, actor.actor_uri)
     return {"status_code": 202, "message": "Activity accepted", "result": result}
 
 
@@ -330,11 +337,7 @@ async def shared_inbox(request: Request):
     """
     base_url = _request_base_url(request)
     payload = await _verify_and_parse_inbox_request(request)
-    result = await api_initializer.activitypub_manager.process_inbox_activity(
-        activity=payload,
-        base_url=base_url,
-        target_actor_uri=None,
-    )
+    result = await _process_inbox(payload, base_url, None)
     return {"status_code": 202, "message": "Activity accepted", "result": result}
 
 

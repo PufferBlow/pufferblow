@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import json
 import secrets
+import time
 import uuid
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -22,6 +23,7 @@ OUTBOUND_POST_MAX_ATTEMPTS = 3
 OUTBOUND_POST_BACKOFF_BASE_SECONDS = 1.0
 
 from pufferblow.api.database.database_handler import DatabaseHandler
+from pufferblow.api.federation.peers import FederationRefused, PeerPolicy, host_of
 from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.core.constants import VERSION
 
@@ -89,6 +91,15 @@ class ActivityPubManager:
         self.websockets_manager = websockets_manager
         # Injected after bootstrap to avoid circular construction
         self.ping_manager: "PingManager | None" = None
+        # Who may federate with this instance (mode, blocked and pending hosts, per-peer switches).
+        self.peer_policy = PeerPolicy(database_handler, is_local=lambda host: self._is_local_host(host))
+
+    def _is_local_host(self, host: str) -> bool:
+        """Whether ``host`` is this instance itself (which is never policed)."""
+        try:
+            return self._is_local_origin(host)
+        except Exception:
+            return False
 
     def build_base_url(self, request_base_url: str | None = None) -> str:
         """
@@ -278,6 +289,26 @@ class ActivityPubManager:
             return response.json()
 
     async def _http_post_json(
+        self, url: str, payload: dict, timeout: float = 10.0, signing_actor: object | None = None
+    ) -> None:
+        """Deliver an activity to another instance, if this instance federates with it.
+
+        Refuses (``FederationRefused``) a blocked, unapproved or closed-off host before anything is sent,
+        and notes how the delivery went (and how long it took) against the peer.
+        """
+        host = host_of(url)
+        decision = self.peer_policy.decide_outbound(host)
+        if not decision.allowed:
+            raise FederationRefused(host, decision.reason)
+        started = time.perf_counter()
+        try:
+            await self._post_json_with_retries(url, payload, timeout=timeout, signing_actor=signing_actor)
+        except Exception:
+            self.peer_policy.record_delivery(host, False)
+            raise
+        self.peer_policy.record_delivery(host, True, round((time.perf_counter() - started) * 1000))
+
+    async def _post_json_with_retries(
         self, url: str, payload: dict, timeout: float = 10.0, signing_actor: object | None = None
     ) -> None:
         """POST an ActivityPub payload with retry-on-transient-failure.
@@ -1280,6 +1311,12 @@ class ActivityPubManager:
         if not activity_type or not actor_uri:
             raise ValueError("Incoming activity must include 'type' and 'actor'")
 
+        # The instance decides who it federates with before anything is stored or acted on.
+        decision = self.peer_policy.decide_inbound(host_of(actor_uri))
+        if not decision.allowed:
+            logger.info("Refused {activity_type} from {host}: {reason}", activity_type=activity_type, host=host_of(actor_uri), reason=decision.reason)
+            raise FederationRefused(host_of(actor_uri), decision.reason)
+
         provided_activity_id = str(activity.get("id") or "").strip()
         if provided_activity_id and self.database_handler.is_activitypub_inbox_known(
             activity_uri=provided_activity_id
@@ -1562,7 +1599,8 @@ class ActivityPubManager:
             return {"processed": True, "activity_type": "Create", "action": "no_local_recipient"}
 
         text_message = self._clean_html_to_text(str(obj.get("content", "")))
-        raw_attachments = obj.get("attachment", []) or []
+        # A peer whose media switch is off can send words but not pictures or files.
+        raw_attachments = (obj.get("attachment", []) or []) if self.peer_policy.policy_for(host_of(remote_actor_uri))["media"] else []
         attachments: list[str] = []
         for item in raw_attachments:
             if isinstance(item, str):

@@ -700,6 +700,31 @@ Response:
 
 ---
 
+## Federation peers
+
+Admins and the owner decide which instances this one federates with. All routes need an admin token.
+
+- **Mode** (`open`, `allowlist`, `closed`): open lets anyone federate unless blocked, allowlist only approved
+  peers (new hosts show up as `pending`), closed nobody.
+- **Status** per peer: `federating`, `pending`, `limited`, `blocked`.
+- **Switches** per peer: `media`, `voice`, `discover`. They follow the status unless set by hand. Only `media`
+  is enforced today (attachments from a peer with it off are dropped); `voice` and `discover` are recorded.
+
+Activities from, and deliveries to, a refused host are not processed (the inbox answers 403).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/federation/peers?auth_token=` | `{ mode, modes, counts, peers: [{ host, status, policy, policy_overrides, software, version, users, follows, last_activity, last_delivery_at, last_delivery_ok, latency_ms, ... }] }` |
+| `PUT /api/v1/federation/mode` `{auth_token, mode}` | Set the mode |
+| `POST /api/v1/federation/peers` `{auth_token, host, status?}` | Add a host (default `federating`). 201; 409 if it is already a peer. `host` may be a URL; it is reduced to host[:port] |
+| `PUT /api/v1/federation/peers/{host}/status` `{auth_token, status}` | Accept, limit, block or set pending (404 if unknown) |
+| `PUT /api/v1/federation/peers/{host}/policy` `{auth_token, policy: {media?, voice?, discover?}}` | Set switches by hand |
+| `DELETE /api/v1/federation/peers/{host}?auth_token=` | Forget the peer |
+| `POST /api/v1/federation/peers/{host}/refresh` `{auth_token}` | Read the peer's nodeinfo (software, version, users). Never contacts a private address |
+| `POST /api/v1/federation/peers/import` `{auth_token, hosts, status?}` | Add up to 500 hosts (default `blocked`). Returns `{added, skipped, invalid}`; known hosts keep what they have |
+
+Each change is written to the audit log.
+
 ## Messages
 
 All routes under `/api/v1/channels/{channel_id}` (mounted as a
