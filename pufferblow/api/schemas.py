@@ -306,7 +306,7 @@ class DmCallSignalRequest(BaseModel):
     """Relay one P2P SDP offer/answer/ICE candidate to the other participant."""
 
     auth_token: str = Field(min_length=1)
-    signal_type: str = Field(pattern="^(offer|answer|candidate)$")
+    signal_type: str = Field(pattern="^(offer|answer|candidate|relay)$")
     payload: dict = Field(default_factory=dict)
 
 
