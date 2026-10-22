@@ -15,8 +15,16 @@ _ACTIVE_STATUSES = {"ringing", "accepted"}
 MAX_SIGNAL_BYTES = 32 * 1024
 
 
+#: The same person may not ring the same person more often than this.
+PAIR_COOLDOWN_SECONDS = 5
+
+
 class CallBusy(ValueError):
-    """The caller or the callee is already on (or ringing for) a call."""
+    """The caller cannot start a call: they are already on one, ringing out, or rang this person a moment ago.
+
+    Only the caller's own state (or their own recent behaviour) can cause this. Whether the *callee* is busy
+    is never reported to the caller; see ``invite``.
+    """
 
 
 class DmCallManager:
@@ -52,6 +60,8 @@ class DmCallManager:
 
         self._lock = threading.Lock()
         self._calls: dict[str, dict[str, Any]] = {}
+        #: When each (caller, callee) pair last started a call, for the cooldown.
+        self._recent: dict[tuple[str, str], datetime.datetime] = {}
 
     @staticmethod
     def _now() -> datetime.datetime:
@@ -80,8 +90,10 @@ class DmCallManager:
             return self._expire_locked()
 
     def _in_call_locked(self, user_id: str) -> bool:
+        """On a call, or ringing someone. Being rung does not count: that is not something the person chose."""
         return any(
-            c["status"] in _ACTIVE_STATUSES and str(user_id) in (c["caller_id"], c["callee_id"])
+            str(user_id) in (c["caller_id"], c["callee_id"])
+            and (c["status"] == "accepted" or (c["status"] == "ringing" and c["caller_id"] == str(user_id)))
             for c in self._calls.values()
         )
 
@@ -105,7 +117,12 @@ class DmCallManager:
         return call
 
     def invite(self, *, caller_id: str, callee_id: str) -> dict[str, Any]:
-        """Start a call. Fails if either side has blocked the other."""
+        """Start a call. Fails if either side has blocked the other, or the caller is busy.
+
+        A callee who is already on a call is simply not rung: the call is created and rings out like one
+        nobody answered, so the caller cannot tell "busy" from "away". The result's ``deliver`` is False
+        for that case; the route uses it to skip the ring and removes it before replying.
+        """
         if str(caller_id) == str(callee_id):
             raise ValueError("Cannot call yourself")
 
@@ -122,9 +139,15 @@ class DmCallManager:
         now = self._now()
         with self._lock:
             self._expire_locked()
-            if self._in_call_locked(caller_id) or self._in_call_locked(callee_id):
-                # The same answer whichever of the two is busy: the caller learns nothing about the callee's calls.
-                raise CallBusy("Cannot call this user right now")
+            if self._in_call_locked(caller_id):
+                raise CallBusy("You are already on a call")
+            pair = (str(caller_id), str(callee_id))
+            last = self._recent.get(pair)
+            if last is not None and (now - last).total_seconds() < PAIR_COOLDOWN_SECONDS:
+                raise CallBusy("Please wait a moment before calling them again")
+            self._recent = {p: t for p, t in self._recent.items() if (now - t).total_seconds() < 60}
+            self._recent[pair] = now
+            deliver = not self._in_call_locked(callee_id)
             self._calls[call_id] = {
                 "call_id": call_id,
                 "caller_id": str(caller_id),
@@ -139,6 +162,7 @@ class DmCallManager:
             "caller_id": str(caller_id),
             "callee_id": str(callee_id),
             "status": "ringing",
+            "deliver": deliver,
         }
 
     def accept(self, *, call_id: str, user_id: str) -> dict[str, Any]:

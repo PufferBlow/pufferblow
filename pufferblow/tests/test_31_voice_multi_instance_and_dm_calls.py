@@ -278,7 +278,7 @@ def test_a_call_nobody_answers_is_dropped_after_the_ring_timeout(dm_calls):
     assert [c["call_id"] for c in dropped] == [call["call_id"]]
     with pytest.raises(ValueError):
         dm_calls.accept(call_id=call["call_id"], user_id=bob)  # too late to pick up
-    assert dm_calls.invite(caller_id=alice, callee_id=bob)["status"] == "ringing"  # and the line is free again
+    assert dm_calls.invite(caller_id=alice, callee_id=_new_user_id())["status"] == "ringing"  # and the line is free again
 
 
 def test_an_answered_call_does_not_time_out(dm_calls):
@@ -289,18 +289,51 @@ def test_an_answered_call_does_not_time_out(dm_calls):
     assert dm_calls.sweep_expired() == []
 
 
-def test_someone_on_a_call_cannot_be_rung_or_ring_out(dm_calls):
+def test_someone_already_calling_or_on_a_call_cannot_start_another(dm_calls):
     alice, bob, carol = _new_user_id(), _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+
+    with pytest.raises(CallBusy, match="already on a call"):
+        dm_calls.invite(caller_id=alice, callee_id=carol)  # still ringing out
+
+    dm_calls.accept(call_id=call["call_id"], user_id=bob)
+    with pytest.raises(CallBusy):
+        dm_calls.invite(caller_id=alice, callee_id=carol)  # on the call
+    with pytest.raises(CallBusy):
+        dm_calls.invite(caller_id=bob, callee_id=carol)  # the callee is on it too
+
+
+def test_being_rung_does_not_lock_you_out_of_calling(dm_calls):
+    alice, bob, carol, dave = _new_user_id(), _new_user_id(), _new_user_id(), _new_user_id()
     dm_calls.invite(caller_id=alice, callee_id=bob)
 
-    with pytest.raises(CallBusy):
-        dm_calls.invite(caller_id=carol, callee_id=bob)  # bob is being rung
-    with pytest.raises(CallBusy):
-        dm_calls.invite(caller_id=alice, callee_id=carol)  # alice is already calling
+    assert dm_calls.invite(caller_id=dave, callee_id=bob)["deliver"] is True  # a second ring still reaches bob
+    assert dm_calls.invite(caller_id=bob, callee_id=carol)["status"] == "ringing"  # and bob can still call out
 
-    # Both busy refusals read the same, so the caller learns nothing about who is on a call.
-    with pytest.raises(CallBusy, match="Cannot call this user right now"):
-        dm_calls.invite(caller_id=carol, callee_id=alice)
+
+def test_someone_on_a_call_is_not_rung_and_the_caller_cannot_tell_busy_from_away(dm_calls):
+    alice, bob, carol, dave = _new_user_id(), _new_user_id(), _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.accept(call_id=call["call_id"], user_id=bob)
+
+    unreachable = dm_calls.invite(caller_id=carol, callee_id=bob)
+    reachable = dm_calls.invite(caller_id=dave, callee_id=_new_user_id())
+
+    assert unreachable["deliver"] is False  # the route skips the ring
+    assert unreachable["status"] == "ringing"  # and carol sees a call that rings out like any other
+    assert set(unreachable) == set(reachable)
+
+
+def test_the_same_person_cannot_ring_the_same_person_again_at_once(dm_calls):
+    alice, bob = _new_user_id(), _new_user_id()
+    first = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.reject(call_id=first["call_id"], user_id=bob)
+
+    with pytest.raises(CallBusy, match="wait a moment"):
+        dm_calls.invite(caller_id=alice, callee_id=bob)
+
+    dm_calls._recent[(alice, bob)] -= datetime.timedelta(seconds=10)
+    assert dm_calls.invite(caller_id=alice, callee_id=bob)["status"] == "ringing"
 
 
 def test_ending_a_call_frees_both_lines(dm_calls):

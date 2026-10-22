@@ -45,14 +45,16 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    await api_initializer.websockets_manager.broadcast_to_user(
-        callee_id,
-        {
-            "type": "dm_call_invite",
-            "call_id": call["call_id"],
-            "caller_id": call["caller_id"],
-        },
-    )
+    # Someone already on a call is not rung, and the caller is not told why (it would reveal who is on a call).
+    if call.pop("deliver", True):
+        await api_initializer.websockets_manager.broadcast_to_user(
+            callee_id,
+            {
+                "type": "dm_call_invite",
+                "call_id": call["call_id"],
+                "caller_id": call["caller_id"],
+            },
+        )
 
     return {"status_code": 200, **call, "ice_servers": api_initializer.voice_session_manager.ice_servers()}
 

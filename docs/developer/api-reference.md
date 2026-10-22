@@ -1688,7 +1688,7 @@ under `/api/v1/dm-calls`; every request carries `auth_token`.
 
 | Route | What it does |
 | --- | --- |
-| `POST /api/v1/dm-calls/{callee_id}/invite` `{auth_token, callee_id}` | Ring someone. Returns `{call_id, status: "ringing", ice_servers}`. 404 if there is no such user; 409 if either of you is already on a call (the same answer whichever it is); 400 if you are calling yourself, or either of you has blocked the other |
+| `POST /api/v1/dm-calls/{callee_id}/invite` `{auth_token, callee_id}` | Ring someone. Returns `{call_id, status: "ringing", ice_servers}`. 404 if there is no such user; 409 if *you* are already on a call or rang this person in the last 5 seconds; 400 if you are calling yourself, or either of you has blocked the other. Someone who is already on a call is not rung, and you are not told: the call rings out like one nobody answered |
 | `POST /api/v1/dm-calls/{call_id}/accept` | Callee only. Returns `{status: "accepted", ice_servers}` |
 | `POST /api/v1/dm-calls/{call_id}/reject` | Decline, or cancel while it rings |
 | `POST /api/v1/dm-calls/{call_id}/end` | End a call |

@@ -87,12 +87,36 @@ def test_calling_someone_who_does_not_exist_is_a_404(client: TestClient):
     assert _invite(client, alice, str(uuid.uuid4())).status_code == 404
 
 
-def test_a_line_that_is_busy_answers_409_for_both_directions(client: TestClient):
+def test_only_the_callers_own_state_can_refuse_an_invite(client: TestClient):
     alice_id, alice = _user("alice")
     bob_id, bob = _user("bob")
     carol_id, carol = _user("carol")
     assert _invite(client, alice, bob_id).status_code == 200
 
-    assert _invite(client, carol, bob_id).status_code == 409  # bob is being rung
     assert _invite(client, alice, carol_id).status_code == 409  # alice is already calling
-    assert _invite(client, carol, alice_id).status_code == 409
+    assert _invite(client, carol, alice_id).status_code == 200  # being rung does not stop carol calling
+    assert _invite(client, bob, carol_id).status_code == 200  # nor bob, who is being rung
+
+
+def test_a_busy_callee_is_not_rung_and_looks_exactly_like_an_unanswered_call(client: TestClient):
+    alice_id, alice = _user("alice")
+    bob_id, bob = _user("bob")
+    _, dave = _user("dave")
+    busy_call = _invite(client, alice, bob_id).json()["call_id"]
+    client.post(f"{CALLS}/{busy_call}/accept", json={"auth_token": bob})  # bob is on a call
+
+    with _socket(client, bob) as bob_ws:
+        bob_ws.receive_json()
+        to_busy = _invite(client, dave, bob_id)
+        assert to_busy.status_code == 200
+        assert set(to_busy.json()) == {"status_code", "call_id", "caller_id", "callee_id", "status", "ice_servers"}  # no tell-tale field
+        assert to_busy.json()["status"] == "ringing"
+        # bob heard nothing: his socket has only what the hello and the earlier events put there
+        bob_ws.send_json({"type": "ping"})
+        seen = []
+        while True:
+            frame = bob_ws.receive_json()
+            if frame.get("type") == "pong":
+                break
+            seen.append(frame.get("name"))
+        assert "user.dm_call_invite" not in seen
