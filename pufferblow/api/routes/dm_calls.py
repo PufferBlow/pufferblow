@@ -42,7 +42,7 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
         },
     )
 
-    return {"status_code": 200, **call}
+    return {"status_code": 200, **call, "ice_servers": api_initializer.voice_session_manager.ice_servers()}
 
 
 @router.post("/{call_id}/accept", status_code=200)
@@ -60,7 +60,12 @@ async def accept_dm_call(call_id: str, request: DmCallActionRequest):
         {"type": "dm_call_accepted", "call_id": call_id},
     )
 
-    return {"status_code": 200, "call_id": call_id, "status": call["status"]}
+    return {
+        "status_code": 200,
+        "call_id": call_id,
+        "status": call["status"],
+        "ice_servers": api_initializer.voice_session_manager.ice_servers(),
+    }
 
 
 @router.post("/{call_id}/reject", status_code=200)

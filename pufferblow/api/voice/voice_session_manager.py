@@ -149,6 +149,10 @@ class VoiceSessionManager:
             )
         ).rstrip("/")
 
+    def ice_servers(self) -> list[dict[str, Any]]:
+        """The STUN/TURN servers a client should use for a call that does not go through the SFU."""
+        return self._build_ice_servers()
+
     def _build_ice_servers(self) -> list[dict[str, Any]]:
         """Build RTC ICE config returned to clients."""
         cfg = self.database_handler.config

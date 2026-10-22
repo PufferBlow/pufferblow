@@ -1680,6 +1680,57 @@ on the caller's own state.
 
 ---
 
+## Voice calls (1:1)
+
+A call between two people on this instance. Audio goes straight between the two devices
+(WebRTC, encrypted with DTLS-SRTP); the instance only relays the set-up messages. Routes are
+under `/api/v1/dm-calls`; every request carries `auth_token`.
+
+| Route | What it does |
+| --- | --- |
+| `POST /api/v1/dm-calls/{callee_id}/invite` `{auth_token, callee_id}` | Ring someone. Returns `{call_id, status: "ringing", ice_servers}`. 400 if you are calling yourself, or either of you has blocked the other |
+| `POST /api/v1/dm-calls/{call_id}/accept` | Callee only. Returns `{status: "accepted", ice_servers}` |
+| `POST /api/v1/dm-calls/{call_id}/reject` | Decline, or cancel while it rings |
+| `POST /api/v1/dm-calls/{call_id}/end` | End a call |
+| `POST /api/v1/dm-calls/{call_id}/signal` `{signal_type, payload}` | Relay one `offer`, `answer` or `candidate` to the other person. The instance does not read `payload` |
+| `POST /api/v1/dm-calls/{call_id}/fallback` `{quality_profile?}` | Join a media-sfu session scoped to the call, when a direct connection fails |
+
+`ice_servers` is the STUN/TURN list to give `RTCPeerConnection`.
+
+The other person is told over their websocket connection (protocol v1 events):
+`user.dm_call_invite {call_id, caller_id}`, `user.dm_call_accepted {call_id}`,
+`user.dm_call_rejected {call_id}`, `user.dm_call_ended {call_id}`, and
+`user.dm_call_offer` / `user.dm_call_answer` / `user.dm_call_candidate {call_id, from_user_id, payload}`.
+
+### What "end-to-end encrypted" means here
+
+The instance relays the SDP, which carries each side's DTLS certificate fingerprint. If the
+instance changed a fingerprint it could sit in the middle of the call. So the official client
+signs its SDP and checks the other side's:
+
+- `offer` and `answer` payloads are `{sdp: {type, sdp}, e2ee: {v: 1, key_id, signature, public_key}}`.
+- `signature` is an ECDSA P-256 / SHA-256 signature, by the sender's identity key, over the lines
+  `pufferblow-call-v1`, `call_id`, the caller's id, the callee's id, `offer` or `answer`, and the
+  sender's sorted `a=fingerprint:` values.
+- The receiver pins the first key it sees for a person, holds the call and asks when a different
+  key appears, and shows a safety number (60 digits from both people's ids and key ids) to compare
+  out of band. Without that comparison the first key is trusted on first use.
+
+The instance cannot make a call end-to-end encrypted by itself and does not check any of this; the
+guarantee is the clients'. A call that falls back to the SFU is not covered yet.
+
+## Identity keys
+
+The public half of the key a device signs calls with. The instance stores public keys only.
+
+| Route | What it does |
+| --- | --- |
+| `PUT /api/v1/identity-keys` `{auth_token, public_key, label?}` | Register your key. `public_key` is a P-256 JWK (`kty`, `crv`, `x`, `y`); a private key is refused. Idempotent: `created` is false for a key you already registered. 409 if the key belongs to another account or you already have 10 |
+| `GET /api/v1/identity-keys/{user_id}?auth_token=` | A person's keys, oldest first: `{key_id, public_key, label, created_at}`. Any signed-in user can read them |
+| `DELETE /api/v1/identity-keys/{key_id}?auth_token=` | Remove one of your own keys. 404 if it is not yours |
+
+`key_id` is the first 32 hex characters of SHA-256 over the 32-byte `x` then the 32-byte `y`.
+
 ## ActivityPub & federation
 
 These are the standard ActivityPub endpoints plus a thin Pufferblow
