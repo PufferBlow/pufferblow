@@ -408,3 +408,24 @@ def test_a_person_with_another_open_connection_keeps_their_call(dm_calls):
     asyncio.run(manager._end_calls_if_offline(bob))
 
     assert dm_calls.accept(call_id=call["call_id"], user_id=bob)["status"] == "accepted"
+
+
+def test_nothing_is_signalled_before_the_callee_has_picked_up(dm_calls):
+    alice, bob = _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+
+    with pytest.raises(ValueError, match="not active"):
+        dm_calls.relay_signal(call_id=call["call_id"], user_id=alice, signal_type="offer", payload={"sdp": "x"})
+    with pytest.raises(ValueError, match="not active"):
+        dm_calls.request_sfu_fallback(call_id=call["call_id"], user_id=alice)
+
+
+def test_a_callee_who_was_never_rung_is_not_told_about_the_call_ending(dm_calls):
+    alice, bob, carol = _new_user_id(), _new_user_id(), _new_user_id()
+    on_call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.accept(call_id=on_call["call_id"], user_id=bob)
+    unreachable = dm_calls.invite(caller_id=carol, callee_id=bob)
+
+    ended = dm_calls.end(call_id=unreachable["call_id"], user_id=carol)
+
+    assert ended["delivered"] is False and ended["other_user_id"] == bob  # the route reads this and stays quiet

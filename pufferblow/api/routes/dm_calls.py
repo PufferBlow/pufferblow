@@ -21,6 +21,11 @@ from pufferblow.core.bootstrap import api_initializer
 router = APIRouter(prefix="/api/v1/dm-calls")
 
 
+def _was_rung(call: dict, recipient_id: str) -> bool:
+    """Whether ``recipient_id`` ever heard of this call. A callee who was busy was never rung, so is told nothing."""
+    return call.get("delivered", True) or str(recipient_id) != str(call.get("callee_id"))
+
+
 @router.post("/{callee_id}/invite", status_code=200)
 async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
     """Ring another user for a 1:1 voice call."""
@@ -32,9 +37,10 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
 
     # Calls that rang out are dropped here too, so a caller who gave up does not keep their line busy.
     for expired in api_initializer.dm_call_manager.sweep_expired():
-        await api_initializer.websockets_manager.broadcast_to_user(
-            expired["callee_id"], {"type": "dm_call_ended", "call_id": expired["call_id"]}
-        )
+        if expired.get("delivered", True):
+            await api_initializer.websockets_manager.broadcast_to_user(
+                expired["callee_id"], {"type": "dm_call_ended", "call_id": expired["call_id"]}
+            )
 
     try:
         call = api_initializer.dm_call_manager.invite(
@@ -92,10 +98,11 @@ async def reject_dm_call(call_id: str, request: DmCallActionRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    await api_initializer.websockets_manager.broadcast_to_user(
-        call["other_user_id"],
-        {"type": "dm_call_rejected", "call_id": call_id},
-    )
+    if _was_rung(call, call["other_user_id"]):
+        await api_initializer.websockets_manager.broadcast_to_user(
+            call["other_user_id"],
+            {"type": "dm_call_rejected", "call_id": call_id},
+        )
 
     return {"status_code": 200, "call_id": call_id, "status": "ended"}
 
@@ -110,10 +117,11 @@ async def end_dm_call(call_id: str, request: DmCallActionRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    await api_initializer.websockets_manager.broadcast_to_user(
-        call["other_user_id"],
-        {"type": "dm_call_ended", "call_id": call_id},
-    )
+    if _was_rung(call, call["other_user_id"]):
+        await api_initializer.websockets_manager.broadcast_to_user(
+            call["other_user_id"],
+            {"type": "dm_call_ended", "call_id": call_id},
+        )
 
     return {"status_code": 200, "call_id": call_id, "status": "ended"}
 

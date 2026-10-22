@@ -153,6 +153,8 @@ class DmCallManager:
                 "caller_id": str(caller_id),
                 "callee_id": str(callee_id),
                 "status": "ringing",
+                #: False when the callee was never rung (already on a call): they hear nothing about this call.
+                "delivered": deliver,
                 "created_at": now,
                 "updated_at": now,
             }
@@ -210,7 +212,8 @@ class DmCallManager:
 
         with self._lock:
             call = self._get_call_or_raise(call_id)
-            if call["status"] not in _ACTIVE_STATUSES:
+            # Nothing is negotiated until the callee has picked up; before that there is no one to signal.
+            if call["status"] != "accepted":
                 raise ValueError(f"Call is not active (status={call['status']})")
             other_user_id = self._other_participant(call, user_id)
 
@@ -228,7 +231,7 @@ class DmCallManager:
         """Join the SFU fallback session for a call whose P2P path failed."""
         with self._lock:
             call = self._get_call_or_raise(call_id)
-            if call["status"] not in _ACTIVE_STATUSES:
+            if call["status"] != "accepted":
                 raise ValueError(f"Call is not active (status={call['status']})")
             self._other_participant(call, user_id)  # raises if not a participant
 

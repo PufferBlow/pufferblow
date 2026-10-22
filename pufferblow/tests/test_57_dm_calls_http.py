@@ -120,3 +120,13 @@ def test_a_busy_callee_is_not_rung_and_looks_exactly_like_an_unanswered_call(cli
                 break
             seen.append(frame.get("name"))
         assert "user.dm_call_invite" not in seen
+
+
+def test_signals_before_the_callee_accepts_are_refused(client: TestClient):
+    _, alice = _user("alice")
+    bob_id, _ = _user("bob")
+    call_id = _invite(client, alice, bob_id).json()["call_id"]
+
+    early = client.post(f"{CALLS}/{call_id}/signal", json={"auth_token": alice, "signal_type": "offer", "payload": {}})
+
+    assert early.status_code == 400
