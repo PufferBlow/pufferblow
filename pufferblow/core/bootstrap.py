@@ -235,6 +235,8 @@ class APIInitializer:
             friends_manager=self.friends_manager,
             voice_session_manager=self.voice_session_manager,
         )
+        # So a dropped connection ends the calls it was in.
+        self.websockets_manager.dm_call_manager = self.dm_call_manager
         # Stickers manager — depends on storage_manager + database_handler.
         # If storage isn't available on this instance, sticker writes will
         # 500 at upload time but the read paths (list_active for the picker)

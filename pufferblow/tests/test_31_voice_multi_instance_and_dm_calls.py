@@ -31,7 +31,7 @@ from pufferblow.api.database.tables.voice_sessions import VoiceSession
 from pufferblow.api.encrypt.encrypt import Encrypt
 from pufferblow.api.friends.friends_manager import FriendsManager
 from pufferblow.api.models.config_model import Config
-from pufferblow.api.voice.dm_call_manager import DmCallManager
+from pufferblow.api.voice.dm_call_manager import MAX_SIGNAL_BYTES, CallBusy, DmCallManager
 from pufferblow.api.voice.voice_session_manager import VoiceSessionManager
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
 
@@ -259,3 +259,119 @@ def test_dm_call_sfu_fallback_requires_participant(dm_calls):
 
     payload = dm_calls.request_sfu_fallback(call_id=call["call_id"], user_id=alice)
     assert payload["backend"] == "sfu_v2_dm_fallback"
+
+
+# ── ringing out, busy lines, dropped connections, signal size ────────────
+
+
+def _backdate(dm_calls, call_id, seconds):
+    dm_calls._calls[call_id]["created_at"] -= datetime.timedelta(seconds=seconds)
+
+
+def test_a_call_nobody_answers_is_dropped_after_the_ring_timeout(dm_calls):
+    alice, bob = _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    _backdate(dm_calls, call["call_id"], dm_calls.ring_timeout_seconds + 1)
+
+    dropped = dm_calls.sweep_expired()
+
+    assert [c["call_id"] for c in dropped] == [call["call_id"]]
+    with pytest.raises(ValueError):
+        dm_calls.accept(call_id=call["call_id"], user_id=bob)  # too late to pick up
+    assert dm_calls.invite(caller_id=alice, callee_id=bob)["status"] == "ringing"  # and the line is free again
+
+
+def test_an_answered_call_does_not_time_out(dm_calls):
+    alice, bob = _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.accept(call_id=call["call_id"], user_id=bob)
+    _backdate(dm_calls, call["call_id"], 10_000)
+    assert dm_calls.sweep_expired() == []
+
+
+def test_someone_on_a_call_cannot_be_rung_or_ring_out(dm_calls):
+    alice, bob, carol = _new_user_id(), _new_user_id(), _new_user_id()
+    dm_calls.invite(caller_id=alice, callee_id=bob)
+
+    with pytest.raises(CallBusy):
+        dm_calls.invite(caller_id=carol, callee_id=bob)  # bob is being rung
+    with pytest.raises(CallBusy):
+        dm_calls.invite(caller_id=alice, callee_id=carol)  # alice is already calling
+
+    # Both busy refusals read the same, so the caller learns nothing about who is on a call.
+    with pytest.raises(CallBusy, match="Cannot call this user right now"):
+        dm_calls.invite(caller_id=carol, callee_id=alice)
+
+
+def test_ending_a_call_frees_both_lines(dm_calls):
+    alice, bob, carol = _new_user_id(), _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.accept(call_id=call["call_id"], user_id=bob)
+    dm_calls.end(call_id=call["call_id"], user_id=alice)
+
+    assert dm_calls.invite(caller_id=carol, callee_id=bob)["status"] == "ringing"
+
+
+def test_a_dropped_connection_ends_the_calls_that_person_was_in(dm_calls):
+    alice, bob = _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.accept(call_id=call["call_id"], user_id=bob)
+
+    ended = dm_calls.end_all_for_user(bob)
+
+    assert [(c["call_id"], c["other_user_id"]) for c in ended] == [(call["call_id"], alice)]
+    with pytest.raises(ValueError):
+        dm_calls.relay_signal(call_id=call["call_id"], user_id=alice, signal_type="candidate", payload={})
+    assert dm_calls.end_all_for_user(bob) == []
+
+
+def test_an_oversized_signal_is_refused_not_relayed(dm_calls):
+    alice, bob = _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.accept(call_id=call["call_id"], user_id=bob)
+
+    with pytest.raises(ValueError, match="too large"):
+        dm_calls.relay_signal(call_id=call["call_id"], user_id=alice, signal_type="offer", payload={"sdp": "x" * (MAX_SIGNAL_BYTES + 1)})
+    assert dm_calls.relay_signal(call_id=call["call_id"], user_id=alice, signal_type="relay", payload={"relay_key": {"v": 1}})["to_user_id"] == bob
+
+
+class _FakeSocket:
+    def __init__(self):
+        self.sent = []
+
+    async def send_json(self, frame):
+        self.sent.append(frame)
+
+
+def test_a_dropped_connection_tells_the_other_side_the_call_ended(dm_calls):
+    import asyncio
+
+    alice, bob = _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    dm_calls.accept(call_id=call["call_id"], user_id=bob)
+
+    manager = WebSocketsManager(user_manager=None)
+    manager.dm_call_manager = dm_calls
+    alices_socket = _FakeSocket()
+    manager.active_connections[alices_socket] = {"user_id": alice}
+
+    asyncio.run(manager._end_calls_if_offline(bob))  # bob has no connection left
+
+    frames = [f for f in alices_socket.sent if f.get("name") == "user.dm_call_ended"]
+    assert [f["data"] for f in frames] == [{"call_id": call["call_id"]}]
+    with pytest.raises(ValueError):
+        dm_calls.accept(call_id=call["call_id"], user_id=bob)
+
+
+def test_a_person_with_another_open_connection_keeps_their_call(dm_calls):
+    import asyncio
+
+    alice, bob = _new_user_id(), _new_user_id()
+    call = dm_calls.invite(caller_id=alice, callee_id=bob)
+    manager = WebSocketsManager(user_manager=None)
+    manager.dm_call_manager = dm_calls
+    manager.active_connections[_FakeSocket()] = {"user_id": bob}  # a second tab
+
+    asyncio.run(manager._end_calls_if_offline(bob))
+
+    assert dm_calls.accept(call_id=call["call_id"], user_id=bob)["status"] == "accepted"

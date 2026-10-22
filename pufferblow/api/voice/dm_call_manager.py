@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import threading
 import uuid
 from typing import Any
@@ -9,6 +10,13 @@ from pufferblow.api.friends.friends_manager import FriendsManager
 from pufferblow.api.voice.voice_session_manager import VoiceSessionManager
 
 _ACTIVE_STATUSES = {"ringing", "accepted"}
+
+#: What one relayed signal (an SDP, a candidate, a relay key) may weigh. A real SDP is a few KB.
+MAX_SIGNAL_BYTES = 32 * 1024
+
+
+class CallBusy(ValueError):
+    """The caller or the callee is already on (or ringing for) a call."""
 
 
 class DmCallManager:
@@ -57,7 +65,40 @@ class DmCallManager:
             return caller_id
         raise ValueError("User is not a participant in this call")
 
+    def _expire_locked(self) -> list[dict[str, Any]]:
+        """Drop calls nobody answered in time. Caller must hold the lock. Returns what was dropped."""
+        now = self._now()
+        limit = datetime.timedelta(seconds=self.ring_timeout_seconds)
+        expired = [c for c in self._calls.values() if c["status"] == "ringing" and now - c["created_at"] > limit]
+        for call in expired:
+            del self._calls[call["call_id"]]
+        return [dict(c) for c in expired]
+
+    def sweep_expired(self) -> list[dict[str, Any]]:
+        """Give up on calls that rang too long; the caller of each is who should be told."""
+        with self._lock:
+            return self._expire_locked()
+
+    def _in_call_locked(self, user_id: str) -> bool:
+        return any(
+            c["status"] in _ACTIVE_STATUSES and str(user_id) in (c["caller_id"], c["callee_id"])
+            for c in self._calls.values()
+        )
+
+    def end_all_for_user(self, user_id: str) -> list[dict[str, Any]]:
+        """End every call a person is in (their connection went away). Returns each call with who to tell."""
+        ended: list[dict[str, Any]] = []
+        with self._lock:
+            for call in list(self._calls.values()):
+                if str(user_id) in (call["caller_id"], call["callee_id"]):
+                    snapshot = dict(call)
+                    snapshot["other_user_id"] = self._other_participant(call, user_id)
+                    del self._calls[call["call_id"]]
+                    ended.append(snapshot)
+        return ended
+
     def _get_call_or_raise(self, call_id: str) -> dict[str, Any]:
+        self._expire_locked()
         call = self._calls.get(call_id)
         if call is None:
             raise ValueError("Call not found")
@@ -80,6 +121,10 @@ class DmCallManager:
         call_id = str(uuid.uuid4())
         now = self._now()
         with self._lock:
+            self._expire_locked()
+            if self._in_call_locked(caller_id) or self._in_call_locked(callee_id):
+                # The same answer whichever of the two is busy: the caller learns nothing about the callee's calls.
+                raise CallBusy("Cannot call this user right now")
             self._calls[call_id] = {
                 "call_id": call_id,
                 "caller_id": str(caller_id),
@@ -136,6 +181,9 @@ class DmCallManager:
         interpret SDP/ICE content at all, it only enforces that the sender is
         one of the call's two participants and the call is still live.
         """
+        if len(json.dumps(payload, separators=(",", ":"), default=str)) > MAX_SIGNAL_BYTES:
+            raise ValueError("Signal is too large")
+
         with self._lock:
             call = self._get_call_or_raise(call_id)
             if call["status"] not in _ACTIVE_STATUSES:

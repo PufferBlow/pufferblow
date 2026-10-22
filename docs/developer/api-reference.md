@@ -1688,19 +1688,22 @@ under `/api/v1/dm-calls`; every request carries `auth_token`.
 
 | Route | What it does |
 | --- | --- |
-| `POST /api/v1/dm-calls/{callee_id}/invite` `{auth_token, callee_id}` | Ring someone. Returns `{call_id, status: "ringing", ice_servers}`. 400 if you are calling yourself, or either of you has blocked the other |
+| `POST /api/v1/dm-calls/{callee_id}/invite` `{auth_token, callee_id}` | Ring someone. Returns `{call_id, status: "ringing", ice_servers}`. 404 if there is no such user; 409 if either of you is already on a call (the same answer whichever it is); 400 if you are calling yourself, or either of you has blocked the other |
 | `POST /api/v1/dm-calls/{call_id}/accept` | Callee only. Returns `{status: "accepted", ice_servers}` |
 | `POST /api/v1/dm-calls/{call_id}/reject` | Decline, or cancel while it rings |
 | `POST /api/v1/dm-calls/{call_id}/end` | End a call |
-| `POST /api/v1/dm-calls/{call_id}/signal` `{signal_type, payload}` | Relay one `offer`, `answer` or `candidate` to the other person. The instance does not read `payload` |
+| `POST /api/v1/dm-calls/{call_id}/signal` `{signal_type, payload}` | Relay one `offer`, `answer`, `candidate` or `relay` (the key exchange for a relayed call) to the other person. The instance does not read `payload`, and refuses one over 32 KB |
 | `POST /api/v1/dm-calls/{call_id}/fallback` `{quality_profile?}` | Join a media-sfu session scoped to the call, when a direct connection fails |
 
 `ice_servers` is the STUN/TURN list to give `RTCPeerConnection`.
 
+A call nobody answers within 45 seconds is dropped, and a person whose last realtime connection
+closes is taken off their calls (the other person gets `user.dm_call_ended`).
+
 The other person is told over their websocket connection (protocol v1 events):
 `user.dm_call_invite {call_id, caller_id}`, `user.dm_call_accepted {call_id}`,
 `user.dm_call_rejected {call_id}`, `user.dm_call_ended {call_id}`, and
-`user.dm_call_offer` / `user.dm_call_answer` / `user.dm_call_candidate {call_id, from_user_id, payload}`.
+`user.dm_call_offer` / `user.dm_call_answer` / `user.dm_call_candidate` / `user.dm_call_relay {call_id, from_user_id, payload}`.
 
 ### What "end-to-end encrypted" means here
 
@@ -1717,7 +1720,15 @@ signs its SDP and checks the other side's:
   out of band. Without that comparison the first key is trusted on first use.
 
 The instance cannot make a call end-to-end encrypted by itself and does not check any of this; the
-guarantee is the clients'. A call that falls back to the SFU is not covered yet.
+guarantee is the clients'.
+
+If the two devices cannot connect directly, both move to the media server (`/fallback`). The server
+forwards audio, so the official client seals every encoded audio frame (AES-GCM, `RTCRtpScriptTransform`)
+with a key from an ECDH exchange that is signed the same way: each side sends `relay` with
+`{relay_key: {v: 1, public_key: <ECDH P-256 JWK>}, e2ee: {...}}`, the signature covering
+`pufferblow-call-relay-v1`, the call id, both user ids and the ECDH key. The media server only ever
+sees ciphertext. A browser that cannot seal frames does not fall back: the call ends instead of
+quietly dropping the encryption.
 
 ## Identity keys
 

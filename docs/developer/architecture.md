@@ -281,7 +281,16 @@ touches the server in the happy path. If direct negotiation fails,
 either side can request `/api/v1/dm-calls/{call_id}/fallback`, which
 joins a normal SFU session (same instance-selection path as channel
 voice) scoped to the call id rather than a channel. Calling a user who
-has blocked you (or whom you've blocked) is refused.
+has blocked you (or whom you've blocked) is refused, as is calling
+someone who is already on a call; an unanswered call is dropped after 45
+seconds and a person's calls end when their last connection closes.
+
+Calls are end-to-end encrypted by the clients, not the server: each side
+signs its SDP fingerprints (and, on the relay, its key exchange) with a
+device identity key whose public half is registered at
+`/api/v1/identity-keys`; the other side pins it and offers a safety
+number. The instance only relays and stores public keys. See
+[Voice calls](api-reference.md#voice-calls-11).
 
 ## Storage and encryption
 

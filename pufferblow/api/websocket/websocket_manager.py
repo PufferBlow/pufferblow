@@ -290,12 +290,23 @@ class WebSocketsManager:
             await self.ensure_user_offline_if_no_connections(
                 user_id=user_id, source="ws_disconnect"
             )
+            await self._end_calls_if_offline(str(user_id))
             voice_manager = getattr(self, "voice_session_manager", None)
             if voice_manager is not None:
                 try:
                     voice_manager.leave_all_active_sessions_for_user(user_id=str(user_id))
                 except Exception as exc:
                     logger.warning(f"Voice session cleanup on disconnect failed for user {user_id}: {exc}")
+
+    async def _end_calls_if_offline(self, user_id: str) -> None:
+        """A person with no connection left cannot be on a call: end theirs and tell the other side."""
+        calls = getattr(self, "dm_call_manager", None)
+        if calls is None or any(
+            isinstance(info, dict) and str(info.get("user_id")) == user_id for info in self.active_connections.values()
+        ):
+            return
+        for call in calls.end_all_for_user(user_id):
+            await self.broadcast_to_user(call["other_user_id"], {"type": "dm_call_ended", "call_id": call["call_id"]})
 
     async def broadcast_to_channel(self, channel_id: str, message: dict) -> None:
         """Send a channel-wide notice (e.g. a voice session change) as a v1 event.

@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from pufferblow.api.dependencies import ensure_user_not_timed_out, get_current_user
+from pufferblow.api.voice.dm_call_manager import CallBusy
 from pufferblow.api.schemas import (
     DmCallActionRequest,
     DmCallFallbackRequest,
@@ -26,10 +27,21 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
     user_id = get_current_user(request.auth_token)
     ensure_user_not_timed_out(user_id, "start voice calls")
 
+    if api_initializer.database_handler.get_user(user_id=callee_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Calls that rang out are dropped here too, so a caller who gave up does not keep their line busy.
+    for expired in api_initializer.dm_call_manager.sweep_expired():
+        await api_initializer.websockets_manager.broadcast_to_user(
+            expired["callee_id"], {"type": "dm_call_ended", "call_id": expired["call_id"]}
+        )
+
     try:
         call = api_initializer.dm_call_manager.invite(
             caller_id=user_id, callee_id=callee_id
         )
+    except CallBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
