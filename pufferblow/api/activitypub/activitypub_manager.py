@@ -754,6 +754,9 @@ class ActivityPubManager:
             reply_to_message_id=reply_to_message_id,
             forwarded_from_message_id=forwarded_from_message_id,
         )
+        # Both people are on record from the first message, so the sender's own conversation list
+        # shows it before the other person has replied.
+        self.database_handler.record_dm_members(conversation_id, [str(local_user_id), peer_info.user_id])
 
         if peer_info.is_local and peer_info.user_id:
             await self.websockets_manager.broadcast_to_user(
@@ -1724,6 +1727,20 @@ class ActivityPubManager:
             "messages": messages,
         }
 
+    def _recover_dm_peer(self, conversation_id: str, viewer_user_id: str, viewer_actor_uri: str, base_url: str) -> str | None:
+        """Find who a conversation is with by trying each local user against its hash, and remember the answer.
+
+        For conversations the viewer started before participants were recorded. Remote people cannot be
+        recovered this way (their address is not known from here).
+        """
+        for user_id in self.database_handler.local_user_ids():
+            if user_id == str(viewer_user_id):
+                continue
+            if self._conversation_id(viewer_actor_uri, self._actor_uri_for_user(user_id, base_url)) == conversation_id:
+                self.database_handler.record_dm_members(conversation_id, [str(viewer_user_id), user_id])
+                return user_id
+        return None
+
     def list_dm_conversations(
         self,
         viewer_user_id: str,
@@ -1789,10 +1806,12 @@ class ActivityPubManager:
                 conversation_id=conv_id, viewer_user_id=viewer_user_id
             )
             if peer_user_id is None:
-                # Outgoing-only conversation. To surface the peer
-                # we'd need to read the original message's metadata
-                # (target peer field on the wire), which the
-                # current schema doesn't persist. Skip for v1.
+                # Outgoing-only so far: the messages name only the viewer. The members table has the
+                # other person for anything sent since it was added; older ones are matched by hash.
+                peer_user_id = self.database_handler.get_dm_other_member(conv_id, viewer_user_id)
+            if peer_user_id is None:
+                peer_user_id = self._recover_dm_peer(conv_id, viewer_user_id, viewer_actor_uri, base_url)
+            if peer_user_id is None:
                 continue
 
             # Resolve the peer's actor_uri. Local users have a
