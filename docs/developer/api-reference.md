@@ -1173,8 +1173,9 @@ the fields don't change per-request.
 
 ### `PUT /api/v1/system/server-info`
 
-Edit the instance's name / description / policy. Requires
-`manage_server_settings`.
+Edit the instance's name / description / welcome message / policy. Requires
+`manage_server_settings`. `welcome_message` (at most 500 characters, trimmed) is the
+greeting new members get.
 
 ```json
 {
@@ -1198,6 +1199,19 @@ alone.
 Switch server avatar / banner mode without uploading. Same shape
 and URL handling as the per-user `profile/appearance` route (including
 the hosted default art). Requires `manage_server_settings`.
+
+`look` is a partial object of how the server is drawn, every part a choice
+from a short list (nothing else is accepted, and an update is all or nothing):
+
+| key | values |
+| --- | --- |
+| `icon_style` | `initials`, `crop`, `bubble`, `school` |
+| `tone`, `tone2` | `brass`, `coral`, `rose`, `violet`, `sky`, `sage` |
+| `banner_pattern` | `ripple`, `burst`, `halftone`, `crowd`, `duo` |
+
+`null` puts a setting back to the one derived from the server's id, which is what
+clients draw until the owner chooses. The reply and `GET /system/server-info` carry
+the whole `look` object. A bad value is a 400 whose `details.field` names it.
 
 ### `GET /api/v1/system/instance-health`
 

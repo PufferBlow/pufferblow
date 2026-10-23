@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import JSON, Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pufferblow.api.database.tables.declarative_base import Base
@@ -32,6 +32,9 @@ class Server(Base):
     accent_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     avatar_seed: Mapped[str | None] = mapped_column(String(64), nullable=True)
     welcome_message: Mapped[str] = mapped_column(String, nullable=False)
+    # How the owner chose the server to look (see ``pufferblow.api.utils.server_look``): the icon style,
+    # colours and banner pattern. Null means nothing chosen, so clients draw the look derived from the id.
+    profile_settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Server stats

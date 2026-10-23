@@ -698,6 +698,7 @@ class ServerSettingsRequest(BaseModel):
     auth_token: str = Field(min_length=1)
     server_name: str | None = None
     server_description: str | None = None
+    welcome_message: str | None = Field(default=None, max_length=500)
     is_private: bool | None = None
     max_users: int | None = None
     max_message_length: int | None = None

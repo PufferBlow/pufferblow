@@ -21,7 +21,9 @@ from pufferblow.api.utils.appearance import (
     generate_shuffle_seed,
     is_valid_hex_color,
 )
+from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.utils.default_art import plan_appearance_update
+from pufferblow.api.utils.server_look import ServerLookError, effective_server_look, merge_server_look
 from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.api.commands.metrics import metrics
@@ -306,6 +308,10 @@ def _build_server_info_payload(state: ServerState) -> dict:
             api_initializer.database_handler,
         ),
         "welcome_message": getattr(server, "welcome_message", None),
+        "look": effective_server_look(getattr(server, "profile_settings", None)),
+        "accent_color": getattr(server, "accent_color", None),
+        "avatar_kind": getattr(server, "avatar_kind", None),
+        "banner_kind": getattr(server, "banner_kind", None),
         "members_count": members_count,
         "online_members": online_members,
         "max_message_length": getattr(settings, "max_message_length", 50_000),
@@ -540,6 +546,9 @@ async def update_server_info_route(request: ServerSettingsRequest):
     if request.server_description is not None:
         server_updates["description"] = request.server_description
         updated_fields.append("server_description")
+    if request.welcome_message is not None:
+        server_updates["welcome_message"] = request.welcome_message.strip()
+        updated_fields.append("welcome_message")
     if request.is_private is not None:
         server_settings_updates["is_private"] = request.is_private
         updated_fields.append("is_private")
@@ -585,9 +594,22 @@ async def update_server_info_route(request: ServerSettingsRequest):
                 )
             database_handler.update_server_values(
                 server_updates.get("server_name", current_server.server_name),
-                current_server.welcome_message,
+                server_updates.get("welcome_message", current_server.welcome_message),
                 server_updates.get("description", current_server.description),
             )
+
+            if "welcome_message" in server_updates:
+                log_activity(
+                    activity_type="server_settings_updated",
+                    user_id=user_id,
+                    title="Welcome message updated",
+                    description="The message new members are greeted with was updated",
+                    metadata={
+                        "field": "welcome_message",
+                        "new_value": server_updates["welcome_message"],
+                        "setting_type": "server_info",
+                    },
+                )
 
             if "server_name" in server_updates:
                 log_activity(
@@ -658,6 +680,7 @@ async def update_server_appearance_route(
     banner_kind: str | None = Body(default=None),
     accent_color: str | None = Body(default=None),
     shuffle_avatar_seed: bool = Body(default=False),
+    look: dict | None = Body(default=None),
 ):
     """Toggle the server's icon/banner mode without uploading a file.
 
@@ -666,7 +689,9 @@ async def update_server_appearance_route(
     can flip the storefront appearance — community members shouldn't
     be able to repaint the server's banner.
 
-    Body fields are all optional. Pass only what you want to change.
+    Body fields are all optional. Pass only what you want to change. ``look`` is a (partial) object of
+    the icon style, colours and banner pattern (see ``pufferblow.api.utils.server_look``); null puts a
+    setting back to the one derived from the server's id.
     """
     user_id = require_privilege(auth_token, "manage_server_settings")
     database_handler = require_component("database_handler")
@@ -697,6 +722,13 @@ async def update_server_appearance_route(
 
     new_seed = generate_shuffle_seed() if shuffle_avatar_seed else None
 
+    new_look = None
+    if look is not None:
+        try:
+            new_look = merge_server_look(getattr(server, "profile_settings", None), look)
+        except ServerLookError as exc:
+            raise ApiError(ErrorCode.VALIDATION_FIELD_RANGE, message=str(exc), details={"field": exc.field}) from exc
+
     plan = plan_appearance_update(
         stable_id=str(server.server_id),
         current_seed=getattr(server, "avatar_seed", None),
@@ -715,6 +747,7 @@ async def update_server_appearance_route(
         avatar_seed=new_seed,
         avatar_url=plan.avatar_url,
         banner_url=plan.banner_url,
+        profile_settings=new_look,
     )
 
     log_activity(
@@ -728,6 +761,7 @@ async def update_server_appearance_route(
             "banner_kind": banner_kind,
             "accent_color": accent_color,
             "shuffled_seed": new_seed is not None,
+            "look": new_look,
             "setting_type": "server_appearance",
         },
     )
@@ -741,6 +775,7 @@ async def update_server_appearance_route(
         "avatar_seed": new_seed,
         "avatar_url": plan.avatar_url,
         "banner_url": plan.banner_url,
+        "look": effective_server_look(new_look if new_look is not None else getattr(server, "profile_settings", None)),
     }
 
 

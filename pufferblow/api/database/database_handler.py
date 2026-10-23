@@ -2111,6 +2111,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         avatar_seed: str | None = None,
         avatar_url: str | None = None,
         banner_url: str | None = None,
+        profile_settings: dict | None = None,
     ) -> None:
         """Patch the server's appearance preferences.
 
@@ -2135,6 +2136,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             values["avatar_url"] = avatar_url
         if banner_url is not None:
             values["banner_url"] = banner_url
+        if profile_settings is not None:
+            values["profile_settings"] = profile_settings
         if len(values) == 1:
             return
         with self.database_session() as session:
@@ -2145,6 +2148,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             )
             session.execute(stmt)
             session.commit()
+        # The server row is cached; show the new look now, not when the cache expires.
+        self._invalidate_server_cache()
 
     def update_message_hash(self, message_id: str, hashed_message: str) -> None:
         """Updates the message's hashed content
@@ -4919,7 +4924,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         """
         Updates the server's info.
         """
-        updated_at = date_in_gmt()
+        # A real datetime: the column is a DateTime, and SQLite refuses the formatted string.
+        updated_at = datetime.datetime.now(datetime.UTC)
 
         with self.database_session() as session:
             stmt = update(Server).values(
