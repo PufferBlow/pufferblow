@@ -2,7 +2,6 @@
 
 from pufferblow.core.constants import (
     AUTHOR,
-    BANNER,
     CURRENT_PLATFORM,
     HOME,
     ORG_GITHUB,
@@ -31,7 +30,6 @@ __all__ = [
     "APIInitializer",
     "api_initializer",
     "AUTHOR",
-    "BANNER",
     "CURRENT_PLATFORM",
     "HOME",
     "ORG_GITHUB",

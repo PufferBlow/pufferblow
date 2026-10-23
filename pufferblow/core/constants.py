@@ -9,28 +9,16 @@ AUTHOR = "ramsy0dev"
 ORG_GITHUB = "https://github.com/pufferblow"
 REPO_GITHUB = "https://github.com/pufferblow/pufferblow"
 
-# ASCII rendering of the Pufferblow brand mark: 8 spokes radiating from a
-# centered ring with a dot. Mirrors the SVG used by the web and desktop
-# clients (8 spokes + ring + dot) so the CLI's first impression matches
-# the rest of the surface. Replaces the previous block-letter
-# `PufferBlow` art, which had no relationship to any other logo we ship.
-BANNER = f"""[bold cyan]
-              \\   |   /
-               \\  |  /
-                \\ | /
-        --------( * )--------
-                / | \\
-               /  |  \\
-              /   |   \\
-[/bold cyan][bold]      Pufferblow[/bold]  [dim]v{VERSION}[/dim]
-"""
 
 
-def banner() -> None:
-    """Render the package banner in the terminal."""
-    from rich import print as rprint
+def banner(command: str | None = None) -> None:
+    """Render the launch screen: the glyph mark beside a short summary (see `cli/glyph.py`)."""
+    from pufferblow.cli.glyph import print_splash
 
-    rprint(BANNER)
+    summary = [("platform", platform.system())]
+    if command:
+        summary.insert(0, ("command", command))
+    print_splash(summary, version=VERSION)
 
 
 CURRENT_PLATFORM = platform.system()

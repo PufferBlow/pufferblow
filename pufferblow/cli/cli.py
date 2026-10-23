@@ -338,7 +338,7 @@ def run() -> None:
     if should_render_banner:
         import pufferblow.core.constants as constants
 
-        constants.banner()
+        constants.banner(argv[0])
 
     parser = _build_parser()
     args = parser.parse_args(argv)
