@@ -206,6 +206,10 @@ class BackgroundTasksManager(BackgroundTaskSchedulerMixin, BackgroundTaskAnalyti
 
             try:
                 with Image.open(full_file_path) as img:
+                    # AVIF here is a single still frame: converting an animated WebP/PNG would freeze it.
+                    if getattr(img, "is_animated", False):
+                        logger.info(f"Skipping optimization for animated image: {file_path}")
+                        return
                     if img.mode in ("RGBA", "LA", "P"):
                         background = Image.new("RGB", img.size, (255, 255, 255))
                         if img.mode == "P":

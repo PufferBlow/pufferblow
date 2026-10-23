@@ -1276,11 +1276,15 @@ CPU / RAM / storage / disk I/O. Requires `view_audit_logs`.
 
 Upload the server avatar. Multipart form with `auth_token` +
 `avatar` file. Requires `manage_server_settings`. Response shape
-matches the per-user avatar route.
+matches the per-user avatar route. Uploading switches the server's
+`avatar_kind` to `image`; `PUT /system/server-appearance` with
+`avatar_kind: "identicon"` goes back to the default art. Animated GIF
+and WebP are kept as uploaded (they are not re-encoded to a still).
 
 ### `POST /api/v1/system/upload-banner`
 
-Upload the server banner. Same shape with `banner` file field.
+Upload the server banner. Same shape with `banner` file field; it
+sets `banner_kind` to `image` (`"default"` goes back).
 
 ### `POST /api/v1/system/runtime-config`
 
@@ -1350,8 +1354,21 @@ Audit log of server-wide events (users joining, channels created,
 moderation actions, settings changes). Requires `view_audit_logs`.
 
 ```json
-{ "auth_token": "<token>", "limit": 100 }   // limit ≤ 200
+{ "auth_token": "<token>", "limit": 100 }   // 1 ≤ limit ≤ 500
 ```
+
+### Stickers and custom emoji
+
+`GET /api/v1/stickers` (any signed-in user) lists the active catalog;
+`GET /api/v1/stickers/all` (`manage_stickers`) includes hidden rows;
+`POST /api/v1/stickers` (multipart `file`, `display_name`, optional
+`alias`, `kind`), `PATCH /api/v1/stickers/{id}` and
+`DELETE /api/v1/stickers/{id}` manage it. Each row carries a `kind`:
+`sticker` (the default; sent as a message with `sticker_ids`) or
+`emoji` (a custom emoji, which **requires** an `alias`, `[a-z0-9_]{2,32}`,
+typed as `:alias:` in a message). Either can be used as a reaction with
+the key `sticker:<sticker_id>`. Files are at most 512 KB; animated GIF and
+WebP are allowed.
 
 ### Analytics charts
 

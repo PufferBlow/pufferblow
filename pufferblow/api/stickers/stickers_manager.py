@@ -67,6 +67,9 @@ if TYPE_CHECKING:
 # renderer; the picker thumbs further at 64×64 via lazy load.
 MAX_STICKER_BYTES = 512 * 1024
 
+# What a catalog row can be: stickers are sent as messages, emoji are typed inline or used to react.
+KINDS = ("sticker", "emoji")
+
 # Allowed MIME types at the upload boundary. The storage manager's
 # auto-categoriser already routes these to the ``stickers/``
 # subdirectory; we still check explicitly because someone could
@@ -194,8 +197,9 @@ class StickersManager:
         user_id: str,
         display_name: str,
         alias: str | None = None,
+        kind: str = "sticker",
     ) -> dict:
-        """Upload a new sticker. Returns the row wire shape.
+        """Upload a new sticker, or a custom emoji with ``kind="emoji"``. Returns the row wire shape.
 
         Raises ``StickersError`` for client-recoverable conditions:
         wrong MIME, too large, duplicate alias.
@@ -204,6 +208,10 @@ class StickersManager:
         # request. Both raises surface as 400 with a clear message.
         cleaned_name = _validate_display_name(display_name)
         cleaned_alias = _validate_alias(alias)
+        if kind not in KINDS:
+            raise ApiError(ErrorCode.STICKERS_INVALID_ALIAS, user_message="The kind must be sticker or emoji.", details={"kind": kind})
+        if kind == "emoji" and not cleaned_alias:
+            raise ApiError(ErrorCode.STICKERS_INVALID_ALIAS, user_message="An emoji needs a shortcode to be typed by.", details={"alias": alias})
 
         # Pre-check the alias uniqueness against the DB so we get a
         # clean 409 rather than letting the storage upload run and
@@ -278,6 +286,7 @@ class StickersManager:
             uploaded_by=uuid.UUID(user_id),
             display_name=cleaned_name,
             alias=cleaned_alias,
+            kind=kind,
         )
 
         self._invalidate_cache()

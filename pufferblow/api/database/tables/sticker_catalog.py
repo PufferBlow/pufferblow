@@ -39,6 +39,8 @@ class ServerStickers(Base):
     # Nullable: not every sticker needs one. When set, must be unique
     # per instance so the chat input can map ``:foo:`` deterministically.
     alias: Mapped[str | None] = mapped_column(String(48), nullable=True, unique=True, index=True)
+    # "sticker" or "emoji": a custom emoji is a small picture with a required shortcode, used inline and as a reaction.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="sticker", server_default="sticker")
     uploaded_by: Mapped[UUID] = mapped_column(SA_UUID(as_uuid=True), nullable=False, index=True)
     usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
@@ -59,6 +61,7 @@ class ServerStickers(Base):
             "filename": self.filename,
             "display_name": self.display_name or self.filename,
             "alias": self.alias,
+            "kind": self.kind or "sticker",
             "uploaded_by": str(self.uploaded_by) if self.uploaded_by else None,
             "usage_count": self.usage_count,
             "is_active": self.is_active,

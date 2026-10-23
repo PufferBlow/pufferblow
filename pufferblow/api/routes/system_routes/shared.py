@@ -48,7 +48,8 @@ class RecentActivityRequest(BaseModel):
     # tab to silently 422 on every load because the client's
     # FETCH_LIMIT exceeded the validator — and the tab rendered as
     # the generic "Failed to load recent activity" error state.
-    limit: int = Field(default=10, ge=1, le=200)
+    # The audit log screen reads the last 500 in one go.
+    limit: int = Field(default=10, ge=1, le=500)
 
 
 class ServerLogsRequest(BaseModel):

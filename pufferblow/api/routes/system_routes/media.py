@@ -60,7 +60,10 @@ async def _upload_server_media(
     lqip_url = _resolve_storage_lqip_url(storage_url, database_handler)
 
     if field_name == "avatar_url":
-        database_handler.update_server_avatar_url(storage_url)
+        # Uploading is choosing the picture: flip the kind with the url so clients draw it.
+        database_handler.update_server_appearance(
+            server_id=current_server.server_id, avatar_url=storage_url, avatar_kind="image"
+        )
         log_activity(
             activity_type="server_avatar_updated",
             user_id=user_id,
@@ -75,7 +78,9 @@ async def _upload_server_media(
             "avatar_lqip_url": lqip_url,
         }
 
-    database_handler.update_server_banner_url(storage_url)
+    database_handler.update_server_appearance(
+        server_id=current_server.server_id, banner_url=storage_url, banner_kind="image"
+    )
     log_activity(
         activity_type="server_banner_updated",
         user_id=user_id,

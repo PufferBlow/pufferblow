@@ -71,7 +71,8 @@ async def upload_sticker_route(
     auth_token: str,
     file: UploadFile = File(..., description="Sticker file (PNG/WebP/GIF/JPEG, ≤512 KB)"),
     display_name: str = Form(..., description="User-facing label"),
-    alias: str | None = Form(default=None, description="Optional shortcode"),
+    alias: str | None = Form(default=None, description="Optional shortcode (required for an emoji)"),
+    kind: str = Form(default="sticker", description="sticker or emoji"),
 ):
     """Upload + catalog a new sticker.
 
@@ -91,6 +92,7 @@ async def upload_sticker_route(
             user_id=user_id,
             display_name=display_name,
             alias=alias,
+            kind=kind,
         )
     except StickersError as exc:
         _raise_from_stickers_error(exc)

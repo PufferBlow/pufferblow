@@ -2011,6 +2011,9 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
 
             session.commit()
 
+        # The profile is cached: show the new picture now, not when the cache expires.
+        self._invalidate_user_cache(user_id)
+
     def update_user_banner(self, user_id: str, new_banner_url: str) -> None:
         """Updates the user's banner URL.
 
@@ -2032,6 +2035,9 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             session.execute(stmt)
 
             session.commit()
+
+        # The profile is cached: show the new picture now, not when the cache expires.
+        self._invalidate_user_cache(user_id)
 
     def update_user_appearance(
         self,
@@ -2080,6 +2086,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             )
             session.execute(stmt)
             session.commit()
+        self._invalidate_user_cache(str(user_id))
 
     def update_user_profile_text(
         self,
@@ -2100,6 +2107,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         with self.database_session() as session:
             session.execute(update(Users).values(**values).where(Users.user_id == _as_uuid(user_id)))
             session.commit()
+        self._invalidate_user_cache(str(user_id))
 
     def update_server_appearance(
         self,
@@ -5484,9 +5492,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         uploaded_by: uuid.UUID,
         display_name: str | None = None,
         alias: str | None = None,
+        kind: str = "sticker",
     ) -> str:
         """
-        Add a sticker to the server catalog if it doesn't already exist.
+        Add a sticker (or, with ``kind="emoji"``, a custom emoji) to the server catalog if it doesn't already exist.
 
         Args:
             sticker_url (str): The storage URL of the sticker.
@@ -5507,7 +5516,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         # same file bytes (StorageManager dedupes by hash, so the
         # URL collides) — we bump usage and return the existing id.
         existing_sticker = self.get_sticker_by_url(sticker_url)
-        if existing_sticker:
+        if existing_sticker and (existing_sticker.kind or "sticker") == kind:
             self.increment_sticker_usage(existing_sticker.sticker_id)
             return existing_sticker.sticker_id
 
@@ -5527,6 +5536,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             filename=filename,
             display_name=resolved_display_name,
             alias=resolved_alias,
+            kind=kind,
             uploaded_by=uploaded_by,
         )
 
