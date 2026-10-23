@@ -19,6 +19,10 @@ class Roles(Base):
         default=list,
     )
 
+    # The mark shown after a person's name: {"tier", "tone", "glyph", "image_url"?}. Null: no badge of its own
+    # (the built-in Owner, Admin and Moderator roles are shown with theirs, see api/utils/role_badges.py).
+    badge: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )

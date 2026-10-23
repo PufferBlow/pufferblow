@@ -7,6 +7,7 @@ import random
 import string
 import uuid
 
+from pufferblow.api.utils.role_badges import effective_badge
 from loguru import logger
 
 # AuthToken manager
@@ -625,6 +626,7 @@ class UserManager:
                     "role_name": role.role_name,
                     "privileges_ids": list(role.privileges_ids or []),
                     "is_system": self.database_handler.is_system_role(role.role_id),
+                    "badge": effective_badge(role.role_id, getattr(role, "badge", None)),
                 }
             )
         return resolved_roles

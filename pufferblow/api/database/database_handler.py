@@ -3006,13 +3006,14 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             return {row[0] for row in session.execute(stmt).fetchall()}
 
     def create_role(
-        self, role_id: str, role_name: str, privileges_ids: list[str]
+        self, role_id: str, role_name: str, privileges_ids: list[str], badge: dict | None = None
     ) -> Roles:
-        """Create a custom role."""
+        """Create a custom role, with a badge when one is given."""
         role = Roles(
             role_id=role_id,
             role_name=role_name,
             privileges_ids=sorted(set(privileges_ids)),
+            badge=badge,
         )
         with self.database_session() as session:
             session.add(role)
@@ -3020,8 +3021,19 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             session.refresh(role)
             return role
 
+    def count_badged_roles(self) -> int:
+        """How many roles carry a badge of their own."""
+        with self.database_session() as session:
+            return sum(1 for row in session.execute(select(Roles)).fetchall() if row[0].badge)
+
     def update_role(
-        self, role_id: str, *, role_name: str, privileges_ids: list[str]
+        self,
+        role_id: str,
+        *,
+        role_name: str,
+        privileges_ids: list[str],
+        badge: dict | None = None,
+        clear_badge: bool = False,
     ) -> Roles | None:
         """Update an existing role.
 
@@ -3044,6 +3056,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             role = row[0]
             role.role_name = role_name
             role.privileges_ids = sorted(set(privileges_ids))
+            if clear_badge:
+                role.badge = None
+            elif badge is not None:
+                role.badge = badge
             role.updated_at = current_timestamp
             session.add(role)
             session.commit()

@@ -801,6 +801,7 @@ class RoleCreateRequest(BaseModel):
     auth_token: str = Field(min_length=1)
     role_name: str = Field(min_length=1, max_length=64)
     privileges_ids: list[str] = Field(default_factory=list)
+    badge: dict | None = Field(default=None, description="tier, tone, glyph (and image_url for an image badge)")
 
 
 class RoleUpdateRequest(BaseModel):
@@ -809,6 +810,8 @@ class RoleUpdateRequest(BaseModel):
     auth_token: str = Field(min_length=1)
     role_name: str = Field(min_length=1, max_length=64)
     privileges_ids: list[str] = Field(default_factory=list)
+    badge: dict | None = Field(default=None, description="Left alone when omitted")
+    remove_badge: bool = Field(default=False, description="Take the badge off the role")
 
 
 class UserRolesUpdateRequest(BaseModel):

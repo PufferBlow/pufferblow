@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 
 from pufferblow.api.dependencies import get_current_user
+from pufferblow.api.errors import ApiError, ErrorCode
+from pufferblow.api.utils.role_badges import (
+    IMAGE_MAX_BYTES,
+    MAX_BADGED_ROLES,
+    RoleBadgeError,
+    check_badge,
+    check_badge_image,
+    effective_badge,
+)
 from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, IMMUTABLE_ROLE_IDS
 from pufferblow.api.routes.system_routes.shared import (
+    parse_upload_auth_form,
     log_activity,
     require_component,
     require_server_owner,
@@ -46,7 +56,16 @@ def _serialize_role(database_handler, role) -> dict:
         "privileges_ids": list(role.privileges_ids or []),
         "is_system": database_handler.is_system_role(role.role_id),
         "user_count": database_handler.count_users_for_role(role.role_id),
+        "badge": effective_badge(role.role_id, getattr(role, "badge", None)),
     }
+
+
+def _checked_badge(badge: dict, privileges_ids: list[str]) -> dict:
+    """The badge to store, or a 400 naming what is wrong with it."""
+    try:
+        return check_badge(badge, privileges_ids)
+    except RoleBadgeError as exc:
+        raise ApiError(ErrorCode.VALIDATION_FIELD_RANGE, message=str(exc), details={"field": f"badge.{exc.field}"}) from exc
 
 
 @router.post("/roles/list", status_code=200)
@@ -98,6 +117,14 @@ async def create_role_route(request: RoleCreateRequest):
             detail=f"Unknown privileges: {', '.join(unknown_privileges)}",
         )
 
+    badge = _checked_badge(request.badge, request.privileges_ids) if request.badge is not None else None
+    if badge is not None and database_handler.count_badged_roles() >= MAX_BADGED_ROLES:
+        raise ApiError(
+            ErrorCode.VALIDATION_FIELD_RANGE,
+            message=f"A server can have at most {MAX_BADGED_ROLES} badged roles.",
+            details={"field": "badge", "limit": MAX_BADGED_ROLES},
+        )
+
     role_id = _slugify_role_name(role_name)
     if role_id in IMMUTABLE_ROLE_IDS:
         raise HTTPException(
@@ -114,6 +141,7 @@ async def create_role_route(request: RoleCreateRequest):
         role_id=role_id,
         role_name=role_name,
         privileges_ids=request.privileges_ids,
+        badge=badge,
     )
     log_activity(
         activity_type="role_created",
@@ -152,10 +180,30 @@ async def update_role_route(role_id: str, request: RoleUpdateRequest):
             detail=f"Unknown privileges: {', '.join(unknown_privileges)}",
         )
 
+    badge = None
+    if request.badge is not None and not request.remove_badge:
+        badge = _checked_badge(request.badge, request.privileges_ids)
+    else:
+        # The role keeps its badge, so it must still be allowed to have it: a staff badge needs a moderation privilege.
+        current = database_handler.get_role(role_id)
+        kept = getattr(current, "badge", None) if current is not None else None
+        if kept and not request.remove_badge:
+            _checked_badge({key: kept.get(key) for key in ("tier", "tone", "glyph", "image_url") if kept.get(key) is not None}, request.privileges_ids)
+    if badge is not None:
+        current = database_handler.get_role(role_id)
+        if current is not None and not getattr(current, "badge", None) and database_handler.count_badged_roles() >= MAX_BADGED_ROLES:
+            raise ApiError(
+                ErrorCode.VALIDATION_FIELD_RANGE,
+                message=f"A server can have at most {MAX_BADGED_ROLES} badged roles.",
+                details={"field": "badge", "limit": MAX_BADGED_ROLES},
+            )
+
     updated_role = database_handler.update_role(
         role_id=role_id,
         role_name=role_name,
         privileges_ids=request.privileges_ids,
+        badge=badge,
+        clear_badge=request.remove_badge,
     )
     if updated_role is None:
         raise HTTPException(status_code=404, detail="Role not found.")
@@ -171,6 +219,7 @@ async def update_role_route(role_id: str, request: RoleUpdateRequest):
         metadata={
             "role_id": updated_role.role_id,
             "privileges_ids": updated_role.privileges_ids,
+            "badge": effective_badge(updated_role.role_id, getattr(updated_role, "badge", None)),
         },
     )
     return {
@@ -260,3 +309,29 @@ async def update_user_roles_route(target_user_id: str, request: UserRolesUpdateR
             "roles_ids": list(updated_user.roles_ids or []),
         },
     }
+
+
+@router.post("/role-badge-images", status_code=201)
+async def upload_role_badge_image_route(
+    form_data=Depends(parse_upload_auth_form),
+    file: UploadFile = Form(..., description="A 128 x 128 PNG under 256 KB"),
+):
+    """Upload the picture for an image badge; the role's badge then points at the returned `url`."""
+    owner_user_id = require_server_owner(form_data.auth_token)
+    storage_manager = require_component("storage_manager")
+
+    content = await file.read(IMAGE_MAX_BYTES + 1)
+    try:
+        check_badge_image(content)
+    except RoleBadgeError as exc:
+        raise ApiError(ErrorCode.VALIDATION_FIELD_RANGE, message=str(exc), details={"field": "file"}) from exc
+    await file.seek(0)
+
+    storage_url, _, _, _, _ = await storage_manager.upload_file(
+        file=file,
+        user_id=owner_user_id,
+        reference_type="role_badge",
+        force_category="badges",
+        check_duplicates=True,
+    )
+    return {"status_code": 201, "message": "Badge picture uploaded.", "url": storage_url}

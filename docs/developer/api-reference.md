@@ -1417,7 +1417,32 @@ Create a custom role. Requires `manage_roles`.
 #### `PUT /api/v1/system/roles/{role_id}`
 
 Update a custom role. Requires `manage_roles`. Same body shape
-as create.
+as create. A `badge` that is left out stays as it is; `"remove_badge": true`
+takes it off.
+
+#### Role badges
+
+Every role in the list carries a `badge`: `{ "tier", "tone", "glyph", "image_url"? }`,
+or `null`. A person's `resolved_roles` carry the same, so clients can draw the mark
+after their name. `tier` is the shape: `staff` (only for a role with `ban_users`,
+`mute_users` or `moderate_content`), `community`, or `system` (given by Pufferblow;
+it cannot be chosen). `tone` is `brass`, `coral`, `rose`, `violet`, `sky`, `sage`,
+`white` or `grey`. `glyph` is one of `crown key shield lifebuoy target star broadcast
+brush code heart trophy flame bot check bubbles globe music film gamepad mic`, or
+`image` with the `image_url` of an uploaded picture. The built-in Owner, Admin and
+Moderator roles are shown with a badge without storing one. At most 50 roles can carry
+a badge. Anything else is a `400` whose `details.field` is `badge.<part>`.
+
+```json
+{ "auth_token": "<token>", "role_name": "Coach", "privileges_ids": [],
+  "badge": { "tone": "violet", "glyph": "target" } }
+```
+
+#### `POST /api/v1/system/role-badge-images`
+
+Upload the picture for an image badge. Owner only. Multipart `auth_token` + `file`:
+a 128 × 128 PNG under 256 KB. Returns `{ "url": "/storage/<hash>" }` to put in the
+badge's `image_url`.
 
 #### `DELETE /api/v1/system/roles/{role_id}`
 
