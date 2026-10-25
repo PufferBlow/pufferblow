@@ -21,6 +21,7 @@ from pufferblow.api.schemas import (
     DirectMessageReactionRequest,
     DirectMessageSendRequest,
 )
+from pufferblow.api.messages.search_filters import build_filters
 from pufferblow.api.routes.messages import (
     SEARCH_DEFAULT_LIMIT,
     SEARCH_DEFAULT_SCAN_LIMIT,
@@ -854,7 +855,18 @@ def _require_dm_member(user_id: str, conversation_id: str) -> None:
 
 
 @router.get("/api/v1/dms/conversations/{conversation_id}/search", status_code=200)
-async def search_direct_messages(conversation_id: str, auth_token: str, q: str, limit: int = SEARCH_DEFAULT_LIMIT):
+async def search_direct_messages(
+    conversation_id: str,
+    auth_token: str,
+    q: str = "",
+    limit: int = SEARCH_DEFAULT_LIMIT,
+    from_user_id: str | None = None,
+    mentions: str | None = None,
+    has: str | None = None,
+    before: str | None = None,
+    after: str | None = None,
+    author_type: str | None = None,
+):
     """Substring search across one conversation, newest first.
 
     Messages are encrypted at rest, so the server decrypts the most recent ones (up to the same scan window a
@@ -862,7 +874,15 @@ async def search_direct_messages(conversation_id: str, auth_token: str, q: str, 
     conversation held more than the window.
     """
     query = (q or "").strip()
-    if len(query) < SEARCH_MIN_QUERY_LENGTH:
+    try:
+        filters = build_filters(
+            from_user_id=from_user_id, mentions=mentions, has=has, before=before, after=after, author_type=author_type
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not query and not filters.active:
+        raise HTTPException(status_code=400, detail="Give a search text or at least one filter.")
+    if query and len(query) < SEARCH_MIN_QUERY_LENGTH:
         raise HTTPException(status_code=400, detail=f"`q` must be at least {SEARCH_MIN_QUERY_LENGTH} characters.")
     if len(query) > SEARCH_MAX_QUERY_LENGTH:
         raise HTTPException(status_code=400, detail=f"`q` exceeds the {SEARCH_MAX_QUERY_LENGTH}-character maximum.")
@@ -877,6 +897,7 @@ async def search_direct_messages(conversation_id: str, auth_token: str, q: str, 
         max_results=limit,
         viewer_user_id=user_id,
         conversation=True,
+        filters=filters,
     )
     return {"status_code": 200, "messages": matches, "query": query, "scanned": scanned, "truncated_scan": truncated}
 

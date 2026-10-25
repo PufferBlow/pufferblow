@@ -3667,7 +3667,14 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         return rows
 
     def fetch_channel_messages_for_search(
-        self, channel_id: str, scan_limit: int, *, conversation: bool = False
+        self,
+        channel_id: str,
+        scan_limit: int,
+        *,
+        conversation: bool = False,
+        sender_id: str | None = None,
+        sent_before=None,
+        sent_after=None,
     ) -> list[tuple[Messages, Users | None]]:
         """Legacy decrypt-and-scan search backend — SQLite-only.
 
@@ -3685,10 +3692,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 session.query(Messages, Users)
                 .join(Users, Messages.sender_id == Users.user_id, isouter=True)
                 .filter(scope == channel_id)
-                .order_by(Messages.sent_at.desc(), Messages.message_id.desc())
-                .limit(capped)
-                .all()
             )
+            # What the row itself can answer narrows the read, so a filtered search spends its window on matches.
+            if sender_id:
+                rows = rows.filter(Messages.sender_id == sender_id)
+            if sent_before is not None:
+                rows = rows.filter(Messages.sent_at < sent_before)
+            if sent_after is not None:
+                rows = rows.filter(Messages.sent_at >= sent_after)
+            rows = rows.order_by(Messages.sent_at.desc(), Messages.message_id.desc()).limit(capped).all()
         return rows
 
     def search_channel_messages_ranked(

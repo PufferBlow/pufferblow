@@ -807,6 +807,24 @@ Scans up to ~200 matches. When `truncated_scan` is `true`, the
 channel was too large to scan exhaustively — clients should fall
 back to local filtering for completeness.
 
+#### Search filters
+
+Both this search and the direct-message one (below) take the same optional filters, so a search can be a text,
+filters, or both. With no `q` at least one filter is required (`400` otherwise). A bad value is a `400` that says
+which.
+
+| Parameter | Meaning |
+|---|---|
+| `from_user_id` | Only messages sent by this user (a bot's messages are `bot:<id>`). |
+| `mentions` | Only messages that `@mention` this username (case-insensitive). |
+| `has` | Comma-separated, all required: `link`, `file`, `image`, `video`, `sound`, `sticker`. `link` is a web address in the text; `file` is an attachment that is not a picture, video, audio or sticker. |
+| `after`, `before` | A day, `YYYY-MM-DD` (UTC). `after=2026-03-01` is messages sent once that day has ended; `before=2026-03-31` is messages sent before that day began. |
+| `author_type` | `user` or `bot`. |
+
+The sender and the dates narrow which rows are read; the rest are checked on the decrypted message. With a text,
+the filters are applied to the best matches (on Postgres, the top 100), so a filtered search can return fewer than
+`limit` even when more exist further down.
+
 ### `POST /api/v1/channels/{channel_id}/send_message`
 
 Send a text message, with optional attachments. Multipart form:
@@ -843,14 +861,14 @@ Only the two people in a conversation may use these; anyone else gets `404`. `co
 conversation list and `GET /api/v1/dms/messages` return.
 
 ```
-GET    /api/v1/dms/conversations/{conversation_id}/search?auth_token=<token>&q=lemon&limit=20
+GET    /api/v1/dms/conversations/{conversation_id}/search?auth_token=<token>&q=lemon&limit=20   // and the filters above
 GET    /api/v1/dms/conversations/{conversation_id}/pins?auth_token=<token>
 PUT    /api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin?auth_token=<token>
 DELETE /api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin?auth_token=<token>
 ```
 
 - **Search** is a substring search over the conversation's recent messages, newest first, with the same limits as
-  channel search (`q` 2 to 256 characters, `limit` 1 to 50). The response is
+  channel search (`q` 2 to 256 characters when given, `limit` 1 to 50) and the filters above. The response is
   `{ messages, query, scanned, truncated_scan }`.
 - **Pins**: either person may pin or unpin (there are no moderators in a private conversation). Both calls are
   idempotent; a conversation holds up to 50 (`409` past that), and a message from another conversation is `404`.

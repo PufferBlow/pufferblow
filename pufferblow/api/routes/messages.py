@@ -38,6 +38,7 @@ from pufferblow.api.dependencies import (
     check_channel_access,
     get_current_user,
 )
+from pufferblow.api.messages.search_filters import build_filters
 from pufferblow.api.services.attachments import clean_descriptions, store_attachments
 from pufferblow.core.bootstrap import api_initializer
 
@@ -217,9 +218,15 @@ async def channel_load_messages(
 async def channel_search_messages(
     auth_token: str,
     channel_id: str,
-    q: str,
+    q: str = "",
     limit: int | None = SEARCH_DEFAULT_LIMIT,
     scan_limit: int | None = SEARCH_DEFAULT_SCAN_LIMIT,
+    from_user_id: str | None = None,
+    mentions: str | None = None,
+    has: str | None = None,
+    before: str | None = None,
+    after: str | None = None,
+    author_type: str | None = None,
 ):
     """
     Substring search across a channel's recent messages.
@@ -233,9 +240,11 @@ async def channel_search_messages(
     Args:
         auth_token: User's authentication token.
         channel_id: Channel ID.
-        q: Search query (2-256 chars).
+        q: Search query (2-256 chars). May be left out when a filter is given.
         limit: Max matches to return (default 20, max 50).
         scan_limit: Max messages to decrypt-and-scan (default 1000, max 5000).
+        from_user_id, mentions, has, before, after, author_type: Filters (see
+            ``api/messages/search_filters.py``); each narrows the matches.
 
     Returns:
         200 OK: Matches plus scan metadata.
@@ -243,7 +252,15 @@ async def channel_search_messages(
         404 NOT FOUND: Channel not found or no access.
     """
     normalized_query = (q or "").strip()
-    if len(normalized_query) < SEARCH_MIN_QUERY_LENGTH:
+    try:
+        filters = build_filters(
+            from_user_id=from_user_id, mentions=mentions, has=has, before=before, after=after, author_type=author_type
+        )
+    except ValueError as exc:
+        raise exceptions.HTTPException(detail=str(exc), status_code=400)
+    if not normalized_query and not filters.active:
+        raise exceptions.HTTPException(detail="Give a search text or at least one filter.", status_code=400)
+    if normalized_query and len(normalized_query) < SEARCH_MIN_QUERY_LENGTH:
         raise exceptions.HTTPException(
             detail=f"`q` must be at least {SEARCH_MIN_QUERY_LENGTH} characters.",
             status_code=400,
@@ -277,6 +294,7 @@ async def channel_search_messages(
         scan_limit=effective_scan,
         max_results=effective_limit,
         viewer_user_id=user_id,
+        filters=filters,
     )
 
     message_data_list = [

@@ -12,6 +12,8 @@ from pufferblow.api.database.database_handler import DatabaseHandler
 # Tables
 from pufferblow.api.database.tables.messages import Messages
 from pufferblow.api.encrypt.encrypt import Encrypt
+from pufferblow.api.messages import search_filters
+from pufferblow.api.messages.search_filters import SearchFilters
 from pufferblow.api.user.user_manager import UserManager
 
 
@@ -190,6 +192,7 @@ class MessagesManager:
         max_results: int,
         viewer_user_id: str | None = None,
         conversation: bool = False,
+        filters: SearchFilters | None = None,
     ) -> tuple[list[dict], int, bool]:
         """Ranked in-channel search. With ``conversation`` the id is a DM conversation's rather than a channel's.
 
@@ -228,29 +231,41 @@ class MessagesManager:
                 had more rows than `scan_limit`. Always False on
                 Postgres (the GIN search isn't a scan).
         """
-        ranked = self.database_handler.search_channel_messages_ranked(
-            channel_id=channel_id, query_text=query, limit=max_results, conversation=conversation
-        )
-        if ranked:
-            # Postgres path: strip the score (clients don't see it
-            # today; rank is implicit in the order), then hydrate.
-            matches = [(message, user) for message, user, _ in ranked]
-            hydrated = self._hydrate_messages(matches, viewer_user_id=viewer_user_id)
-            return hydrated, len(ranked), False
+        filters = filters or SearchFilters()
+        text_query = (query or "").strip()
+        if text_query:
+            # With filters the best hits are read in a wider batch, since some will be filtered out.
+            ranked = self.database_handler.search_channel_messages_ranked(
+                channel_id=channel_id,
+                query_text=text_query,
+                limit=100 if filters.active else max_results,
+                conversation=conversation,
+            )
+            if ranked:
+                # Postgres path: strip the score (clients don't see it today; rank is implicit in the order).
+                hydrated = self._hydrate_messages([(message, user) for message, user, _ in ranked], viewer_user_id=viewer_user_id)
+                if filters.active:
+                    hydrated = [m for m in hydrated if search_filters.matches(m, filters)]
+                return hydrated[:max_results], len(ranked), False
 
-        # SQLite fallback (or "Postgres found nothing"). On Postgres
-        # the empty-result short-circuit means we never spin up the
-        # decrypt path for misses — only the SQLite tests reach it.
-        if not str(
-            self.database_handler.database_engine.url
-        ).startswith("sqlite://"):
-            return [], 0, False
+            # SQLite fallback (or "Postgres found nothing"). On Postgres an empty ranked result means no
+            # message has the text, so the decrypt path is only reached by the SQLite tests.
+            if not str(self.database_handler.database_engine.url).startswith("sqlite://"):
+                return [], 0, False
 
+        # No text (filters only), or the SQLite harness: read the most recent rows the row-level filters allow,
+        # decrypt them and keep those that match the text and the content filters.
+        from_row = filters.from_user_id if filters.from_user_id and not filters.from_user_id.startswith("bot:") else None
         candidates = self.database_handler.fetch_channel_messages_for_search(
-            channel_id=channel_id, scan_limit=scan_limit, conversation=conversation
+            channel_id=channel_id,
+            scan_limit=scan_limit,
+            conversation=conversation,
+            sender_id=from_row,
+            sent_before=filters.before,
+            sent_after=filters.after,
         )
 
-        needle = query.lower()
+        needle = text_query.lower()
         matches: list[tuple[Messages, object | None]] = []
         for message_tuple in candidates:
             message_data = message_tuple[0]
@@ -268,10 +283,21 @@ class MessagesManager:
                 )
                 continue
 
-            if needle in raw_message.lower():
-                matches.append(message_tuple)
-                if len(matches) >= max_results:
-                    break
+            if needle and needle not in raw_message.lower():
+                continue
+            if filters.active and not search_filters.matches(
+                {
+                    "sender_user_id": f"bot:{message_data.sender_bot_id}" if message_data.sender_bot_id else str(message_data.sender_id),
+                    "message": raw_message,
+                    "attachments": message_data.attachments or [],
+                    "sent_at": message_data.sent_at,
+                },
+                filters,
+            ):
+                continue
+            matches.append(message_tuple)
+            if len(matches) >= max_results:
+                break
 
         hydrated = self._hydrate_messages(matches, viewer_user_id=viewer_user_id)
         truncated = len(candidates) >= scan_limit
