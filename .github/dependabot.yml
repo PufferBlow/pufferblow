@@ -1,11 +1,72 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+# Dependabot: version updates and security updates.
+# Reference: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Security updates (the ones that fix a published advisory) are raised by Dependabot itself and are not
+# held back by the schedule or by `open-pull-requests-limit` below. Turn on "Dependabot alerts" and
+# "Dependabot security updates" under Settings > Code security; this file only shapes the routine
+# version updates and how they are grouped.
 
 version: 2
 updates:
-  - package-ecosystem: "pip" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # Python dependencies (poetry.lock). Checked daily so a new advisory's fix is proposed quickly.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "build(deps)"
+      prefix-development: "build(deps-dev)"
+    groups:
+      # Everything that is not a security fix and only changes a minor or patch version arrives as
+      # one pull request, so the routine noise does not bury the individual security ones.
+      python-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      # Security fixes for any package are grouped per update so one review covers them.
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # The container image (base image and its tag).
+  - package-ecosystem: "docker"
+    directory: "/"
     schedule:
       interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "build(docker)"
+
+  # Images named in the compose file.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "build(docker)"
+
+  # Actions used by the workflows (pinned versions go stale and actions run with repository access).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
