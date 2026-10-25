@@ -24,7 +24,7 @@ fastapi = ">=0.115.12,<1"
 # `pufferblow/api/database/database.py`.
 # `tomli` removed — replaced by stdlib `tomllib`.
 rich = "^14.2.0"
-pycryptodome = "^3.23.0"
+pycryptodome = ">=3.23,<5.0"
 loguru = "^0.7.3"
 pytz = ">=2025.2,<2027.0"
 psycopg2-binary = "^2.9.10"
