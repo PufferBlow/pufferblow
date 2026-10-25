@@ -12,6 +12,7 @@ from loguru import logger
 
 from pufferblow.api.dependencies import get_current_user
 from pufferblow.api.errors import ApiError
+from pufferblow.api.database.channel_org_mixin import MAX_PINS_PER_CHANNEL
 from pufferblow.api.federation.peers import FederationRefused
 from pufferblow.api.schemas import (
     ActivityPubFollowRequest,
@@ -19,6 +20,13 @@ from pufferblow.api.schemas import (
     DirectMessageLoadQuery,
     DirectMessageReactionRequest,
     DirectMessageSendRequest,
+)
+from pufferblow.api.routes.messages import (
+    SEARCH_DEFAULT_LIMIT,
+    SEARCH_DEFAULT_SCAN_LIMIT,
+    SEARCH_MAX_LIMIT,
+    SEARCH_MAX_QUERY_LENGTH,
+    SEARCH_MIN_QUERY_LENGTH,
 )
 from pufferblow.core.bootstrap import api_initializer
 from pufferblow.core.constants import VERSION
@@ -834,3 +842,84 @@ async def list_dm_conversations(request: Request, auth_token: str):
         "status_code": 200,
         "conversations": conversations,
     }
+
+
+# ── search and pins inside a conversation ─────────────────────────
+
+
+def _require_dm_member(user_id: str, conversation_id: str) -> None:
+    """Only the two people in a conversation may search it or touch its pins; anyone else is told it is not there."""
+    if not api_initializer.database_handler.is_dm_member(conversation_id, str(user_id)):
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+
+@router.get("/api/v1/dms/conversations/{conversation_id}/search", status_code=200)
+async def search_direct_messages(conversation_id: str, auth_token: str, q: str, limit: int = SEARCH_DEFAULT_LIMIT):
+    """Substring search across one conversation, newest first.
+
+    Messages are encrypted at rest, so the server decrypts the most recent ones (up to the same scan window a
+    channel search uses) and returns up to ``limit`` matches. The response sets ``truncated_scan`` when the
+    conversation held more than the window.
+    """
+    query = (q or "").strip()
+    if len(query) < SEARCH_MIN_QUERY_LENGTH:
+        raise HTTPException(status_code=400, detail=f"`q` must be at least {SEARCH_MIN_QUERY_LENGTH} characters.")
+    if len(query) > SEARCH_MAX_QUERY_LENGTH:
+        raise HTTPException(status_code=400, detail=f"`q` exceeds the {SEARCH_MAX_QUERY_LENGTH}-character maximum.")
+    if limit < 1 or limit > SEARCH_MAX_LIMIT:
+        raise HTTPException(status_code=400, detail=f"`limit` must be between 1 and {SEARCH_MAX_LIMIT}.")
+    user_id = get_current_user(auth_token)
+    _require_dm_member(user_id, conversation_id)
+    matches, scanned, truncated = api_initializer.messages_manager.search_messages(
+        channel_id=conversation_id,
+        query=query,
+        scan_limit=SEARCH_DEFAULT_SCAN_LIMIT,
+        max_results=limit,
+        viewer_user_id=user_id,
+        conversation=True,
+    )
+    return {"status_code": 200, "messages": matches, "query": query, "scanned": scanned, "truncated_scan": truncated}
+
+
+@router.get("/api/v1/dms/conversations/{conversation_id}/pins", status_code=200)
+async def list_direct_message_pins(conversation_id: str, auth_token: str):
+    """A conversation's pinned messages, newest pin first."""
+    user_id = get_current_user(auth_token)
+    _require_dm_member(user_id, conversation_id)
+    rows = api_initializer.database_handler.list_pinned(conversation_id)
+    hydrated = api_initializer.messages_manager._hydrate_messages([(message, user) for message, user, _ in rows], viewer_user_id=user_id)
+    pins = [{**message, **pin} for message, (_, _, pin) in zip(hydrated, rows)]
+    return {"status_code": 200, "pins": pins, "limit": MAX_PINS_PER_CHANNEL}
+
+
+async def _tell_dm_peer_about_pins(user_id: str, message_id: str, request: Request) -> None:
+    await api_initializer.activitypub_manager.notify_local_dm_peer(
+        local_user_id=user_id, message_id=message_id, payload={"type": "pins_changed"}, base_url=_request_base_url(request)
+    )
+
+
+@router.put("/api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin", status_code=200)
+async def pin_direct_message(conversation_id: str, message_id: str, request: Request, auth_token: str):
+    """Pin a message in a conversation. Either person may; it is idempotent and a conversation holds up to 50."""
+    user_id = get_current_user(auth_token)
+    _require_dm_member(user_id, conversation_id)
+    message = api_initializer.database_handler.get_message_by_id(message_id)
+    if message is None or str(message.conversation_id or "") != conversation_id:
+        raise HTTPException(status_code=404, detail="That message is not in this conversation.")
+    outcome = api_initializer.database_handler.pin_message(conversation_id, message_id, str(user_id))
+    if outcome == "full":
+        raise HTTPException(status_code=409, detail=f"A conversation can have at most {MAX_PINS_PER_CHANNEL} pins. Unpin one first.")
+    if outcome == "pinned":
+        await _tell_dm_peer_about_pins(user_id, message_id, request)
+    return {"status_code": 200, "pinned": True, "already": outcome == "already"}
+
+
+@router.delete("/api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin", status_code=200)
+async def unpin_direct_message(conversation_id: str, message_id: str, request: Request, auth_token: str):
+    """Unpin a message in a conversation (either person may). Idempotent."""
+    user_id = get_current_user(auth_token)
+    _require_dm_member(user_id, conversation_id)
+    removed = api_initializer.database_handler.unpin_message(conversation_id, message_id)
+    if removed:
+        await _tell_dm_peer_about_pins(user_id, message_id, request)
+    return {"status_code": 200, "pinned": False, "removed": removed}

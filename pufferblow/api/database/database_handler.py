@@ -3667,7 +3667,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         return rows
 
     def fetch_channel_messages_for_search(
-        self, channel_id: str, scan_limit: int
+        self, channel_id: str, scan_limit: int, *, conversation: bool = False
     ) -> list[tuple[Messages, Users | None]]:
         """Legacy decrypt-and-scan search backend — SQLite-only.
 
@@ -3678,11 +3678,13 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         substring-match in Python after decryption.
         """
         capped = max(1, int(scan_limit))
+        # For a DM, `channel_id` is the conversation's id.
+        scope = Messages.conversation_id if conversation else Messages.channel_id
         with self.database_session() as session:
             rows = (
                 session.query(Messages, Users)
                 .join(Users, Messages.sender_id == Users.user_id, isouter=True)
-                .filter(Messages.channel_id == channel_id)
+                .filter(scope == channel_id)
                 .order_by(Messages.sent_at.desc(), Messages.message_id.desc())
                 .limit(capped)
                 .all()
@@ -3694,6 +3696,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         channel_id: str,
         query_text: str,
         limit: int,
+        *,
+        conversation: bool = False,
     ) -> list[tuple[Messages, Users | None, float]]:
         """Ranked full-text search over a channel's plaintext index.
 
@@ -3720,14 +3724,16 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         if not normalized:
             return []
 
+        # A fixed choice of two column names, never user input.
+        scope_column = "conversation_id" if conversation else "channel_id"
         with self.database_session() as session:
             sql = text(
-                """
+                f"""
                 SELECT
                     m.message_id,
                     ts_rank_cd(m.search_tokens, plainto_tsquery('simple', :q)) AS rank_score
                 FROM messages m
-                WHERE m.channel_id = :channel_id
+                WHERE m.{scope_column} = :channel_id
                   AND m.search_tokens IS NOT NULL
                   AND m.search_tokens @@ plainto_tsquery('simple', :q)
                 ORDER BY rank_score DESC, m.sent_at DESC, m.message_id DESC
@@ -3869,6 +3875,23 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 }
                 for row in last_messages
             ]
+
+    def is_dm_member(self, conversation_id: str, user_id: str) -> bool:
+        """Whether ``user_id`` takes part in a DM conversation: recorded as a member, or has written in it."""
+        from pufferblow.api.database.dm_members_mixin import DmConversationMembers
+
+        with self.database_session() as session:
+            member = session.execute(
+                select(DmConversationMembers.user_id).where(
+                    DmConversationMembers.conversation_id == conversation_id, DmConversationMembers.user_id == str(user_id)
+                )
+            ).first()
+            if member:
+                return True
+            sent = session.execute(
+                select(Messages.message_id).where(Messages.conversation_id == conversation_id, Messages.sender_id == str(user_id)).limit(1)
+            ).first()
+            return sent is not None
 
     def get_conversation_other_sender(
         self, conversation_id: str, viewer_user_id: str

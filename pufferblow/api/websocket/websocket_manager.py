@@ -11,6 +11,7 @@ DM_EVENT_NAMES = {
     "message_edited": "dm.message.updated",
     "message_deleted": "dm.message.deleted",
     "reaction": "dm.reaction.updated",
+    "pins_changed": "dm.pins.updated",
 }
 
 

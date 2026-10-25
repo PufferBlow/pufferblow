@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from pufferblow.api.database.tables.channel_organization import ChannelCategories, PinnedMessages
@@ -115,7 +115,8 @@ class DatabaseChannelOrgMixin:
                 session.query(Messages, Users, PinnedMessages)
                 .join(PinnedMessages, PinnedMessages.message_id == Messages.message_id)
                 .join(Users, Messages.sender_id == Users.user_id, isouter=True)
-                .filter(PinnedMessages.channel_id == channel_id, Messages.channel_id == channel_id)
+                # A DM conversation's id stands in for the channel id: its messages carry it as `conversation_id`.
+                .filter(PinnedMessages.channel_id == channel_id, or_(Messages.channel_id == channel_id, Messages.conversation_id == channel_id))
                 .order_by(PinnedMessages.pinned_at.desc())
                 .all()
             )

@@ -189,8 +189,9 @@ class MessagesManager:
         scan_limit: int,
         max_results: int,
         viewer_user_id: str | None = None,
+        conversation: bool = False,
     ) -> tuple[list[dict], int, bool]:
-        """Ranked in-channel search.
+        """Ranked in-channel search. With ``conversation`` the id is a DM conversation's rather than a channel's.
 
         Two code paths share this signature:
 
@@ -228,7 +229,7 @@ class MessagesManager:
                 Postgres (the GIN search isn't a scan).
         """
         ranked = self.database_handler.search_channel_messages_ranked(
-            channel_id=channel_id, query_text=query, limit=max_results
+            channel_id=channel_id, query_text=query, limit=max_results, conversation=conversation
         )
         if ranked:
             # Postgres path: strip the score (clients don't see it
@@ -246,7 +247,7 @@ class MessagesManager:
             return [], 0, False
 
         candidates = self.database_handler.fetch_channel_messages_for_search(
-            channel_id=channel_id, scan_limit=scan_limit
+            channel_id=channel_id, scan_limit=scan_limit, conversation=conversation
         )
 
         needle = query.lower()

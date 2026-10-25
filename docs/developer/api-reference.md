@@ -837,6 +837,27 @@ attachment URLs, sender profile snapshot, and the message's
 - 400 — message exceeds the instance's `max_message_length`.
 - 413 — attachment(s) over the per-file or per-message limit.
 
+### Search and pins in a direct message
+
+Only the two people in a conversation may use these; anyone else gets `404`. `conversation_id` is the one the
+conversation list and `GET /api/v1/dms/messages` return.
+
+```
+GET    /api/v1/dms/conversations/{conversation_id}/search?auth_token=<token>&q=lemon&limit=20
+GET    /api/v1/dms/conversations/{conversation_id}/pins?auth_token=<token>
+PUT    /api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin?auth_token=<token>
+DELETE /api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin?auth_token=<token>
+```
+
+- **Search** is a substring search over the conversation's recent messages, newest first, with the same limits as
+  channel search (`q` 2 to 256 characters, `limit` 1 to 50). The response is
+  `{ messages, query, scanned, truncated_scan }`.
+- **Pins**: either person may pin or unpin (there are no moderators in a private conversation). Both calls are
+  idempotent; a conversation holds up to 50 (`409` past that), and a message from another conversation is `404`.
+  The list is `{ pins, limit }`, newest pin first, each pin a message with `pinned_by` and `pinned_at`.
+- When the other person is on this instance and connected, a pin or unpin reaches them as a `dm.pins.updated`
+  event carrying the `conversation_id`, so their list can refresh.
+
 ### `PUT /api/v1/channels/{channel_id}/mark_message_as_read`
 
 Update the caller's read marker for the channel.
