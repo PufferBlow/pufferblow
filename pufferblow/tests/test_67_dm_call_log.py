@@ -157,6 +157,27 @@ def test_the_conversation_list_words_a_call_line_and_the_line_names_both_people(
     assert (log["caller_name"], log["callee_name"]) == (alice_name, bob_name)
 
 
+def test_a_later_request_with_a_hostile_host_header_cannot_steer_where_a_call_line_goes(client: TestClient):
+    """The line is written from the people's existing actors, not from the Host of whichever request noticed the call."""
+    alice_id, alice_name, alice = _user("alice")
+    bob_id, bob_name, bob = _user("bob")
+    carol_id, carol_name, carol = _user("carol")
+    call_id = _ring(client, alice, bob_id)  # a normal request: both get their actors from it
+    other_call = _ring(client, carol, alice_id)
+    before = {u: api_initializer.database_handler.get_activitypub_actor_by_user_id(user_id=u).actor_uri for u in (alice_id, bob_id, carol_id)}
+
+    hostile = {"host": "evil.example"}
+    # Bob's rejection and alice's ending of her other call, both sent with a hostile Host, are what notice the calls.
+    assert client.post(f"{CALLS}/{call_id}/reject", json={"auth_token": bob}, headers=hostile).status_code == 200
+    assert client.post(f"{CALLS}/{other_call}/reject", json={"auth_token": carol}, headers=hostile).status_code == 200
+
+    db = api_initializer.database_handler
+    after = {u: db.get_activitypub_actor_by_user_id(user_id=u).actor_uri for u in (alice_id, bob_id, carol_id)}
+    assert after == before and not any("evil.example" in uri for uri in after.values())
+    assert len(_calls_in_chat(client, alice, bob_name)) == 1
+    assert len(_calls_in_chat(client, carol, alice_name)) == 1
+
+
 # ── how the manager decides the outcome ───────────────────────────
 
 

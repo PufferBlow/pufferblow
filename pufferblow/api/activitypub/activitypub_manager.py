@@ -108,8 +108,6 @@ class ActivityPubManager:
         self.ping_manager: "PingManager | None" = None
         # Who may federate with this instance (mode, blocked and pending hosts, per-peer switches).
         self._background_tasks: set[asyncio.Task] = set()
-        #: The public address of this instance as last seen on a request, for work done with no request in hand.
-        self.base_url_hint: str | None = None
         self.peer_policy = PeerPolicy(database_handler, is_local=lambda host: self._is_local_host(host), on_new_peer=self._learn_peer)
 
     def _learn_peer(self, host: str) -> None:
@@ -1022,19 +1020,24 @@ class ActivityPubManager:
         await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
         return {"activity_id": activity_uri, "delivery_target": delivery_target}
 
-    def _local_conversation_id(self, user_a: str, user_b: str, base_url: str | None) -> str | None:
-        """The conversation two local people share. Their existing actors give it; without them, ``base_url`` makes them."""
-        actors = [self.database_handler.get_activitypub_actor_by_user_id(user_id=str(u)) for u in (user_a, user_b)]
-        if all(actors):
-            return self._conversation_id(actors[0].actor_uri, actors[1].actor_uri)
-        if base_url:
-            return self._conversation_id(
-                self.ensure_local_actor(user_id=str(user_a), base_url=base_url).actor_uri,
-                self.ensure_local_actor(user_id=str(user_b), base_url=base_url).actor_uri,
-            )
-        return None
+    def _local_conversation_id(self, user_a: str, user_b: str) -> str | None:
+        """The conversation two local people share, from their existing actors. None until both have one.
 
-    async def log_dm_call(self, call: dict, base_url: str | None = None) -> None:
+        Nothing is created here: this runs for people other than whoever's request happened to notice the call,
+        so no address a request carried may decide where it goes. Both actors are made when the call starts
+        (``prepare_dm_call``), the same way sending a direct message makes them.
+        """
+        actors = [self.database_handler.get_activitypub_actor_by_user_id(user_id=str(u)) for u in (user_a, user_b)]
+        if not all(actors):
+            return None
+        return self._conversation_id(actors[0].actor_uri, actors[1].actor_uri)
+
+    def prepare_dm_call(self, caller_id: str, callee_id: str, base_url: str) -> None:
+        """Make sure both people of a call have an actor, so the call's line has a conversation to go into."""
+        for user_id in (caller_id, callee_id):
+            self.ensure_local_actor(user_id=str(user_id), base_url=base_url)
+
+    async def log_dm_call(self, call: dict) -> None:
         """Keep a line in the conversation about a call that finished.
 
         It is an ordinary direct message from the caller with no text and one attachment of type ``call``
@@ -1044,7 +1047,7 @@ class ActivityPubManager:
         """
         try:
             caller, callee = str(call["caller_id"]), str(call["callee_id"])
-            conversation_id = self._local_conversation_id(caller, callee, base_url or self.base_url_hint)
+            conversation_id = self._local_conversation_id(caller, callee)
             if conversation_id is None:
                 return
             entry = {
