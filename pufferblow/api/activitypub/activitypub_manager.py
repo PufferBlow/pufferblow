@@ -23,6 +23,7 @@ OUTBOUND_POST_MAX_ATTEMPTS = 3
 OUTBOUND_POST_BACKOFF_BASE_SECONDS = 1.0
 
 from pufferblow.api.database.database_handler import DatabaseHandler
+from pufferblow.api.federation.nodeinfo import fetch_peer_info
 from pufferblow.api.federation.peers import FederationRefused, PeerPolicy, host_of
 from pufferblow.api.messages.messages_manager import MessagesManager
 from pufferblow.core.constants import VERSION
@@ -92,7 +93,29 @@ class ActivityPubManager:
         # Injected after bootstrap to avoid circular construction
         self.ping_manager: "PingManager | None" = None
         # Who may federate with this instance (mode, blocked and pending hosts, per-peer switches).
-        self.peer_policy = PeerPolicy(database_handler, is_local=lambda host: self._is_local_host(host))
+        self._background_tasks: set[asyncio.Task] = set()
+        self.peer_policy = PeerPolicy(database_handler, is_local=lambda host: self._is_local_host(host), on_new_peer=self._learn_peer)
+
+    def _learn_peer(self, host: str) -> None:
+        """Ask a host we have just met what it is (software, version, users), in the background.
+
+        Without a running event loop (a test, a script) there is nothing to schedule and the admin can still
+        use "Check now".
+        """
+        try:
+            task = asyncio.get_running_loop().create_task(self._fetch_peer_info(host))
+        except RuntimeError:
+            return
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    async def _fetch_peer_info(self, host: str) -> None:
+        try:
+            info = await fetch_peer_info(host)
+            if info is not None:
+                self.database_handler.set_peer_info(host, software=info["software"], version=info["version"], users=info["users"])
+        except Exception as exc:  # an unreachable or unsafe host just stays unlabelled
+            logger.debug("No nodeinfo for {host}: {error}", host=host, error=exc)
 
     def _is_local_host(self, host: str) -> bool:
         """Whether ``host`` is this instance itself (which is never policed)."""

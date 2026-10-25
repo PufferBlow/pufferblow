@@ -129,9 +129,16 @@ class PeerPolicy:
     host is this instance itself, which is never policed.
     """
 
-    def __init__(self, database: Any, is_local: Callable[[str], bool] | None = None) -> None:
+    def __init__(
+        self,
+        database: Any,
+        is_local: Callable[[str], bool] | None = None,
+        on_new_peer: Callable[[str], None] | None = None,
+    ) -> None:
         self.database = database
         self._is_local = is_local or (lambda host: False)
+        #: Called with a host the first time it is seen, so the owner can ask it what it is (nodeinfo).
+        self._on_new_peer = on_new_peer
 
     @property
     def available(self) -> bool:
@@ -152,8 +159,10 @@ class PeerPolicy:
         if peer is None:
             if mode == "open":
                 self.database.upsert_peer(host, "federating")
+                self._new_peer(host)
                 return ALLOW
             self.database.upsert_peer(host, "pending")  # an admin will see it and decide
+            self._new_peer(host)
             return Decision(False, "pending")
         if peer["status"] == "blocked":
             return Decision(False, "blocked")
@@ -176,14 +185,23 @@ class PeerPolicy:
         if peer is None:
             if mode == "open":
                 self.database.upsert_peer(host, "federating")
+                self._new_peer(host)
                 return ALLOW
             self.database.upsert_peer(host, "pending")
+            self._new_peer(host)
             return Decision(False, "not_approved")
         if peer["status"] == "blocked":
             return Decision(False, "blocked")
         if peer["status"] == "pending" and mode != "open":
             return Decision(False, "not_approved")
         return ALLOW
+
+    def _new_peer(self, host: str) -> None:
+        if self._on_new_peer is not None:
+            try:
+                self._on_new_peer(host)
+            except Exception:  # learning about a host must never decide whether its activity is accepted
+                pass
 
     def policy_for(self, host: str) -> dict[str, bool]:
         """The switches for ``host``. A host not known (or a local one) gets the most open set."""

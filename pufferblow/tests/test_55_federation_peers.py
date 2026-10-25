@@ -137,6 +137,54 @@ def test_inbox_refuses_activity_from_a_blocked_peer_with_403(client: TestClient)
     assert reply.status_code in (401, 403)
 
 
+def test_inbox_answers_403_over_http_once_the_signature_is_accepted(client: TestClient, monkeypatch):
+    """Past the signature check, a blocked host gets a 403 from the route."""
+    async def accepted(**_kwargs):
+        return None
+
+    monkeypatch.setattr(api_initializer.activitypub_manager, "verify_inbox_signature", accepted)
+    host = _host()
+    api_initializer.database_handler.upsert_peer(host, "blocked")
+    activity = {"id": f"https://{host}/a/1", "type": "Create", "actor": f"https://{host}/ap/users/x", "object": {"type": "Note"}}
+    reply = client.post("/ap/inbox", json=activity)
+    assert reply.status_code == 403
+    assert host in reply.text
+
+
+def test_a_host_seen_for_the_first_time_is_reported_once():
+    db, host, seen = api_initializer.database_handler, _host(), []
+    policy = PeerPolicy(db, on_new_peer=seen.append)
+    policy.decide_inbound(host)
+    policy.decide_inbound(host)
+    policy.decide_outbound(host)
+    assert seen == [host]
+
+
+def test_a_failing_new_peer_hook_does_not_change_the_decision():
+    def boom(_host):
+        raise RuntimeError("nodeinfo exploded")
+
+    assert PeerPolicy(api_initializer.database_handler, on_new_peer=boom).decide_inbound(_host()).allowed
+
+
+def test_the_manager_learns_a_new_peer_from_its_nodeinfo(monkeypatch):
+    from pufferblow.api.activitypub import activitypub_manager as module
+
+    async def info(_host):
+        return {"software": "pufferblow", "version": "1.2.3", "users": 7}
+
+    monkeypatch.setattr(module, "fetch_peer_info", info)
+    host = _host()
+
+    async def meet():
+        api_initializer.activitypub_manager.peer_policy.decide_inbound(host)
+        await asyncio.gather(*list(api_initializer.activitypub_manager._background_tasks))
+
+    asyncio.run(meet())
+    peer = api_initializer.database_handler.get_peer(host)
+    assert (peer["software"], peer["version"], peer["users"]) == ("pufferblow", "1.2.3", 7)
+
+
 def test_manager_refuses_blocked_actor_before_doing_anything():
     from pufferblow.api.federation.peers import FederationRefused
 
