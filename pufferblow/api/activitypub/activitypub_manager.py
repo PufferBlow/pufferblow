@@ -138,6 +138,29 @@ class ActivityPubManager:
         except Exception:
             return False
 
+    def canonical_base_url(self) -> str:
+        """The address this instance's ActivityPub identities and object ids are built on.
+
+        It comes from the instance itself (its server id, which is also the host in every ``name@host`` address),
+        never from a request: the Host header is whatever a caller sent, and what is built on it is stored and
+        shown to other servers. The scheme is https unless the host is a local one. Without a server row (a bare
+        test database) it falls back to the configured listen address.
+        """
+        try:
+            server_id = str(getattr(self.database_handler.get_server(), "server_id", "") or "").strip().lower()
+        except Exception:
+            server_id = ""
+        if server_id and "/" not in server_id and "@" not in server_id and " " not in server_id:
+            host = server_id.rsplit(":", 1)[0] if server_id.count(":") == 1 else server_id
+            local = host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or host.endswith(".local")
+            return f"{'http' if local else 'https'}://{server_id}"
+        return self.build_base_url()
+
+    def _actor_uri_of(self, user_id: str) -> str:
+        """A local person's actor address: the one on record, which conversation ids were built from, or the canonical one."""
+        row = self.database_handler.get_activitypub_actor_by_user_id(user_id=str(user_id))
+        return row.actor_uri if row is not None else self._actor_uri_for_user(str(user_id), self.canonical_base_url())
+
     def build_base_url(self, request_base_url: str | None = None) -> str:
         """
         Build the canonical base URL for ActivityPub object IDs.
@@ -1032,8 +1055,9 @@ class ActivityPubManager:
             return None
         return self._conversation_id(actors[0].actor_uri, actors[1].actor_uri)
 
-    def prepare_dm_call(self, caller_id: str, callee_id: str, base_url: str) -> None:
+    def prepare_dm_call(self, caller_id: str, callee_id: str) -> None:
         """Make sure both people of a call have an actor, so the call's line has a conversation to go into."""
+        base_url = self.canonical_base_url()
         for user_id in (caller_id, callee_id):
             self.ensure_local_actor(user_id=str(user_id), base_url=base_url)
 
@@ -1837,7 +1861,7 @@ class ActivityPubManager:
         for user_id in self.database_handler.local_user_ids():
             if user_id == str(viewer_user_id):
                 continue
-            if self._conversation_id(viewer_actor_uri, self._actor_uri_for_user(user_id, base_url)) == conversation_id:
+            if self._conversation_id(viewer_actor_uri, self._actor_uri_of(user_id)) == conversation_id:
                 self.database_handler.record_dm_members(conversation_id, [str(viewer_user_id), user_id])
                 return user_id
         return None
@@ -1886,7 +1910,7 @@ class ActivityPubManager:
         """
         import base64
 
-        viewer_actor_uri = self._actor_uri_for_user(viewer_user_id, base_url)
+        viewer_actor_uri = self._actor_uri_of(viewer_user_id)
         candidates = self.database_handler.list_user_dm_conversation_candidates(
             viewer_user_id
         )

@@ -97,6 +97,15 @@ The ASGI export lives at `pufferblow/server/app.py` and points at
 | `WebSocketsManager` | Real-time fanout by channel or user |
 | `VoiceSessionManager` | Issues SFU join tokens, tracks voice sessions, processes `media-sfu` callbacks |
 
+### The instance's own address
+
+ActivityPub actors, inboxes and object ids are stored and shown to other servers, so they are built on
+`ActivityPubManager.canonical_base_url()`: the instance's server id (the host in every `name@host` address), with
+`https` unless it is a local host, and the configured listen address only when there is no server row. They are never
+built from a request's `Host` header, which is whatever the caller sent. An actor that already exists keeps the
+address it was made with, and conversation ids are worked out from the actors on record, so a request arriving under
+another name still finds the same conversations.
+
 ## HTTP request pipeline
 
 Every request goes through, in order:

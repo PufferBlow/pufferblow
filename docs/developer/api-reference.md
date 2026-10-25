@@ -1827,7 +1827,7 @@ caller with no text and one attachment of type `call`, so it is stored, listed i
 the callee went offline before answering), `cancelled` (the caller hung up first) or `declined`. In the
 conversation list such a line shows as `Voice call · 1 hr 12 min`, `Missed call` or `Call declined`. The line is
 written when the call is next noticed (any call request, or a connection closing), so one that rang out can appear
-a moment after its 45 seconds. Both people get an ActivityPub actor when the call starts, the way sending a direct message gives them one; the line is written from those actors, never from the address a later request carried, and is skipped if either person has none.
+a moment after its 45 seconds. Both people get an ActivityPub actor when the call starts, and the line is written from those actors; it is skipped if either person has none.
 
 A call nobody answers within 45 seconds is dropped, and a person whose last realtime connection
 closes is taken off their calls (the other person gets `user.dm_call_ended`).

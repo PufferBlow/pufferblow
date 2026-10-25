@@ -6,7 +6,7 @@ validates auth and relays; it never touches media.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 
 from pufferblow.api.dependencies import ensure_user_not_timed_out, get_current_user
 from pufferblow.api.voice.dm_call_manager import CallBusy
@@ -37,7 +37,7 @@ def _was_rung(call: dict, recipient_id: str) -> bool:
 
 
 @router.post("/{callee_id}/invite", status_code=200)
-async def invite_dm_call(callee_id: str, request: DmCallInviteRequest, http: Request):
+async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
     """Ring another user for a 1:1 voice call."""
     user_id = get_current_user(request.auth_token)
     ensure_user_not_timed_out(user_id, "start voice calls")
@@ -62,10 +62,10 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest, http: Req
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Both people get an actor now, as a direct message would give them, so the call's line has a conversation.
+    # Both people get an actor now (on the instance's own address), so the call's line has a conversation.
     # The line itself is written later without a request (see ``_log_finished_calls``).
     try:
-        api_initializer.activitypub_manager.prepare_dm_call(user_id, callee_id, str(http.base_url).rstrip("/"))
+        api_initializer.activitypub_manager.prepare_dm_call(user_id, callee_id)
     except Exception:  # the call goes ahead; at worst it leaves no line
         pass
 

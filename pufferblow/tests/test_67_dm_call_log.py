@@ -42,8 +42,8 @@ def _act(client: TestClient, action: str, call_id: str, token: str):
     return client.post(f"{CALLS}/{call_id}/{action}", json={"auth_token": token})
 
 
-def _calls_in_chat(client: TestClient, token: str, peer: str) -> list[dict]:
-    loaded = client.get("/api/v1/dms/messages", params={"auth_token": token, "peer": peer, "page": 1, "messages_per_page": 50})
+def _calls_in_chat(client: TestClient, token: str, peer: str, headers: dict | None = None) -> list[dict]:
+    loaded = client.get("/api/v1/dms/messages", params={"auth_token": token, "peer": peer, "page": 1, "messages_per_page": 50}, headers=headers)
     assert loaded.status_code == 200, loaded.text
     return [a["call"] for m in loaded.json()["messages"] for a in m.get("attachments", []) if a.get("type") == "call"]
 
@@ -157,25 +157,50 @@ def test_the_conversation_list_words_a_call_line_and_the_line_names_both_people(
     assert (log["caller_name"], log["callee_name"]) == (alice_name, bob_name)
 
 
-def test_a_later_request_with_a_hostile_host_header_cannot_steer_where_a_call_line_goes(client: TestClient):
-    """The line is written from the people's existing actors, not from the Host of whichever request noticed the call."""
+def test_a_hostile_host_header_cannot_steer_any_actor_or_call_line(client: TestClient):
+    """Identities and lines are built on the instance's own address, whatever Host a request carried."""
     alice_id, alice_name, alice = _user("alice")
     bob_id, bob_name, bob = _user("bob")
-    carol_id, carol_name, carol = _user("carol")
-    call_id = _ring(client, alice, bob_id)  # a normal request: both get their actors from it
-    other_call = _ring(client, carol, alice_id)
-    before = {u: api_initializer.database_handler.get_activitypub_actor_by_user_id(user_id=u).actor_uri for u in (alice_id, bob_id, carol_id)}
-
     hostile = {"host": "evil.example"}
-    # Bob's rejection and alice's ending of her other call, both sent with a hostile Host, are what notice the calls.
+    call_id = client.post(f"{CALLS}/{bob_id}/invite", json={"auth_token": alice, "callee_id": bob_id}, headers=hostile).json()["call_id"]
     assert client.post(f"{CALLS}/{call_id}/reject", json={"auth_token": bob}, headers=hostile).status_code == 200
-    assert client.post(f"{CALLS}/{other_call}/reject", json={"auth_token": carol}, headers=hostile).status_code == 200
 
     db = api_initializer.database_handler
-    after = {u: db.get_activitypub_actor_by_user_id(user_id=u).actor_uri for u in (alice_id, bob_id, carol_id)}
-    assert after == before and not any("evil.example" in uri for uri in after.values())
-    assert len(_calls_in_chat(client, alice, bob_name)) == 1
-    assert len(_calls_in_chat(client, carol, alice_name)) == 1
+    uris = [db.get_activitypub_actor_by_user_id(user_id=u).actor_uri for u in (alice_id, bob_id)]
+    assert not any("evil.example" in uri for uri in uris)
+    assert all(uri.startswith(api_initializer.activitypub_manager.canonical_base_url()) for uri in uris)
+    assert len(_calls_in_chat(client, alice, bob_name, headers=hostile)) == 1  # and reading it back does not depend on the Host either
+
+
+def test_an_existing_actor_keeps_its_address_and_its_conversations_when_the_host_differs(client: TestClient):
+    """Conversation ids come from the actors on record, so a request from another address still finds them."""
+    alice_id, alice_name, alice = _user("alice")
+    bob_id, bob_name, bob = _user("bob")
+    sent = client.post("/api/v1/dms/send", json={"auth_token": alice, "peer": bob_name, "message": "hello", "attachments": []})
+    assert sent.status_code == 201, sent.text
+    listed = client.get("/api/v1/dms/conversations", params={"auth_token": bob}, headers={"host": "other-name.example"}).json()["conversations"]
+    assert [c["last_message_preview"] for c in listed] == ["hello"]
+
+
+def test_the_canonical_address_comes_from_the_instance_not_a_request():
+    manager = api_initializer.activitypub_manager
+    real = manager.database_handler.get_server
+
+    def server_with(server_id):
+        return lambda: types.SimpleNamespace(server_id=server_id)
+
+    try:
+        manager.database_handler.get_server = server_with("chat.example.com")
+        assert manager.canonical_base_url() == "https://chat.example.com"
+        manager.database_handler.get_server = server_with("localhost:7575")
+        assert manager.canonical_base_url() == "http://localhost:7575"
+        manager.database_handler.get_server = server_with("chat.example.com:8443")
+        assert manager.canonical_base_url() == "https://chat.example.com:8443"
+        for odd in ("", None, "evil.example/path", "a b", "x@y"):
+            manager.database_handler.get_server = server_with(odd)
+            assert manager.canonical_base_url() == manager.build_base_url()  # falls back to the configured address
+    finally:
+        manager.database_handler.get_server = real
 
 
 # ── how the manager decides the outcome ───────────────────────────

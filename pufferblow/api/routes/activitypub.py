@@ -36,8 +36,12 @@ router = APIRouter()
 
 
 def _request_base_url(request: Request) -> str:
-    """Request base url."""
-    return str(request.base_url).rstrip("/")
+    """The address to build ActivityPub identities and ids on: the instance's own, not the request's Host header.
+
+    ``request`` is kept so the many callers need not change; what a request says its host is does not matter here,
+    because what is built on it is stored and shown to other servers.
+    """
+    return api_initializer.activitypub_manager.canonical_base_url()
 
 
 @router.get("/.well-known/nodeinfo", status_code=200)

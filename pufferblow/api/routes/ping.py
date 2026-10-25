@@ -39,7 +39,7 @@ router = APIRouter(prefix="/api/v1/ping")
 
 def _request_base_url(request: Request) -> str:
     """Extract the canonical base URL from the incoming request."""
-    return str(request.base_url).rstrip("/")
+    return api_initializer.activitypub_manager.canonical_base_url()
 
 
 def _ping_manager():
