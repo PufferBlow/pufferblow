@@ -309,6 +309,11 @@ class WebSocketsManager:
         for call in calls.end_all_for_user(user_id):
             if call.get("delivered", True) or call["other_user_id"] != call["callee_id"]:
                 await self.broadcast_to_user(call["other_user_id"], {"type": "dm_call_ended", "call_id": call["call_id"]})
+        # Their calls are over, so each gets its line in the conversation (no request here: the actors say where).
+        logger_of_calls = getattr(self, "activitypub_manager", None)
+        if logger_of_calls is not None:
+            for finished in calls.drain_finished():
+                await logger_of_calls.log_dm_call(finished)
 
     async def broadcast_to_channel(self, channel_id: str, message: dict) -> None:
         """Send a channel-wide notice (e.g. a voice session change) as a v1 event.

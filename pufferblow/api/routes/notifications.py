@@ -23,6 +23,33 @@ NOTIFICATIONS_DEFAULT_LIMIT = 50
 NOTIFICATIONS_MAX_LIMIT = 100
 
 
+def _can_read(user_id: str, channel_id: str | None, cache: dict[str, bool]) -> bool:
+    """Whether the viewer may still read a channel (a mention in a channel they have since lost is not shown)."""
+    if not channel_id:
+        return False
+    if channel_id not in cache:
+        try:
+            check_channel_access(user_id, channel_id)
+            cache[channel_id] = True
+        except Exception:  # not found, private, or any other refusal: no preview
+            cache[channel_id] = False
+    return cache[channel_id]
+
+
+def _with_preview(notification: dict, user_id: str, access: dict[str, bool]) -> dict:
+    """The notification with a short look at the message it is about: its text and whether it carried files."""
+    message_id = notification.get("message_id")
+    if not message_id or not _can_read(user_id, notification.get("channel_id"), access):
+        return notification
+    try:
+        preview = api_initializer.messages_manager.reply_preview(message_id)
+    except Exception:
+        return notification
+    if preview.get("deleted"):
+        return {**notification, "preview": {"deleted": True}}
+    return {**notification, "preview": {"text": preview.get("content", ""), "has_attachments": bool(preview.get("has_attachments"))}}
+
+
 @router.get("/", status_code=200)
 async def list_notifications(
     auth_token: str,
@@ -44,6 +71,7 @@ async def list_notifications(
         )
 
     user_id = get_current_user(auth_token)
+    access_cache: dict[str, bool] = {}
 
     rows = api_initializer.notifications_manager.list_for_user(
         user_id=user_id,
@@ -56,7 +84,7 @@ async def list_notifications(
 
     return {
         "status_code": 200,
-        "notifications": [row.to_dict() for row in rows],
+        "notifications": [_with_preview(row.to_dict(), user_id, access_cache) for row in rows],
         "unread_count": unread_count,
     }
 

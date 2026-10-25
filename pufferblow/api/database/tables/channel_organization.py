@@ -19,12 +19,14 @@ class ChannelCategories(Base):
     name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     #: Order among categories, smallest first.
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: ``"text"`` or ``"voice"`` on the category that new channels of that type land in, so it survives being renamed.
+    default_for: Mapped[str | None] = mapped_column(String(8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     def to_dict(self) -> dict:
-        return {"category_id": self.category_id, "name": self.name, "position": self.position}
+        return {"category_id": self.category_id, "name": self.name, "position": self.position, "default_for": self.default_for}
 
 
 class PinnedMessages(Base):

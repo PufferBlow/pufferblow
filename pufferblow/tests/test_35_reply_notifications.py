@@ -69,3 +69,29 @@ def test_someone_already_getting_a_mention_is_not_pinged_twice(client: TestClien
         reply_to_message_id=original,
         already_notified={owner_id},
     ) == []
+
+
+def test_a_notification_carries_a_short_look_at_its_message(client: TestClient):
+    owner, other, channel = _setup(client, "preview")
+    original = _send(client, owner, channel, "anyone around?")
+    long_text = "yes! " + "word " * 100
+    _send(client, other, channel, long_text, reply_to=original)
+
+    [note] = _notifications(client, owner)
+
+    assert note["preview"]["text"].startswith("yes! word word")
+    assert 0 < len(note["preview"]["text"]) <= 200  # cut, not the whole message
+    assert note["preview"]["has_attachments"] is False
+
+
+def test_the_preview_is_left_out_once_the_viewer_can_no_longer_read_the_channel(client: TestClient, monkeypatch):
+    owner, other, channel = _setup(client, "revoked")
+    original = _send(client, owner, channel, "anyone around?")
+    _send(client, other, channel, "a private reply", reply_to=original)
+
+    def refuse(user_id, channel_id):
+        raise PermissionError("no access")
+
+    monkeypatch.setattr("pufferblow.api.routes.notifications.check_channel_access", refuse)
+    [note] = _notifications(client, owner)
+    assert "preview" not in note

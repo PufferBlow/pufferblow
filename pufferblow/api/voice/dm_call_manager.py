@@ -60,6 +60,9 @@ class DmCallManager:
 
         self._lock = threading.Lock()
         self._calls: dict[str, dict[str, Any]] = {}
+        #: Calls that have finished, each with how it ended, waiting for the route layer to put a line about
+        #: it in the conversation (see ``drain_finished``).
+        self._finished: list[dict[str, Any]] = []
         #: When each (caller, callee) pair last started a call, for the cooldown.
         self._recent: dict[tuple[str, str], datetime.datetime] = {}
 
@@ -75,12 +78,52 @@ class DmCallManager:
             return caller_id
         raise ValueError("User is not a participant in this call")
 
+    def _record_finished_locked(self, call: dict[str, Any], *, by: str | None, expired: bool = False) -> None:
+        """Note how a call ended, for its line in the conversation. Caller must hold the lock.
+
+        ``by`` is who ended it (None when nobody did: it rang out). A call that was picked up *completed* and
+        kept how long it lasted; one that was not is *missed* (rang out, or the callee went away), *cancelled*
+        (the caller hung up first) or *declined* (the callee did).
+        """
+        now = self._now()
+        if call["status"] == "accepted":
+            outcome = "completed"
+            started = call.get("accepted_at") or call["created_at"]
+            duration = max(0, int((now - started).total_seconds()))
+        else:
+            duration = 0
+            if expired or by is None:
+                outcome = "missed"
+            elif by == call["caller_id"]:
+                outcome = "cancelled"
+            elif by == call["callee_id"]:
+                outcome = "declined"
+            else:
+                outcome = "missed"
+        self._finished.append(
+            {
+                "call_id": call["call_id"],
+                "caller_id": call["caller_id"],
+                "callee_id": call["callee_id"],
+                "outcome": outcome,
+                "duration_seconds": duration,
+                "ended_at": now,
+            }
+        )
+
+    def drain_finished(self) -> list[dict[str, Any]]:
+        """The calls that finished since the last time, each once, oldest first."""
+        with self._lock:
+            done, self._finished = self._finished, []
+            return done
+
     def _expire_locked(self) -> list[dict[str, Any]]:
         """Drop calls nobody answered in time. Caller must hold the lock. Returns what was dropped."""
         now = self._now()
         limit = datetime.timedelta(seconds=self.ring_timeout_seconds)
         expired = [c for c in self._calls.values() if c["status"] == "ringing" and now - c["created_at"] > limit]
         for call in expired:
+            self._record_finished_locked(call, by=None, expired=True)
             del self._calls[call["call_id"]]
         return [dict(c) for c in expired]
 
@@ -105,6 +148,8 @@ class DmCallManager:
                 if str(user_id) in (call["caller_id"], call["callee_id"]):
                     snapshot = dict(call)
                     snapshot["other_user_id"] = self._other_participant(call, user_id)
+                    # Whoever went away ended it; a callee who left before picking up simply missed it.
+                    self._record_finished_locked(call, by=str(user_id))
                     del self._calls[call["call_id"]]
                     ended.append(snapshot)
         return ended
@@ -175,13 +220,14 @@ class DmCallManager:
             if call["status"] != "ringing":
                 raise ValueError(f"Call is not ringing (status={call['status']})")
             call["status"] = "accepted"
-            call["updated_at"] = self._now()
+            call["updated_at"] = call["accepted_at"] = self._now()
             return dict(call)
 
     def reject(self, *, call_id: str, user_id: str) -> dict[str, Any]:
         with self._lock:
             call = self._get_call_or_raise(call_id)
             other_user_id = self._other_participant(call, user_id)
+            self._record_finished_locked(call, by=str(user_id))
             call["status"] = "ended"
             call["updated_at"] = self._now()
             snapshot = dict(call)
@@ -193,6 +239,7 @@ class DmCallManager:
         with self._lock:
             call = self._get_call_or_raise(call_id)
             other_user_id = self._other_participant(call, user_id)
+            self._record_finished_locked(call, by=str(user_id))
             snapshot = dict(call)
             del self._calls[call_id]
             snapshot["other_user_id"] = other_user_id

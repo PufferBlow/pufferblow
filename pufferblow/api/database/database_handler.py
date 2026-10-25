@@ -3161,6 +3161,10 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         Returns:
             `None`.
         """
+        # A channel made without a category goes into the default one for its type ("Text Channels", "Voice
+        # Channels" unless an admin renamed or removed them), so it can be grouped and collapsed with the rest.
+        if not getattr(channel, "category_id", None):
+            channel.category_id = self.default_category_id(getattr(channel, "channel_type", None))
         with self.database_session() as session:
             session.add(channel)
 

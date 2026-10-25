@@ -6,7 +6,7 @@ validates auth and relays; it never touches media.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from pufferblow.api.dependencies import ensure_user_not_timed_out, get_current_user
 from pufferblow.api.voice.dm_call_manager import CallBusy
@@ -21,13 +21,22 @@ from pufferblow.core.bootstrap import api_initializer
 router = APIRouter(prefix="/api/v1/dm-calls")
 
 
+async def _log_finished_calls(request: Request) -> None:
+    """Put a line in each conversation about the calls that finished since the last look (rang out, ended)."""
+    base_url = str(request.base_url).rstrip("/")
+    # Remembered for the lines that have to be written where there is no request (a connection that dropped).
+    api_initializer.activitypub_manager.base_url_hint = base_url
+    for call in api_initializer.dm_call_manager.drain_finished():
+        await api_initializer.activitypub_manager.log_dm_call(call, base_url)
+
+
 def _was_rung(call: dict, recipient_id: str) -> bool:
     """Whether ``recipient_id`` ever heard of this call. A callee who was busy was never rung, so is told nothing."""
     return call.get("delivered", True) or str(recipient_id) != str(call.get("callee_id"))
 
 
 @router.post("/{callee_id}/invite", status_code=200)
-async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
+async def invite_dm_call(callee_id: str, request: DmCallInviteRequest, http: Request):
     """Ring another user for a 1:1 voice call."""
     user_id = get_current_user(request.auth_token)
     ensure_user_not_timed_out(user_id, "start voice calls")
@@ -42,6 +51,7 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
                 expired["callee_id"], {"type": "dm_call_ended", "call_id": expired["call_id"]}
             )
 
+    await _log_finished_calls(http)  # the ones swept just above rang out
     try:
         call = api_initializer.dm_call_manager.invite(
             caller_id=user_id, callee_id=callee_id
@@ -66,13 +76,14 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
 
 
 @router.post("/{call_id}/accept", status_code=200)
-async def accept_dm_call(call_id: str, request: DmCallActionRequest):
+async def accept_dm_call(call_id: str, request: DmCallActionRequest, http: Request):
     """Accept an incoming DM call, signaling the caller to begin offering."""
     user_id = get_current_user(request.auth_token)
 
     try:
         call = api_initializer.dm_call_manager.accept(call_id=call_id, user_id=user_id)
     except ValueError as exc:
+        await _log_finished_calls(http)  # it may have rung out just before this answer
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     await api_initializer.websockets_manager.broadcast_to_user(
@@ -89,14 +100,16 @@ async def accept_dm_call(call_id: str, request: DmCallActionRequest):
 
 
 @router.post("/{call_id}/reject", status_code=200)
-async def reject_dm_call(call_id: str, request: DmCallActionRequest):
+async def reject_dm_call(call_id: str, request: DmCallActionRequest, http: Request):
     """Reject (or cancel) a DM call before/while it's ringing."""
     user_id = get_current_user(request.auth_token)
 
     try:
         call = api_initializer.dm_call_manager.reject(call_id=call_id, user_id=user_id)
     except ValueError as exc:
+        await _log_finished_calls(http)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _log_finished_calls(http)
 
     if _was_rung(call, call["other_user_id"]):
         await api_initializer.websockets_manager.broadcast_to_user(
@@ -108,14 +121,16 @@ async def reject_dm_call(call_id: str, request: DmCallActionRequest):
 
 
 @router.post("/{call_id}/end", status_code=200)
-async def end_dm_call(call_id: str, request: DmCallActionRequest):
+async def end_dm_call(call_id: str, request: DmCallActionRequest, http: Request):
     """End an in-progress DM call."""
     user_id = get_current_user(request.auth_token)
 
     try:
         call = api_initializer.dm_call_manager.end(call_id=call_id, user_id=user_id)
     except ValueError as exc:
+        await _log_finished_calls(http)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _log_finished_calls(http)
 
     if _was_rung(call, call["other_user_id"]):
         await api_initializer.websockets_manager.broadcast_to_user(

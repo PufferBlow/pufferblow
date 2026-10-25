@@ -30,6 +30,12 @@ class DatabaseChannelOrgMixin:
             rows = session.execute(select(ChannelCategories).order_by(ChannelCategories.position, ChannelCategories.name)).scalars()
             return [row.to_dict() for row in rows]
 
+    def default_category_id(self, channel_type: str | None) -> str | None:
+        """The category a new channel of this type goes into when none is named, if the instance has one."""
+        kind = "voice" if channel_type == "voice" else "text"
+        with self.database_session() as session:
+            return session.execute(select(ChannelCategories.category_id).where(ChannelCategories.default_for == kind).limit(1)).scalar()
+
     def category_exists(self, category_id: str) -> bool:
         with self.database_session() as session:
             return session.get(ChannelCategories, category_id) is not None

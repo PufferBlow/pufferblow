@@ -53,6 +53,20 @@ class ActivityPubPeer:
     shared_inbox_uri: str | None
 
 
+def call_preview(call: dict) -> str:
+    """What the conversation list shows for a call's line: the same for both people, in a few words."""
+    outcome = call.get("outcome")
+    if outcome == "completed":
+        seconds = int(call.get("duration_seconds") or 0)
+        minutes, rest = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        length = f"{hours} hr {minutes} min" if hours else f"{minutes} min" if minutes else f"{rest} sec"
+        return f"Voice call · {length}"
+    if outcome == "declined":
+        return "Call declined"
+    return "Missed call"
+
+
 def _attachment_url(item) -> str | None:
     """Coerce an attachment item to its URL string.
 
@@ -94,6 +108,8 @@ class ActivityPubManager:
         self.ping_manager: "PingManager | None" = None
         # Who may federate with this instance (mode, blocked and pending hosts, per-peer switches).
         self._background_tasks: set[asyncio.Task] = set()
+        #: The public address of this instance as last seen on a request, for work done with no request in hand.
+        self.base_url_hint: str | None = None
         self.peer_policy = PeerPolicy(database_handler, is_local=lambda host: self._is_local_host(host), on_new_peer=self._learn_peer)
 
     def _learn_peer(self, host: str) -> None:
@@ -1006,6 +1022,65 @@ class ActivityPubManager:
         await self._http_post_json(url=delivery_target, payload=activity, signing_actor=local_actor)
         return {"activity_id": activity_uri, "delivery_target": delivery_target}
 
+    def _local_conversation_id(self, user_a: str, user_b: str, base_url: str | None) -> str | None:
+        """The conversation two local people share. Their existing actors give it; without them, ``base_url`` makes them."""
+        actors = [self.database_handler.get_activitypub_actor_by_user_id(user_id=str(u)) for u in (user_a, user_b)]
+        if all(actors):
+            return self._conversation_id(actors[0].actor_uri, actors[1].actor_uri)
+        if base_url:
+            return self._conversation_id(
+                self.ensure_local_actor(user_id=str(user_a), base_url=base_url).actor_uri,
+                self.ensure_local_actor(user_id=str(user_b), base_url=base_url).actor_uri,
+            )
+        return None
+
+    async def log_dm_call(self, call: dict, base_url: str | None = None) -> None:
+        """Keep a line in the conversation about a call that finished.
+
+        It is an ordinary direct message from the caller with no text and one attachment of type ``call``
+        (``outcome``: completed, missed, cancelled or declined; ``duration_seconds`` for a completed one), so it
+        is stored, listed in history, searched past and delivered live like any other, and each client words it
+        for whoever is reading. Best effort: the call is over either way, so a failure only costs the line.
+        """
+        try:
+            caller, callee = str(call["caller_id"]), str(call["callee_id"])
+            conversation_id = self._local_conversation_id(caller, callee, base_url or self.base_url_hint)
+            if conversation_id is None:
+                return
+            entry = {
+                "url": f"call:{call['call_id']}",
+                "type": "call",
+                "call": {
+                    "call_id": call["call_id"],
+                    "caller_id": caller,
+                    "callee_id": callee,
+                    "caller_name": self._sender_fields(caller)["username"],
+                    "callee_name": self._sender_fields(callee)["username"],
+                    "outcome": call["outcome"],
+                    "duration_seconds": int(call.get("duration_seconds") or 0),
+                },
+            }
+            row = self.messages_manager.send_direct_message(user_id=caller, conversation_id=conversation_id, message="", attachments=[entry])
+            self.database_handler.record_dm_members(conversation_id, [caller, callee])
+            frame = {
+                "type": "message",
+                "conversation_id": conversation_id,
+                "message_id": str(row.message_id),
+                "sender_user_id": caller,
+                "message": "",
+                "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+                "attachments": [entry],
+                "reply_to_message_id": None,
+                "reply_to": None,
+                "forwarded_from_message_id": None,
+                "federated": False,
+                **self._sender_fields(caller),
+            }
+            for user_id in (caller, callee):
+                await self.websockets_manager.broadcast_to_user(user_id=user_id, message=frame)
+        except Exception as exc:
+            logger.warning(f"Could not record a DM call in its conversation: {exc}")
+
     def _sender_fields(self, user_id: str) -> dict:
         """Author name and avatar for a live DM frame, so a client can draw the row."""
         try:
@@ -1891,6 +1966,12 @@ class ActivityPubManager:
                         err=str(exc),
                     )
                     preview = "[message unavailable]"
+
+            if not preview and last_msg is not None:
+                for attachment in last_msg.attachments or []:
+                    if isinstance(attachment, dict) and attachment.get("type") == "call":
+                        preview = call_preview(attachment.get("call") or {})
+                        break
 
             # Truncate the preview so the sidebar row stays one-line.
             # The dashboard CSS truncates with ellipsis too, but

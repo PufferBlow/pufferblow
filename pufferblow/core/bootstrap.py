@@ -264,6 +264,8 @@ class APIInitializer:
         )
         # Cross-wire so ActivityPubManager can dispatch Ping/PingAck to PingManager
         self.activitypub_manager.ping_manager = self.ping_manager
+        # A call that ends with its person gone is noted in their conversation, which needs the ActivityPub side.
+        self.websockets_manager.activitypub_manager = self.activitypub_manager
 
         self._wire_command_protocol()
 

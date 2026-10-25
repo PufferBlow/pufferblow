@@ -606,11 +606,17 @@ read them; changing them needs `edit_channels`.
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/channels/categories?auth_token=` | `{ categories: [{ category_id, name, position }] }`, in order |
+| `GET /api/v1/channels/categories?auth_token=` | `{ categories: [{ category_id, name, position, default_for }] }`, in order |
 | `POST /api/v1/channels/categories` `{auth_token, name}` | Add one at the end (201). `name` is trimmed, 1-64 characters, unique (409 if taken) |
 | `PUT /api/v1/channels/categories/{category_id}` `{auth_token, name}` | Rename (404 if unknown, 409 on a clash) |
 | `PUT /api/v1/channels/categories/order` `{auth_token, category_ids}` | Put these first, in this order; any not named keep their order after them |
 | `DELETE /api/v1/channels/categories/{category_id}?auth_token=` | Delete. Its channels stay, uncategorised |
+
+Every instance starts with two default categories, **Text Channels** and **Voice Channels** (`default_for` is `text`
+or `voice`; it is `null` on any other). A channel created without a `category_id` goes into the default one for its
+type, found by `default_for` and not by name, so an admin can rename them freely. Deleting a default category leaves
+its channels uncategorised and later channels of that type uncategorised too. The migration that adds them (0010)
+only creates them on an instance with no categories at all, and files the channels that had none by type.
 
 Categories are not announced over the socket: clients read them again when they
 open the channel list.
@@ -924,11 +930,16 @@ Returns:
       "message_id": "...",
       "is_read": false,
       "created_at": "...",
-      "data": { ... }
+      "data": { ... },
+      "preview": { "text": "hey @ada, can you review this?", "has_attachments": false }
     }
   ]
 }
 ```
+
+`preview` is a look at the message the notification is about: its text cut to 200 characters and whether it carried
+files (`{ "deleted": true }` when the message is gone). It is left out when the notification has no message, or when
+the viewer can no longer read its channel.
 
 ### `GET /api/v1/notifications/unread_count`
 
@@ -1801,6 +1812,22 @@ under `/api/v1/dm-calls`; every request carries `auth_token`.
 | `POST /api/v1/dm-calls/{call_id}/fallback` `{quality_profile?}` | Join a media-sfu session scoped to the call, when a direct connection fails |
 
 `ice_servers` is the STUN/TURN list to give `RTCPeerConnection`.
+
+**Call lines.** When a call finishes, the conversation gets a line about it: an ordinary direct message from the
+caller with no text and one attachment of type `call`, so it is stored, listed in history, and delivered live
+(`dm.message.created`) to both people like any message:
+
+```json
+{ "url": "call:<call_id>", "type": "call",
+  "call": { "call_id": "...", "caller_id": "...", "callee_id": "...", "caller_name": "ada", "callee_name": "grace",
+            "outcome": "completed", "duration_seconds": 4350 } }
+```
+
+`outcome` is `completed` (it was picked up; `duration_seconds` is how long it lasted), `missed` (it rang out, or
+the callee went offline before answering), `cancelled` (the caller hung up first) or `declined`. In the
+conversation list such a line shows as `Voice call · 1 hr 12 min`, `Missed call` or `Call declined`. The line is
+written when the call is next noticed (any call request, or a connection closing), so one that rang out can appear
+a moment after its 45 seconds.
 
 A call nobody answers within 45 seconds is dropped, and a person whose last realtime connection
 closes is taken off their calls (the other person gets `user.dm_call_ended`).
