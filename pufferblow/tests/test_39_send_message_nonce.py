@@ -75,7 +75,7 @@ def services(monkeypatch):
 
 def _send(text: str = "hello", nonce: str | None = "n1", channel_id: str = "c1") -> dict:
     form = SendMessageForm(auth_token="token", message=text, nonce=nonce)
-    return asyncio.run(routes.channel_send_message(channel_id, (form, [], [])))
+    return asyncio.run(routes.channel_send_message(channel_id, (form, [], [], [])))
 
 
 def test_a_retry_with_the_same_nonce_returns_the_first_message(services):

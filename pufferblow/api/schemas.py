@@ -340,6 +340,8 @@ class MessageAttachment(BaseModel):
     filename: str
     type: str
     size: int | None = None
+    #: What the file shows (alt text), when the sender wrote one.
+    description: str | None = None
 
 
 class ReactionSummary(BaseModel):

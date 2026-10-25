@@ -817,7 +817,13 @@ message=look at this
 sent_at=2026-05-21T08:30:00Z       // optional client-set ISO timestamp
 attachments=@photo.jpg              // repeated for multiple files
 attachments=@notes.pdf
+attachment_descriptions=["A sunset over the bay", ""]   // optional: one text per file, same order
 ```
+
+`attachment_descriptions` is a JSON list of strings, one for each file in `attachments` and in the same order
+(alt text: what the file shows). Each is trimmed and cut to 1000 characters; an entry that is empty or not a
+string, a missing list, or text that is not JSON simply means no description. A described file comes back with a
+`description` on its attachment object; one without has no such key.
 
 Returns the canonical message object including dedup-resolved
 attachment URLs, sender profile snapshot, and the message's

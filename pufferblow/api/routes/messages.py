@@ -38,7 +38,7 @@ from pufferblow.api.dependencies import (
     check_channel_access,
     get_current_user,
 )
-from pufferblow.api.services.attachments import store_attachments
+from pufferblow.api.services.attachments import clean_descriptions, store_attachments
 from pufferblow.core.bootstrap import api_initializer
 
 # Create router for message-related endpoints
@@ -62,6 +62,13 @@ async def parse_send_message_form(
         "", description="ISO timestamp when message was sent by client"
     ),
     attachments: list[UploadFile] = Form([], description="File attachments (optional)"),
+    attachment_descriptions: str = Form(
+        "",
+        description=(
+            "JSON list of strings, one per file in `attachments` and in the same order: what each file "
+            "shows (alt text). Empty strings and a missing list mean no description."
+        ),
+    ),
     sticker_ids: str = Form(
         "",
         description=(
@@ -81,7 +88,7 @@ async def parse_send_message_form(
             "with the same nonce returns the first result instead of posting again"
         ),
     ),
-) -> tuple[SendMessageForm, list[UploadFile], list[str]]:
+) -> tuple[SendMessageForm, list[UploadFile], list[str], list[str]]:
     """
     Parse multipart form data into a validated SendMessageForm.
 
@@ -101,7 +108,7 @@ async def parse_send_message_form(
     parsed_sticker_ids = [
         sid.strip() for sid in (sticker_ids or "").split(",") if sid.strip()
     ]
-    return form_data, attachments, parsed_sticker_ids
+    return form_data, attachments, parsed_sticker_ids, clean_descriptions(attachment_descriptions, len(attachments))
 
 
 @router.get("/load_messages", status_code=200, response_model=LoadMessagesResponse)
@@ -309,7 +316,7 @@ async def channel_search_messages(
 @router.post("/send_message")
 async def channel_send_message(
     channel_id: str,
-    form_data: tuple[SendMessageForm, list[UploadFile], list[str]] = Depends(
+    form_data: tuple[SendMessageForm, list[UploadFile], list[str], list[str]] = Depends(
         parse_send_message_form
     ),
 ):
@@ -327,7 +334,7 @@ async def channel_send_message(
         404 NOT FOUND: Channel not found or no access
     """
     # Unpack validated form data, file attachments, and sticker refs.
-    validated_form, attachments, sticker_ids = form_data
+    validated_form, attachments, sticker_ids, descriptions = form_data
     auth_token = validated_form.auth_token
     message = validated_form.message
 
@@ -352,7 +359,7 @@ async def channel_send_message(
 
     nonce = validated_form.nonce
     if nonce is None:
-        return await _send_channel_message(principal, channel_id, validated_form, attachments, sticker_ids)
+        return await _send_channel_message(principal, channel_id, validated_form, attachments, sticker_ids, descriptions)
 
     # Same guarantee as the socket's `message.create`: a client retrying after a lost response gets
     # the first result back instead of a second message. Keyed per channel so a nonce reused
@@ -367,7 +374,7 @@ async def channel_send_message(
             status_code=409, detail="This message is still being sent. Retry shortly."
         )
     try:
-        response = await _send_channel_message(principal, channel_id, validated_form, attachments, sticker_ids)
+        response = await _send_channel_message(principal, channel_id, validated_form, attachments, sticker_ids, descriptions)
     except BaseException:
         # Nothing was committed, or we cannot tell: free the key so a retry runs for real.
         store.release_idempotency_key(principal.id, operation, nonce)
@@ -382,6 +389,7 @@ async def _send_channel_message(
     validated_form: SendMessageForm,
     attachments: list[UploadFile],
     sticker_ids: list[str],
+    descriptions: list[str],
 ) -> dict:
     """Upload the attachments, then create the message and publish it."""
     message = validated_form.message
@@ -389,7 +397,7 @@ async def _send_channel_message(
     _, max_total_attachment_mb = _get_message_and_attachment_policy()
 
     attachment_objects = await store_attachments(
-        principal, channel_id, attachments, max_total_mb=max_total_attachment_mb
+        principal, channel_id, attachments, max_total_mb=max_total_attachment_mb, descriptions=descriptions
     )
 
     # Persisting, sticker resolution, mention notifications and the real-time event all live in

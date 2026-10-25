@@ -24,7 +24,31 @@ def measure_upload_size(file: UploadFile) -> int:
     return size
 
 
-async def store_attachments(principal, channel_id: str, files: list[UploadFile], *, max_total_mb: int) -> list[dict]:
+MAX_DESCRIPTION_LENGTH = 1000
+
+
+def clean_descriptions(raw: str | list | None, count: int) -> list[str]:
+    """The per-file descriptions a client sent, as one string per file (empty when none).
+
+    ``raw`` is a JSON list of strings in the same order as the files. Anything else (not JSON, not a list, a
+    non-string entry) is ignored rather than failing the send, and each text is trimmed and cut to
+    ``MAX_DESCRIPTION_LENGTH``.
+    """
+    import json
+
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw.strip() else []
+        except ValueError:
+            raw = []
+    items = raw if isinstance(raw, list) else []
+    cleaned = [item.strip()[:MAX_DESCRIPTION_LENGTH] if isinstance(item, str) else "" for item in items]
+    return (cleaned + [""] * count)[:count]
+
+
+async def store_attachments(
+    principal, channel_id: str, files: list[UploadFile], *, max_total_mb: int, descriptions: list[str] | None = None
+) -> list[dict]:
     """Store each file and return the attachment objects a message carries.
 
     Raises ``HTTPException`` (400 for a refused file or an oversized set, 503 when the instance has no storage,
@@ -32,7 +56,10 @@ async def store_attachments(principal, channel_id: str, files: list[UploadFile],
     """
     from pufferblow.core.bootstrap import api_initializer
 
-    files = [file for file in files if file.filename]
+    described = list(descriptions or []) + [""] * len(files)
+    paired = [(file, described[i]) for i, file in enumerate(files) if file.filename]
+    files = [file for file, _ in paired]
+    texts = [text for _, text in paired]
     if not files:
         return []
     if api_initializer.storage_manager is None:
@@ -46,7 +73,7 @@ async def store_attachments(principal, channel_id: str, files: list[UploadFile],
         )
 
     attachment_objects: list[dict] = []
-    for file in files:
+    for file, description in zip(files, texts):
         try:
             storage_url, is_duplicate, filename, mime_type, file_size = await api_initializer.storage_manager.upload_file(
                 file=file,
@@ -61,9 +88,10 @@ async def store_attachments(principal, channel_id: str, files: list[UploadFile],
                 from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 
                 lqip_url = _resolve_storage_lqip_url(storage_url, api_initializer.database_handler)
-            attachment_objects.append(
-                {"url": storage_url, "lqip_url": lqip_url, "filename": filename, "type": mime_type, "size": file_size}
-            )
+            attachment = {"url": storage_url, "lqip_url": lqip_url, "filename": filename, "type": mime_type, "size": file_size}
+            if description:
+                attachment["description"] = description  # what the file shows, for people who cannot see it
+            attachment_objects.append(attachment)
 
             try:
                 api_initializer.database_handler.create_activity(
