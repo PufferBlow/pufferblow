@@ -1,7 +1,7 @@
 // Renders the default avatars (512x512) and banners (1500x500) from SVG to PNG with Electron's
 // Chromium, for clients that cannot draw SVG. Transparent backgrounds are kept.
 //
-//   cd client-new && npx electron ../pufferblow/scripts/assets/render_default_art_pngs.cjs
+//   cd client && npx electron ../pufferblow/scripts/assets/render_default_art_pngs.cjs
 //
 // (unset ELECTRON_RUN_AS_NODE if your shell sets it)
 const { app, BrowserWindow } = require("electron");

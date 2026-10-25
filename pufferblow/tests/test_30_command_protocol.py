@@ -169,9 +169,9 @@ def test_every_fixture_matches_its_schema(path: Path):
 
 
 def test_client_copy_of_fixtures_is_identical_when_present():
-    client_copy = PROJECT_ROOT.parent / "client-new" / "src" / "features" / "realtime" / "__fixtures__"
+    client_copy = PROJECT_ROOT.parent / "client" / "src" / "features" / "realtime" / "__fixtures__"
     if not client_copy.exists():
-        pytest.skip("client-new is not checked out next to the backend")
+        pytest.skip("client is not checked out next to the backend")
     assert sorted(p.name for p in client_copy.glob("*.json")) == [p.name for p in FIXTURE_FILES]
     for path in FIXTURE_FILES:
         assert (client_copy / path.name).read_text(encoding="utf-8") == path.read_text(encoding="utf-8"), path.name
