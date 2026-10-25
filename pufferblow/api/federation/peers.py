@@ -139,6 +139,8 @@ class PeerPolicy:
         self._is_local = is_local or (lambda host: False)
         #: Called with a host the first time it is seen, so the owner can ask it what it is (nodeinfo).
         self._on_new_peer = on_new_peer
+        #: Hosts already known without nodeinfo that we have asked once since start (so a dead host is not retried per request).
+        self._asked: set[str] = set()
 
     @property
     def available(self) -> bool:
@@ -166,6 +168,7 @@ class PeerPolicy:
             return Decision(False, "pending")
         if peer["status"] == "blocked":
             return Decision(False, "blocked")
+        self._backfill(host, peer)
         if peer["status"] == "pending":
             if mode == "open":
                 self.database.set_peer_status(host, "federating")  # open means open: no approval to wait for
@@ -192,11 +195,19 @@ class PeerPolicy:
             return Decision(False, "not_approved")
         if peer["status"] == "blocked":
             return Decision(False, "blocked")
+        self._backfill(host, peer)
         if peer["status"] == "pending" and mode != "open":
             return Decision(False, "not_approved")
         return ALLOW
 
+    def _backfill(self, host: str, peer: dict) -> None:
+        """A host that became a peer before nodeinfo was read automatically: ask it once per run."""
+        if peer.get("software") or host in self._asked:
+            return
+        self._new_peer(host)
+
     def _new_peer(self, host: str) -> None:
+        self._asked.add(host)
         if self._on_new_peer is not None:
             try:
                 self._on_new_peer(host)

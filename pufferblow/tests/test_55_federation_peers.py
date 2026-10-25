@@ -160,6 +160,15 @@ def test_a_host_seen_for_the_first_time_is_reported_once():
     assert seen == [host]
 
 
+def test_a_peer_known_before_nodeinfo_was_automatic_is_asked_once():
+    db, host, seen = api_initializer.database_handler, _host(), []
+    db.upsert_peer(host, "federating")  # already a peer, no software on record
+    policy = PeerPolicy(db, on_new_peer=seen.append)
+    policy.decide_inbound(host)
+    policy.decide_inbound(host)
+    assert seen == [host]
+
+
 def test_a_failing_new_peer_hook_does_not_change_the_decision():
     def boom(_host):
         raise RuntimeError("nodeinfo exploded")
