@@ -822,8 +822,12 @@ attachment_descriptions=["A sunset over the bay", ""]   // optional: one text pe
 
 `attachment_descriptions` is a JSON list of strings, one for each file in `attachments` and in the same order
 (alt text: what the file shows). Each is trimmed and cut to 1000 characters; an entry that is empty or not a
-string, a missing list, or text that is not JSON simply means no description. A described file comes back with a
-`description` on its attachment object; one without has no such key.
+string, a missing list, or text that is not JSON simply means no description. Only images and video are described:
+a description sent for any other file is dropped. A described file comes back with a `description` on its
+attachment object; one without has no such key.
+
+An attachment keeps the file name it was sent with, even when the instance already holds identical bytes from an
+earlier upload (the two share a `url`, not a name).
 
 Returns the canonical message object including dedup-resolved
 attachment URLs, sender profile snapshot, and the message's

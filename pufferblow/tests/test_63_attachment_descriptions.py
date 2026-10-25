@@ -10,6 +10,19 @@ from pufferblow.api.services.attachments import MAX_DESCRIPTION_LENGTH, clean_de
 from pufferblow.core.bootstrap import api_initializer
 
 
+def _png() -> bytes:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 40, 40)).save(out, format="PNG")
+    return out.getvalue()
+
+
+_PNG = _png()
+
+
 def _owner_and_channel(client: TestClient, name: str) -> tuple[str, str]:
     user = api_initializer.user_manager.sign_up(username=f"{name}_owner", password="owner-password", is_owner=True)
     token = api_initializer.auth_token_manager.issue_session_tokens(user_id=str(user.user_id), origin_server=user.origin_server)["access_token"]
@@ -32,18 +45,18 @@ def test_send_message_keeps_each_files_description(client: TestClient):
     token, channel_id = _owner_and_channel(client, "described")
     sent = client.post(
         f"/api/v1/channels/{channel_id}/send_message",
-        data={"auth_token": token, "message": "two files", "attachment_descriptions": json.dumps(["The release notes", ""])},
-        files=[("attachments", ("notes.txt", b"hello", "text/plain")), ("attachments", ("more.txt", b"world!", "text/plain"))],
+        data={"auth_token": token, "message": "two files", "attachment_descriptions": json.dumps(["A red square", ""])},
+        files=[("attachments", ("dot.png", _PNG, "image/png")), ("attachments", ("more.txt", b"world!", "text/plain"))],
     )
     assert sent.status_code == 200, sent.text
     first, second = sent.json()["attachments"]
-    assert first["description"] == "The release notes"
+    assert first["description"] == "A red square"
     assert "description" not in second
 
     loaded = client.get(f"/api/v1/channels/{channel_id}/load_messages", params={"auth_token": token})
     assert loaded.status_code == 200, loaded.text
     stored = [a for m in loaded.json()["messages"] for a in m.get("attachments", [])]
-    assert [a.get("description") for a in stored if a["filename"].endswith("notes.txt")] == ["The release notes"]
+    assert [a.get("description") for a in stored if a["filename"].endswith("dot.png")] == ["A red square"]
 
 
 def test_a_send_without_descriptions_is_unchanged(client: TestClient):
@@ -55,3 +68,30 @@ def test_a_send_without_descriptions_is_unchanged(client: TestClient):
     )
     assert sent.status_code == 200, sent.text
     assert "description" not in sent.json()["attachments"][0]
+
+
+def test_only_pictures_and_video_keep_a_description(client: TestClient):
+    token, channel_id = _owner_and_channel(client, "mediaonly")
+    sent = client.post(
+        f"/api/v1/channels/{channel_id}/send_message",
+        data={"auth_token": token, "message": "", "attachment_descriptions": json.dumps(["not kept", "kept"])},
+        files=[("attachments", ("notes.txt", b"hello", "text/plain")), ("attachments", ("dot.png", _PNG, "image/png"))],
+    )
+    assert sent.status_code == 200, sent.text
+    text, picture = sent.json()["attachments"]
+    assert "description" not in text
+    assert picture["description"] == "kept"
+
+
+def test_the_same_file_sent_twice_keeps_each_sends_own_name(client: TestClient):
+    """The instance stores identical bytes once, but a spoiler marker on one send must not leak onto the other."""
+    token, channel_id = _owner_and_channel(client, "twins")
+    sent = client.post(
+        f"/api/v1/channels/{channel_id}/send_message",
+        data={"auth_token": token, "message": ""},
+        files=[("attachments", ("SPOILER_image.png", _PNG, "image/png")), ("attachments", ("image.png", _PNG, "image/png"))],
+    )
+    assert sent.status_code == 200, sent.text
+    first, second = sent.json()["attachments"]
+    assert first["url"] == second["url"]
+    assert [first["filename"], second["filename"]] == ["SPOILER_image.png", "image.png"]

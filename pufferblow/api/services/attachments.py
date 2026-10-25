@@ -25,6 +25,8 @@ def measure_upload_size(file: UploadFile) -> int:
 
 
 MAX_DESCRIPTION_LENGTH = 1000
+#: Only pictures and video are described; other files are told apart by their name and type.
+DESCRIBABLE_TYPES = ("image/", "video/")
 
 
 def clean_descriptions(raw: str | list | None, count: int) -> list[str]:
@@ -88,8 +90,12 @@ async def store_attachments(
                 from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 
                 lqip_url = _resolve_storage_lqip_url(storage_url, api_initializer.database_handler)
+            # A file the instance already holds comes back under the name of whoever sent it first. The name belongs
+            # to this message (it carries the SPOILER_ marker), so a repeat keeps the name it was sent with.
+            if is_duplicate:
+                filename = file.filename
             attachment = {"url": storage_url, "lqip_url": lqip_url, "filename": filename, "type": mime_type, "size": file_size}
-            if description:
+            if description and mime_type.startswith(DESCRIBABLE_TYPES):
                 attachment["description"] = description  # what the file shows, for people who cannot see it
             attachment_objects.append(attachment)
 
