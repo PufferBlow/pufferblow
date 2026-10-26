@@ -170,6 +170,24 @@ def test_dm_fallback_session_uses_instance_selection_and_is_shared(db, vsm):
         assert vs.sfu_instance_id == "sfu-b"
 
 
+def test_a_session_reports_when_it_started_and_a_new_one_starts_fresh(db, vsm):
+    _register(vsm, "sfu-a", "default", "wss://sfu-a.example.com/rtc/v1/ws", current_peers=0)
+    first, second = _new_user_id(), _new_user_id()
+
+    one = vsm.create_or_join_dm_fallback_session(user_id=first, call_id="call-timer")
+    started = vsm.get_session_status(session_id=one["session_id"])["started_at"]
+    assert started is not None
+
+    # A second person joining does not move the start: it is the channel's timer, not theirs.
+    vsm.create_or_join_dm_fallback_session(user_id=second, call_id="call-timer")
+    assert vsm.get_session_status(session_id=one["session_id"])["started_at"] == started
+
+    # Everyone leaving ends the session; the next join is a new one.
+    vsm.leave_session(user_id=first, session_id=one["session_id"])
+    vsm.leave_session(user_id=second, session_id=one["session_id"])
+    assert vsm.get_active_session_for_channel("call-timer") is None
+
+
 def test_dm_fallback_session_migrates_off_a_draining_instance(db, vsm):
     _register(vsm, "sfu-a", "default", "wss://sfu-a.example.com/rtc/v1/ws", current_peers=50)
     _register(vsm, "sfu-b", "default", "wss://sfu-b.example.com/rtc/v1/ws", current_peers=10)

@@ -56,6 +56,7 @@ async def get_voice_channel_participants(channel_id: str, auth_token: str):
             "participants": [],
             "participant_count": 0,
             "session_id": None,
+            "started_at": None,
         }
 
     return {
@@ -64,6 +65,7 @@ async def get_voice_channel_participants(channel_id: str, auth_token: str):
         "participants": [p for p in payload.get("participants", []) if p.get("is_connected")],
         "participant_count": payload.get("participant_count", 0),
         "session_id": payload.get("session_id"),
+        "started_at": payload.get("started_at"),
     }
 
 

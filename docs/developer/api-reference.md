@@ -1761,6 +1761,11 @@ List who's currently in the voice session for a channel.
 GET /api/v2/voice/channels/{channel_id}/participants?auth_token=<token>
 ```
 
+The response also carries `started_at`: when the current session began (the
+first person joining an empty channel), or `null` when nobody is in the
+channel. A session ends when the last person leaves, so the value resets by
+itself; clients use it for one shared "in call for" timer.
+
 ### `POST /api/v2/voice/sessions/{session_id}/leave`
 
 Leave the voice session.

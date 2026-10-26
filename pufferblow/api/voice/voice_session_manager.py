@@ -759,6 +759,9 @@ class VoiceSessionManager:
                 "session_id": session_row.session_id,
                 "channel_id": session_row.channel_id,
                 "is_active": session_row.is_active,
+                # A session ends when its last participant leaves and the next join starts a new one, so this is
+                # when the channel became busy; clients show it as a shared "in call for" timer.
+                "started_at": session_row.created_at.isoformat() if session_row.created_at else None,
                 "quality_profile": session_row.quality_profile,
                 "backend": session_row.backend,
                 "signaling_url": signaling_url,
