@@ -761,13 +761,22 @@ class VoiceSessionManager:
                 "is_active": session_row.is_active,
                 # A session ends when its last participant leaves and the next join starts a new one, so this is
                 # when the channel became busy; clients show it as a shared "in call for" timer.
-                "started_at": session_row.created_at.isoformat() if session_row.created_at else None,
+                "started_at": self._utc_iso(session_row.created_at),
                 "quality_profile": session_row.quality_profile,
                 "backend": session_row.backend,
                 "signaling_url": signaling_url,
                 "participants": participants,
                 "participant_count": participant_count,
             }
+
+    @staticmethod
+    def _utc_iso(value: datetime.datetime | None) -> str | None:
+        """ISO time that always says it is UTC. SQLite hands back naive datetimes, which a client would read as local time."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=datetime.timezone.utc)
+        return value.isoformat()
 
     def get_active_session_for_channel(self, channel_id: str) -> dict[str, Any] | None:
         """Return active session status by channel id."""

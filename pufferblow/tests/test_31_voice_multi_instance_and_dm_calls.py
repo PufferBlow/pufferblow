@@ -177,6 +177,7 @@ def test_a_session_reports_when_it_started_and_a_new_one_starts_fresh(db, vsm):
     one = vsm.create_or_join_dm_fallback_session(user_id=first, call_id="call-timer")
     started = vsm.get_session_status(session_id=one["session_id"])["started_at"]
     assert started is not None
+    assert started.endswith("+00:00")  # a client must not mistake it for local time
 
     # A second person joining does not move the start: it is the channel's timer, not theirs.
     vsm.create_or_join_dm_fallback_session(user_id=second, call_id="call-timer")
