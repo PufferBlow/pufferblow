@@ -23,7 +23,7 @@ fastapi = ">=0.115.12,<1"
 # is now implemented inline against the SQLAlchemy engine in
 # `pufferblow/api/database/database.py`.
 # `tomli` removed — replaced by stdlib `tomllib`.
-rich = "^14.2.0"
+rich = ">=14.2,<16.0"
 pycryptodome = "^3.23.0"
 loguru = "^0.7.3"
 pytz = ">=2025.2,<2027.0"
