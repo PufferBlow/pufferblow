@@ -16,7 +16,7 @@ from pufferblow.api.utils.role_badges import (
     check_badge_image,
     effective_badge,
 )
-from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, IMMUTABLE_ROLE_IDS
+from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, IMMUTABLE_ROLE_IDS, RESERVED_ROLE_IDS
 from pufferblow.api.routes.system_routes.shared import (
     parse_upload_auth_form,
     log_activity,
@@ -126,7 +126,7 @@ async def create_role_route(request: RoleCreateRequest):
         )
 
     role_id = _slugify_role_name(role_name)
-    if role_id in IMMUTABLE_ROLE_IDS:
+    if role_id in RESERVED_ROLE_IDS:
         raise HTTPException(
             status_code=409,
             detail="That role name maps to a reserved system role identifier.",

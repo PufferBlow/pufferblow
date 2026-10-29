@@ -3,6 +3,7 @@
 from pufferblow.api.roles.constants import (
     DEFAULT_ROLE_ID,
     IMMUTABLE_ROLE_IDS,
+    RESERVED_ROLE_IDS,
     OWNER_ROLE_ID,
     SYSTEM_ROLE_IDS,
 )
@@ -10,6 +11,7 @@ from pufferblow.api.roles.constants import (
 __all__ = [
     "DEFAULT_ROLE_ID",
     "IMMUTABLE_ROLE_IDS",
+    "RESERVED_ROLE_IDS",
     "OWNER_ROLE_ID",
     "SYSTEM_ROLE_IDS",
 ]

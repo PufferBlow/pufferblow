@@ -482,9 +482,9 @@ def test_the_admin_role_is_retired_and_its_holders_become_moderators():
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
-        conn.execute(sa.text("CREATE TABLE roles (role_id TEXT PRIMARY KEY)"))
+        conn.execute(sa.text("CREATE TABLE roles (role_id TEXT PRIMARY KEY, role_name TEXT)"))
         conn.execute(sa.text("CREATE TABLE users (user_id TEXT PRIMARY KEY, roles_ids TEXT)"))
-        conn.execute(sa.text("INSERT INTO roles VALUES ('owner'), ('admin'), ('moderator'), ('user')"))
+        conn.execute(sa.text("INSERT INTO roles VALUES ('owner', 'Server Owner'), ('admin', 'Administrator'), ('moderator', 'Moderator'), ('user', 'Regular User')"))
         conn.execute(sa.text("INSERT INTO users VALUES ('a', '[\"admin\"]'), ('b', '[\"admin\", \"moderator\"]'), ('c', '[\"user\"]'), ('d', '[\"owner\"]')"))
         retire_admin.apply(conn)
         retire_admin.apply(conn)  # safe to run again
@@ -493,3 +493,25 @@ def test_the_admin_role_is_retired_and_its_holders_become_moderators():
         held = {uid: json.loads(r) for uid, r in conn.execute(sa.text("SELECT user_id, roles_ids FROM users"))}
         assert held == {"a": ["moderator"], "b": ["moderator"], "c": ["user"], "d": ["owner"]}
         assert "admin" not in {r[0] for r in conn.execute(sa.text("SELECT role_id FROM roles"))}
+
+
+def test_a_custom_role_with_the_retired_id_is_left_alone():
+    import sqlalchemy as sa
+
+    from pufferblow.api.database import retire_admin
+
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE roles (role_id TEXT PRIMARY KEY, role_name TEXT)"))
+        conn.execute(sa.text("CREATE TABLE users (user_id TEXT PRIMARY KEY, roles_ids TEXT)"))
+        conn.execute(sa.text("INSERT INTO roles VALUES ('admin', 'Something Custom')"))
+        conn.execute(sa.text("INSERT INTO users VALUES ('a', '[\"admin\"]')"))
+        retire_admin.apply(conn)
+        assert conn.execute(sa.text("SELECT roles_ids FROM users")).scalar() == '["admin"]'
+        assert conn.execute(sa.text("SELECT COUNT(*) FROM roles")).scalar() == 1
+
+
+def test_no_custom_role_can_take_the_retired_admin_id(client: TestClient):
+    _, owner = _staff()
+    reply = client.post("/api/v1/system/roles", json={"auth_token": owner, "role_name": "Admin", "privileges_ids": ["send_messages"]})
+    assert reply.status_code == 409, reply.text

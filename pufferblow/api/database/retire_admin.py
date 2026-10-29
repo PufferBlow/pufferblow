@@ -16,6 +16,12 @@ def apply(bind) -> None:
     if "roles" not in tables:
         return
 
+    # Only the built-in role is retired. ``admin`` can no longer be created as a custom role, but a row that is not the
+    # seeded one (named "Administrator") is left exactly as it is, with its holders.
+    built_in = bind.execute(sa.text("SELECT 1 FROM roles WHERE role_id = 'admin' AND role_name = 'Administrator'")).first()
+    if built_in is None:
+        return
+
     if "users" in tables:
         rows = bind.execute(sa.text("SELECT user_id, roles_ids FROM users")).all()
         for user_id, roles in rows:
