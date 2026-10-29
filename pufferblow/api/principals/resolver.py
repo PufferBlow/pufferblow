@@ -32,6 +32,10 @@ class UserPrincipalResolver:
         if not self._users.check_user(user_id=user_id, auth_token=credential):
             raise ApiError(ErrorCode.AUTH_INVALID_TOKEN)
 
+        refused = self._users.membership_error(user_id)
+        if refused:
+            raise ApiError(refused)
+
         if self._users.get_user_moderation_state(user_id=user_id).get("is_banned"):
             raise ApiError(ErrorCode.AUTH_USER_BANNED, details={"user_id": user_id})
 

@@ -1781,6 +1781,20 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             session.execute(stmt)
             session.commit()
 
+    def delete_user_refresh_tokens(self, user_id: str) -> None:
+        """Revoke every refresh token a user has (they stopped being a member, say)."""
+        database_uri = str(self.database_engine.url)
+        if database_uri.startswith("sqlite://"):
+            return
+
+        with self.database_session() as session:
+            stmt = delete(AuthTokens).where(
+                AuthTokens.user_id == uuid.UUID(str(user_id)),
+                AuthTokens.auth_token.like("refresh:%"),
+            )
+            session.execute(stmt)
+            session.commit()
+
     def update_auth_token(
         self, user_id: str, new_auth_token: str, new_auth_token_expire_time: str
     ) -> None:

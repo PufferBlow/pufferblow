@@ -86,6 +86,8 @@ class ServerJoinRequests(Base):
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending", index=True)
     decided_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: When an approval was used to let someone in. An approval is good once: leaving and coming back asks again.
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
     def to_dict(self) -> dict:
@@ -99,6 +101,7 @@ class ServerJoinRequests(Base):
             "status": self.status,
             "decided_by": self.decided_by,
             "decided_at": self.decided_at.isoformat() if self.decided_at else None,
+            "consumed": self.consumed_at is not None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

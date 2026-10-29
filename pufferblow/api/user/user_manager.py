@@ -528,6 +528,21 @@ class UserManager:
 
         return user_data
 
+    def membership_error(self, user_id: str) -> str | None:
+        """The error code to refuse this person with when they are not an active member (waiting, declined, or left), else None.
+
+        One place for every way in (routes, realtime, refreshing a session) to ask, so none of them is a way round it.
+        """
+        from pufferblow.api.errors import ErrorCode
+
+        user = self.database_handler.get_user(user_id=str(user_id))
+        status = (getattr(user, "membership_status", None) or "active") if user is not None else "active"
+        if status == "pending":
+            return ErrorCode.AUTH_MEMBERSHIP_PENDING
+        if status in ("denied", "remote"):
+            return ErrorCode.AUTH_MEMBERSHIP_DENIED
+        return None
+
     def check_user(
         self,
         user_id: str | None = None,

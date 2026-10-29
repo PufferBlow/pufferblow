@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, exceptions, responses
 
 from pufferblow.api.errors import ApiError, ErrorCode
+from pufferblow.api.models.config_model import instance_id_of
 from pufferblow.api.schemas import RefreshTokenRequest
 from pufferblow.core.bootstrap import api_initializer
 
@@ -62,10 +63,16 @@ async def refresh_auth_token(request: RefreshTokenRequest):
             message=f"Refresh token valid but user_id={user_id} no longer exists.",
         )
 
+    refused = api_initializer.user_manager.membership_error(user_id)
+    if refused:
+        raise ApiError(refused)
+
     api_initializer.auth_token_manager.revoke_refresh_token(request.refresh_token)
+    # The token names the server it is for. Someone who joined from another server has their home as `origin_server`,
+    # but a session here is a session for this server.
     session_tokens = api_initializer.auth_token_manager.issue_session_tokens(
         user_id=user_id,
-        origin_server=user.origin_server,
+        origin_server=instance_id_of(api_initializer.config),
     )
 
     return {

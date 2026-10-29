@@ -1,0 +1,96 @@
+# Three Pufferblow instances for trying things out together. Not for production: every password is "simpass123".
+#
+#   docker compose -f docker/sim/docker-compose.yml -p pbsim up -d --build
+#
+# Each one is reached as host.docker.internal:<port> by the other containers AND by this machine (Docker Desktop adds
+# the name to the hosts file), so a person's name is the same for everyone: alice@host.docker.internal:7577.
+#   pb1  7576  "Open Harbor"      anyone can join
+#   pb2  7577  "Members Only"     needs an invitation code
+#   pb3  7578  "By Approval"      people ask, the owner or a moderator decides
+x-server: &server
+  build: {context: ../.., dockerfile: Dockerfile}
+  restart: unless-stopped
+  command: ["sh", "-c", "python docker/sim/bootstrap.py && exec pufferblow serve"]
+  extra_hosts: ["host.docker.internal:host-gateway"]
+
+x-server-env: &server-env
+  PUFFERBLOW_API_HOST: 0.0.0.0
+  PUFFERBLOW_API_PORT: "7575"
+  PUFFERBLOW_WORKERS: "1"
+  PUFFERBLOW_ALLOW_PRIVATE_FEDERATION: "1"
+  PUFFERBLOW_PUBLIC_SCHEME: http
+
+services:
+  pb1-db:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: pufferblow, POSTGRES_PASSWORD: pufferblow, POSTGRES_DB: pufferblow}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U pufferblow"], interval: 5s, timeout: 3s, retries: 20}
+    volumes: ["pb1-pg:/var/lib/postgresql/data"]
+
+  pb1-cache:
+    image: memcached:1.6-alpine
+
+  pb1:
+    <<: *server
+    environment:
+      <<: *server-env
+      PUFFERBLOW_DATABASE_URI: postgresql+psycopg2://pufferblow:pufferblow@pb1-db:5432/pufferblow
+      PUFFERBLOW_MEMCACHE_HOST: pb1-cache
+      SIM_SERVER_NAME: "Open Harbor"
+      SIM_JOIN_MODE: "open"
+    ports: ["7576:7575"]
+    volumes: ["./config.pb1.toml:/root/.pufferblow/config.toml:ro"]
+    depends_on:
+      pb1-db: {condition: service_healthy}
+      pb1-cache: {condition: service_started}
+
+  pb2-db:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: pufferblow, POSTGRES_PASSWORD: pufferblow, POSTGRES_DB: pufferblow}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U pufferblow"], interval: 5s, timeout: 3s, retries: 20}
+    volumes: ["pb2-pg:/var/lib/postgresql/data"]
+
+  pb2-cache:
+    image: memcached:1.6-alpine
+
+  pb2:
+    <<: *server
+    environment:
+      <<: *server-env
+      PUFFERBLOW_DATABASE_URI: postgresql+psycopg2://pufferblow:pufferblow@pb2-db:5432/pufferblow
+      PUFFERBLOW_MEMCACHE_HOST: pb2-cache
+      SIM_SERVER_NAME: "Members Only"
+      SIM_JOIN_MODE: "invite"
+    ports: ["7577:7575"]
+    volumes: ["./config.pb2.toml:/root/.pufferblow/config.toml:ro"]
+    depends_on:
+      pb2-db: {condition: service_healthy}
+      pb2-cache: {condition: service_started}
+
+  pb3-db:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: pufferblow, POSTGRES_PASSWORD: pufferblow, POSTGRES_DB: pufferblow}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U pufferblow"], interval: 5s, timeout: 3s, retries: 20}
+    volumes: ["pb3-pg:/var/lib/postgresql/data"]
+
+  pb3-cache:
+    image: memcached:1.6-alpine
+
+  pb3:
+    <<: *server
+    environment:
+      <<: *server-env
+      PUFFERBLOW_DATABASE_URI: postgresql+psycopg2://pufferblow:pufferblow@pb3-db:5432/pufferblow
+      PUFFERBLOW_MEMCACHE_HOST: pb3-cache
+      SIM_SERVER_NAME: "By Approval"
+      SIM_JOIN_MODE: "request"
+    ports: ["7578:7575"]
+    volumes: ["./config.pb3.toml:/root/.pufferblow/config.toml:ro"]
+    depends_on:
+      pb3-db: {condition: service_healthy}
+      pb3-cache: {condition: service_started}
+
+volumes:
+  pb1-pg: {}
+  pb2-pg: {}
+  pb3-pg: {}

@@ -29,6 +29,9 @@ def apply(bind) -> None:
         # People who exist here only because they federated (DMs, friend requests) have not joined anything.
         bind.execute(sa.text("UPDATE users SET membership_status = 'remote' WHERE username LIKE :pattern ESCAPE '!'"), {"pattern": "fedi!_%"})
 
+    if "server_join_requests" in tables and "consumed_at" not in {c["name"] for c in inspector.get_columns("server_join_requests")}:
+        bind.execute(sa.text("ALTER TABLE server_join_requests ADD COLUMN consumed_at TIMESTAMP"))
+
     if "privileges" in tables:
         existing = {row[0] for row in bind.execute(sa.text("SELECT privilege_id FROM privileges"))}
         # A database with no privileges yet is a new one: its first start seeds the whole catalog, these included.

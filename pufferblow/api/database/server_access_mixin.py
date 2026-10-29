@@ -150,6 +150,15 @@ class DatabaseServerAccessMixin:
             row = session.execute(select(ServerJoinRequests).where(ServerJoinRequests.handle == handle).order_by(ServerJoinRequests.created_at.desc()).limit(1)).scalar()
             return row.to_dict() if row is not None else None
 
+    def consume_join_request(self, request_id: str) -> bool:
+        """An approval lets someone in once. False if it was already used."""
+        with self.database_session() as session:
+            result = session.execute(
+                update(ServerJoinRequests).where(ServerJoinRequests.request_id == request_id, ServerJoinRequests.consumed_at.is_(None)).values(consumed_at=_now())
+            )
+            session.commit()
+            return bool(result.rowcount)
+
     def decide_join_request(self, request_id: str, *, status: str, decided_by: str) -> dict | None:
         """Mark a pending request approved or denied. None if it is gone or was already decided."""
         with self.database_session() as session:
@@ -171,6 +180,9 @@ class DatabaseServerAccessMixin:
             session.execute(update(Users).values(membership_status=status).where(Users.user_id == uuid.UUID(str(user_id))))
             session.commit()
         self._invalidate_user_cache(user_id)
+        if status != "active":
+            # Whoever is no longer a member cannot trade an old refresh token for a new session.
+            self.delete_user_refresh_tokens(user_id)
 
     def user_ids_with_privilege(self, privilege_id: str) -> list[str]:
         """Local people whose roles include this privilege (the owner always counts)."""

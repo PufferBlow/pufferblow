@@ -240,6 +240,8 @@ class _Remote:
 
 @pytest.fixture
 def remote(client, monkeypatch):
+    # The made-up home host does not resolve; the check that real ones are public is tested on its own below.
+    monkeypatch.setattr("pufferblow.api.routes.federation_join.assert_public", lambda host: None)
     person = _Remote()
 
     async def fetch(actor_uri: str):
@@ -323,6 +325,55 @@ def test_a_request_server_keeps_the_visitor_waiting_until_approved(client: TestC
     joined = client.post("/api/v1/federation/join/status", json={"assertion": remote.assertion()}).json()
     assert joined["status"] == "joined" and joined["auth_token"]
     assert client.post("/api/v1/users/profile", json={"auth_token": joined["auth_token"]}).status_code == 200
+
+
+def test_an_approval_lets_someone_in_once(client: TestClient, remote: _Remote):
+    _, owner = _staff()
+    _mode(owner, client, "request")
+    _join(client, remote)
+    [asked] = client.get("/api/v1/server/join-requests", params={"auth_token": owner}).json()["requests"]
+    client.post(f"/api/v1/server/join-requests/{asked['request_id']}/approve", json={"auth_token": owner})
+    joined = client.post("/api/v1/federation/join/status", json={"assertion": remote.assertion()}).json()
+    assert joined["status"] == "joined"
+
+    # Having left, the same approval does not get them back in: they are asked about again.
+    client.post("/api/v1/federation/leave", json={"auth_token": joined["auth_token"]})
+    again = _join(client, remote)
+    assert again.status_code == 202 and again.json()["status"] == "pending"
+    [_, second] = sorted(client.get("/api/v1/server/join-requests", params={"auth_token": owner}).json()["requests"], key=lambda r: r["created_at"], reverse=True)[:2] or [None, None]
+    assert client.post("/api/v1/federation/join/status", json={"assertion": remote.assertion()}).json()["status"] == "pending"
+
+
+def test_someone_who_left_cannot_get_a_new_session_or_a_realtime_connection(client: TestClient, remote: _Remote):
+    joined = _join(client, remote).json()
+    user_id = joined["user"]["user_id"]
+    assert api_initializer.user_manager.membership_error(user_id) is None
+    client.post("/api/v1/federation/leave", json={"auth_token": joined["auth_token"]})
+    assert api_initializer.user_manager.membership_error(user_id) == "auth.membership_denied"
+    # The realtime path asks the same question as the routes.
+    from pufferblow.api.errors import ApiError
+
+    with pytest.raises(ApiError):
+        api_initializer.authorizer  # noqa: B018  (the resolver below is what the socket uses)
+        from pufferblow.api.principals.resolver import UserPrincipalResolver
+
+        UserPrincipalResolver(api_initializer.user_manager, api_initializer.auth_token_manager).resolve(joined["auth_token"])
+
+
+def test_a_visitor_whose_home_is_a_private_address_is_not_fetched(client: TestClient, monkeypatch):
+    """The join route fetches a page from whatever address it is given, so it refuses addresses that are not public."""
+    monkeypatch.delenv("PUFFERBLOW_ALLOW_PRIVATE_FEDERATION", raising=False)
+    person = _Remote(host="127.0.0.1:9")
+    fetched = []
+
+    async def fetch(actor_uri: str):
+        fetched.append(actor_uri)
+        return person.row
+
+    monkeypatch.setattr(api_initializer.activitypub_manager, "fetch_remote_actor", fetch)
+    response = client.post("/api/v1/federation/join", json={"assertion": person.assertion()})
+    assert response.status_code == 401 and response.json()["error_code"] == "join.assertion_invalid"
+    assert fetched == []
 
 
 def test_a_denied_visitor_is_told_so(client: TestClient, remote: _Remote):

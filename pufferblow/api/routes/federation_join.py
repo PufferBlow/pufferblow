@@ -32,6 +32,7 @@ from pufferblow.api.federation.identity_assertion import (
     sign_assertion,
     verify_assertion,
 )
+from pufferblow.api.federation.nodeinfo import UnsafeHost, assert_public
 from pufferblow.api.federation.peers import host_of, normalize_host
 from pufferblow.api.models.config_model import instance_id_of
 from pufferblow.api.server.join_announce import announce_join_request
@@ -103,6 +104,12 @@ async def _verified(token: str):
         raise _invalid("the handle, issuer and actor disagree")
 
     activitypub = api_initializer.activitypub_manager
+    # This route is open to anyone and goes and fetches a page from the address they name, so it only ever goes to a
+    # public one (unless this is a lab that says otherwise; see `PUFFERBLOW_ALLOW_PRIVATE_FEDERATION`).
+    try:
+        assert_public(issuer)
+    except UnsafeHost as exc:
+        raise _invalid(f"the issuer is not a public address ({exc})") from exc
     decision = activitypub.peer_policy.decide_inbound(issuer)
     if not decision.allowed:
         raise ApiError(ErrorCode.JOIN_REFUSED, message=f"Federation policy refused {issuer}: {decision.reason}")
@@ -110,7 +117,8 @@ async def _verified(token: str):
     try:
         actor = await activitypub.fetch_remote_actor(actor_uri=claims["actor"])
     except Exception as exc:
-        raise _invalid(f"the home server's key could not be fetched ({exc})") from exc
+        logger.info("Could not fetch the actor {actor}: {error}", actor=claims["actor"], error=exc)
+        raise _invalid("the home server's key could not be fetched") from exc
     if str(actor.preferred_username).lower() != name.lower():
         raise _invalid("the actor is not that person")
 
@@ -194,7 +202,7 @@ async def join_server_route(
             return _waiting(latest)
         if latest["status"] == "denied":
             raise ApiError(ErrorCode.AUTH_MEMBERSHIP_DENIED)
-        if latest["status"] == "approved":
+        if latest["status"] == "approved" and not latest["consumed"] and database.consume_join_request(latest["request_id"]):
             return _session_for(_make_member(actor, handle))
 
     admission = JoinPolicy(database).admit(invite_code)
@@ -219,7 +227,9 @@ async def join_status_route(assertion: str = Body(..., embed=True)):
         return _waiting(latest)
     if latest["status"] == "denied":
         raise ApiError(ErrorCode.AUTH_MEMBERSHIP_DENIED)
-    return _session_for(_make_member(actor, handle))
+    if latest["status"] == "approved" and not latest["consumed"] and api_initializer.database_handler.consume_join_request(latest["request_id"]):
+        return _session_for(_make_member(actor, handle))
+    return {"status_code": 200, "status": "none"}
 
 
 @router.post("/leave", status_code=200)

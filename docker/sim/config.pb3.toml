@@ -1,0 +1,11 @@
+# Instance 3 of the simulation. Listens on 7575 inside its container, known to everyone as host.docker.internal:7578.
+[server]
+api_host = "0.0.0.0"
+api_port = 7575
+public_host = "host.docker.internal:7578"
+public_scheme = "http"
+workers = 1
+
+[security]
+cors_origin_regex = ".*"
+cors_allow_credentials = true
