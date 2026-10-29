@@ -8,13 +8,11 @@ def _create_session_user(
     password: str,
     *,
     is_owner: bool = False,
-    is_admin: bool = False,
 ):
     user = api_initializer.user_manager.sign_up(
         username=username,
         password=password,
         is_owner=is_owner,
-        is_admin=is_admin,
     )
     tokens = api_initializer.auth_token_manager.issue_session_tokens(
         user_id=str(user.user_id),
@@ -52,7 +50,7 @@ def test_owner_can_create_and_list_custom_roles(client: TestClient):
     )
     assert roles_response.status_code == 200
     role_ids = {role["role_id"] for role in roles_response.json()["roles"]}
-    assert {"owner", "admin", "moderator", "user", "channel-steward"} <= role_ids
+    assert {"owner", "moderator", "user", "channel-steward"} <= role_ids
 
     privileges_response = client.post(
         "/api/v1/system/privileges/list",

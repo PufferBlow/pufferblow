@@ -250,17 +250,15 @@ class SecurityChecksHandler:
         self,
         user_id: str,
         check_if_server_owner: bool | None = True,
-        check_if_admin: bool | None = True,
         privilege_id: str | None = None,
     ) -> None:
         """
-        Checks if the user is privileged weither that be he is an admin or the server the owner, if not then an HTTPException will
+        Checks if the user is privileged weither that be he is the server owner, if not then an HTTPException will
         be raised.
 
         Args:
             user_id (str): The user's user_id.
             check_if_server_owner (bool, optional, default: True): Check if the user is the sever owner.
-            check_if_admin (bool, optional, default: True): Check if the user is an admin.
 
         Returns:
             None.
@@ -277,17 +275,13 @@ class SecurityChecksHandler:
                 )
             return None
 
-        is_admin = self.user_manager.is_admin(user_id=user_id)
         is_server_owner = self.user_manager.is_server_owner(user_id=user_id)
-        is_allowed = (
-            (check_if_admin and is_admin)
-            or (check_if_server_owner and is_server_owner)
-        )
+        is_allowed = check_if_server_owner and is_server_owner
         if not is_allowed:
             return ORJSONResponse(
                 status_code=403,
                 content={
-                    "error": "Access forbidden. Only the server owner and admins can access this route"
+                    "error": "Access forbidden. Only the server owner can access this route"
                 },
             )
 

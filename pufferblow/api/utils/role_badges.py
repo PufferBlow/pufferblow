@@ -41,7 +41,6 @@ IMAGE_URL_PREFIX = "/storage/"
 
 BUILT_IN_BADGES: dict[str, dict[str, Any]] = {
     "owner": {"tier": "staff", "tone": "brass", "glyph": "crown"},
-    "admin": {"tier": "staff", "tone": "coral", "glyph": "key"},
     "moderator": {"tier": "staff", "tone": "sky", "glyph": "shield"},
 }
 

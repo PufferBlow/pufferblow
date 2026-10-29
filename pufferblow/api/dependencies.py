@@ -114,46 +114,6 @@ def require_server_owner(auth_token: str) -> str:
     return user_id
 
 
-def require_admin(auth_token: str) -> str:
-    """
-    Require that the user is an admin or server owner.
-
-    Args:
-        auth_token: The authentication token
-
-    Returns:
-        str: The user ID if user is admin or server owner
-
-    Raises:
-        HTTPException: If user is neither admin nor server owner
-    """
-    user_id = get_current_user(auth_token)
-
-    is_admin = api_initializer.user_manager.is_admin(user_id=user_id)
-    is_owner = api_initializer.user_manager.is_server_owner(user_id=user_id)
-
-    if not (is_admin or is_owner):
-        logger.warning(
-            "AUTHZ_ADMIN_DENIED user_id={user_id} is_admin={is_admin} is_owner={is_owner}",
-            user_id=user_id,
-            is_admin=is_admin,
-            is_owner=is_owner,
-        )
-        raise ApiError(
-            ErrorCode.AUTH_PRIVILEGE_DENIED,
-            user_message="Only admins or the server owner can do that.",
-            details={"required_role": "admin"},
-        )
-
-    logger.info(
-        "AUTHZ_ADMIN_GRANTED user_id={user_id} is_admin={is_admin} is_owner={is_owner}",
-        user_id=user_id,
-        is_admin=is_admin,
-        is_owner=is_owner,
-    )
-    return user_id
-
-
 def require_privilege(auth_token: str, privilege_id: str) -> str:
     """
     Require that the current user has a resolved instance privilege.

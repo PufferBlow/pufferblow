@@ -235,7 +235,6 @@ def _run_full_setup(
     auth_token = api_initializer.user_manager.sign_up(
         username=owner.username,
         password=owner.password,
-        is_admin=True,
         is_owner=True,
     ).raw_auth_token
 

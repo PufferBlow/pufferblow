@@ -134,34 +134,6 @@ def require_server_owner(auth_token: str) -> str:
     return user_id
 
 
-def require_admin(auth_token: str, *, allow_owner: bool = False) -> str:
-    """Ensure current user is an admin, optionally allowing the owner."""
-    user_id = extract_user(auth_token)
-    user_manager = require_component("user_manager")
-    if user_manager.is_admin(user_id=user_id):
-        return user_id
-    if allow_owner and user_manager.is_server_owner(user_id=user_id):
-        return user_id
-    raise HTTPException(
-        status_code=403,
-        detail="Access forbidden. Only administrators can perform this action.",
-    )
-
-
-def require_admin_or_owner(auth_token: str) -> str:
-    """Ensure current user is admin or owner."""
-    user_id = extract_user(auth_token)
-    user_manager = require_component("user_manager")
-    if user_manager.is_admin(user_id=user_id) or user_manager.is_server_owner(
-        user_id=user_id
-    ):
-        return user_id
-    raise HTTPException(
-        status_code=403,
-        detail="Access forbidden. Only administrators can perform this action.",
-    )
-
-
 def require_privilege(auth_token: str, privilege_id: str) -> str:
     """Ensure current user has a resolved instance privilege."""
     user_id = extract_user(auth_token)

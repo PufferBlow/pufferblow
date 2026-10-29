@@ -138,7 +138,7 @@ def seed_mock_data(api: Any, *, password: str = DEFAULT_PASSWORD, filler: int = 
             report.users_existing.append(name)
             continue
         wants_owner = owner is not None and name == owner
-        user = users.sign_up(username=name, password=password, is_owner=wants_owner, is_admin=name == "grace")
+        user = users.sign_up(username=name, password=password, is_owner=wants_owner, is_moderator=name == "grace")
         ids[name] = str(user.user_id)
         report.users_created.append(name)
         if status != "online":

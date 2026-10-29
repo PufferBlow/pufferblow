@@ -9,7 +9,7 @@ from pufferblow.core.bootstrap import api_initializer
 
 
 async def announce_join_request(request: dict) -> None:
-    """A realtime event to everyone who may approve (the owner, admins, moderators), carrying the request and how many wait."""
+    """A realtime event to everyone who may approve (the owner and moderators), carrying the request and how many wait."""
     try:
         database = api_initializer.database_handler
         pending = database.count_join_requests("pending")

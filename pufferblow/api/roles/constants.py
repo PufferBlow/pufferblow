@@ -4,7 +4,6 @@ OWNER_ROLE_ID = "owner"
 DEFAULT_ROLE_ID = "user"
 SYSTEM_ROLE_IDS = {
     OWNER_ROLE_ID,
-    "admin",
     "moderator",
     DEFAULT_ROLE_ID,
 }

@@ -133,7 +133,7 @@ def test_the_built_in_roles_list_with_their_badges(client: TestClient):
     token = _session(owner=True)
     roles = _roles(client, token)
     assert roles["owner"]["badge"] == {"tier": "staff", "tone": "brass", "glyph": "crown"}
-    assert roles["admin"]["badge"]["glyph"] == "key"
+    assert "admin" not in roles
     assert roles["moderator"]["badge"]["glyph"] == "shield"
     assert roles["user"]["badge"] is None
 

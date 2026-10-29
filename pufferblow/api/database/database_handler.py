@@ -463,6 +463,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 err=str(exc),
             )
 
+        # There is no Admin role: its holders become moderators and the role is removed.
+        try:
+            from pufferblow.api.database import retire_admin
+
+            with self.database_engine.begin() as conn:
+                retire_admin.apply(conn)
+        except Exception as exc:
+            logger.warning("retire-admin migration skipped due to error: {err}", err=str(exc))
+
         # Disappearing-DMs migration: adds messages.expires_at and
         # ensures the dm_conversation_settings table is in place
         # (the SQLAlchemy create_all run above handles fresh
@@ -5414,40 +5423,6 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     "manage_server_settings",
                     "manage_server_privileges",
                     "manage_storage",
-                    "view_server_stats",
-                    "ban_users",
-                    "mute_users",
-                    "moderate_content",
-                    "view_audit_logs",
-                    "manage_blocked_ips",
-                    "upload_files",
-                    "delete_files",
-                    "view_files",
-                    "manage_background_tasks",
-                    "manage_stickers",
-                    "manage_invites",
-                    "manage_join_requests",
-                ],
-            },
-            {
-                "id": "admin",
-                "name": "Administrator",
-                "privileges": [
-                    # Most privileges except server owner specific ones
-                    "create_users",
-                    "edit_users",
-                    "view_users",
-                    "reset_user_tokens",
-                    "create_channels",
-                    "delete_channels",
-                    "edit_channels",
-                    "manage_channel_users",
-                    "view_private_channels",
-                    "send_messages",
-                    "delete_messages",
-                    "edit_messages",
-                    "view_messages",
-                    "manage_server_settings",
                     "view_server_stats",
                     "ban_users",
                     "mute_users",

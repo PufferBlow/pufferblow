@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body
 from loguru import logger
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
-from pufferblow.api.dependencies import require_admin
+from pufferblow.api.dependencies import require_server_owner
 from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.federation.nodeinfo import UnsafeHost, fetch_peer_info
 from pufferblow.api.federation.peers import MODES, STATUSES, PeerError, normalize_host
@@ -62,7 +62,7 @@ def _require_peer(host: str) -> dict:
 @router.get("/peers", status_code=200)
 async def list_peers_route(auth_token: str):
     """The federation mode, every peer, and how many are in each status."""
-    require_admin(auth_token)
+    require_server_owner(auth_token)
     database = api_initializer.database_handler
     peers = database.list_peers()
     return {"status_code": 200, "mode": database.get_federation_mode(), "modes": list(MODES), "counts": _counts(peers), "peers": peers}
@@ -71,7 +71,7 @@ async def list_peers_route(auth_token: str):
 @router.put("/mode", status_code=200)
 async def set_mode_route(auth_token: str = Body(..., embed=True), mode: str = Body(..., embed=True)):
     """Set the federation mode: ``open``, ``allowlist`` or ``closed``."""
-    user_id = require_admin(auth_token)
+    user_id = require_server_owner(auth_token)
     try:
         api_initializer.database_handler.set_federation_mode(mode)
     except PeerError as exc:
@@ -83,7 +83,7 @@ async def set_mode_route(auth_token: str = Body(..., embed=True), mode: str = Bo
 @router.post("/peers", status_code=201)
 async def add_peer_route(auth_token: str = Body(..., embed=True), host: str = Body(..., embed=True), status: str = Body("federating", embed=True)):
     """Add an instance by hand (approving it, by default). 409 if it is already a peer."""
-    user_id = require_admin(auth_token)
+    user_id = require_server_owner(auth_token)
     clean = _host(host)
     database = api_initializer.database_handler
     try:
@@ -99,7 +99,7 @@ async def add_peer_route(auth_token: str = Body(..., embed=True), host: str = Bo
 @router.put("/peers/{host}/status", status_code=200)
 async def set_peer_status_route(host: str, auth_token: str = Body(..., embed=True), status: str = Body(..., embed=True)):
     """Accept (``federating``), ``limited``, ``blocked`` or ``pending`` for a peer."""
-    user_id = require_admin(auth_token)
+    user_id = require_server_owner(auth_token)
     clean = _host(host)
     _require_peer(clean)
     try:
@@ -113,7 +113,7 @@ async def set_peer_status_route(host: str, auth_token: str = Body(..., embed=Tru
 @router.put("/peers/{host}/policy", status_code=200)
 async def set_peer_policy_route(host: str, auth_token: str = Body(..., embed=True), policy: dict = Body(..., embed=True)):
     """Set some of a peer's switches: ``media``, ``voice``, ``discover`` (true or false)."""
-    user_id = require_admin(auth_token)
+    user_id = require_server_owner(auth_token)
     clean = _host(host)
     _require_peer(clean)
     try:
@@ -127,7 +127,7 @@ async def set_peer_policy_route(host: str, auth_token: str = Body(..., embed=Tru
 @router.delete("/peers/{host}", status_code=200)
 async def delete_peer_route(host: str, auth_token: str):
     """Forget a peer. If it federates again later it is treated as new."""
-    user_id = require_admin(auth_token)
+    user_id = require_server_owner(auth_token)
     clean = _host(host)
     if not api_initializer.database_handler.delete_peer(clean):
         raise ApiError(ErrorCode.RESOURCE_NOT_FOUND, message=f"No peer {clean}.", details={"host": clean})
@@ -138,7 +138,7 @@ async def delete_peer_route(host: str, auth_token: str):
 @router.post("/peers/{host}/refresh", status_code=200)
 async def refresh_peer_route(host: str, auth_token: str = Body(..., embed=True)):
     """Ask the peer what it is (software, version, users) and keep the answer. Never sends anything to a private address."""
-    require_admin(auth_token)
+    require_server_owner(auth_token)
     clean = _host(host)
     _require_peer(clean)
     try:
@@ -161,7 +161,7 @@ async def import_peers_route(
 
     Returns what was added, what was skipped because it was already a peer, and what was not a valid host.
     """
-    user_id = require_admin(auth_token)
+    user_id = require_server_owner(auth_token)
     if status not in STATUSES:
         raise ApiError(ErrorCode.VALIDATION_FIELD_RANGE, message=f"status must be one of {list(STATUSES)}.", details={"field": "status"})
     if len(hosts) > MAX_IMPORT:

@@ -16,8 +16,8 @@ NEW_PRIVILEGES = (
     ("manage_join_requests", "Manage Join Requests", "moderation"),
 )
 
-#: The built-in roles that get them. Owner and admin run the server; moderators decide who comes in.
-ROLES_WITH_ACCESS_PRIVILEGES = ("owner", "admin", "moderator")
+#: The built-in roles that get them: the owner runs the server; moderators decide who comes in.
+ROLES_WITH_ACCESS_PRIVILEGES = ("owner", "moderator")
 
 
 def apply(bind) -> None:

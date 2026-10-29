@@ -99,7 +99,7 @@ class UserManager:
         self,
         username: str,
         password: str,
-        is_admin: bool | None = False,
+        is_moderator: bool | None = False,
         is_owner: bool | None = False,
         membership_status: str = "active",
     ) -> Users:
@@ -111,7 +111,7 @@ class UserManager:
         Args:
             username (str): Unique username for the user account.
             password (str): Plain text password (will be encrypted).
-            is_admin (bool, optional): Set admin privileges. Defaults to False.
+            is_moderator (bool, optional): Make them a moderator. Defaults to False.
             is_owner (bool, optional): Set server owner privileges. Defaults to False.
 
         Returns:
@@ -178,8 +178,8 @@ class UserManager:
         # Set user roles based on parameters
         if is_owner:
             new_user.roles_ids = [OWNER_ROLE_ID]
-        elif is_admin:
-            new_user.roles_ids = ["admin"]
+        elif is_moderator:
+            new_user.roles_ids = ["moderator"]
         else:
             new_user.roles_ids = [DEFAULT_ROLE_ID]
 
@@ -615,21 +615,6 @@ class UserManager:
 
         # Check if 'owner' role is in the user's roles_ids
         return OWNER_ROLE_ID in user_data.roles_ids if user_data.roles_ids else False
-
-    def is_admin(self, user_id: str) -> bool:
-        """
-        Check if the user is an admin of the server or not
-
-        Args:
-            `user_id` (str): The user's `user_id`.
-
-        Returns:
-            bool: True if the user is an admin, otherwise False.
-        """
-        user_data = self.database_handler.get_user(user_id=user_id)
-
-        # Check if 'admin' role is in the user's roles_ids
-        return "admin" in user_data.roles_ids if user_data.roles_ids else False
 
     def get_user_role_ids(self, user_id: str) -> list[str]:
         """Return normalized role ids for a user."""

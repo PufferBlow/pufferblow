@@ -27,7 +27,7 @@ from pufferblow.api.utils.server_look import ServerLookError, effective_server_l
 from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 from pufferblow.api.utils.extract_user_id import extract_user_id
 from pufferblow.api.commands.metrics import metrics
-from pufferblow.api.dependencies import require_admin
+from pufferblow.api.dependencies import require_server_owner
 from pufferblow.api.health.monitor import UPTIME_DAYS, monitor, uptime_percent
 from pufferblow.core.bootstrap import api_initializer
 
@@ -249,7 +249,7 @@ async def instance_health_details_route(auth_token: str):
     has been up, per-check timings, request latency over the last day, resource use, 90 days of uptime,
     recent incidents and the instances this one is linked to.
     """
-    require_admin(auth_token)
+    require_server_owner(auth_token)
     import asyncio
 
     return {"status_code": 200, "health": await asyncio.to_thread(build_instance_health_details)}

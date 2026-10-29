@@ -473,3 +473,23 @@ def test_someone_who_left_is_refused_by_the_older_checks_too(client: TestClient,
         extract_user(joined["auth_token"])
     refused = api_initializer.security_checks_handler.check_user(auth_token=joined["auth_token"])
     assert refused is not None and refused.status_code == 403
+
+
+def test_the_admin_role_is_retired_and_its_holders_become_moderators():
+    import sqlalchemy as sa
+
+    from pufferblow.api.database import retire_admin
+
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE roles (role_id TEXT PRIMARY KEY)"))
+        conn.execute(sa.text("CREATE TABLE users (user_id TEXT PRIMARY KEY, roles_ids TEXT)"))
+        conn.execute(sa.text("INSERT INTO roles VALUES ('owner'), ('admin'), ('moderator'), ('user')"))
+        conn.execute(sa.text("INSERT INTO users VALUES ('a', '[\"admin\"]'), ('b', '[\"admin\", \"moderator\"]'), ('c', '[\"user\"]'), ('d', '[\"owner\"]')"))
+        retire_admin.apply(conn)
+        retire_admin.apply(conn)  # safe to run again
+        import json
+
+        held = {uid: json.loads(r) for uid, r in conn.execute(sa.text("SELECT user_id, roles_ids FROM users"))}
+        assert held == {"a": ["moderator"], "b": ["moderator"], "c": ["user"], "d": ["owner"]}
+        assert "admin" not in {r[0] for r in conn.execute(sa.text("SELECT role_id FROM roles"))}

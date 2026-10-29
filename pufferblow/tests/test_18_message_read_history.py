@@ -8,13 +8,11 @@ def _create_session_user(
     password: str,
     *,
     is_owner: bool = False,
-    is_admin: bool = False,
 ):
     user = api_initializer.user_manager.sign_up(
         username=username,
         password=password,
         is_owner=is_owner,
-        is_admin=is_admin,
     )
     tokens = api_initializer.auth_token_manager.issue_session_tokens(
         user_id=str(user.user_id),
