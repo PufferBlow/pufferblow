@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Body
@@ -47,9 +48,10 @@ def _ours() -> str:
 
 
 def _invalid(why: str) -> ApiError:
-    # What failed is for the log; the person sees one message whatever it was.
+    # What failed is for the log only: this route is open to anyone, so what it says must not tell a stranger which
+    # addresses resolve, which are private, or which are reachable.
     logger.info("Join assertion refused: {why}", why=why)
-    return ApiError(ErrorCode.JOIN_ASSERTION_INVALID, message=f"Join assertion refused: {why}")
+    return ApiError(ErrorCode.JOIN_ASSERTION_INVALID)
 
 
 # ── on the home server ────────────────────────────────────────
@@ -94,7 +96,10 @@ async def _verified(token: str):
         raise _invalid(str(exc)) from exc
 
     ours = _ours()
-    issuer = claims["iss"].lower()
+    try:
+        issuer = normalize_host(str(claims["iss"]))
+    except Exception as exc:
+        raise _invalid("the issuer is not a plain host") from exc
     name, _, handle_host = claims["sub"].rpartition("@")
     if claims["aud"].lower() != ours:
         raise _invalid("for another server")
@@ -110,12 +115,14 @@ async def _verified(token: str):
         assert_public(issuer)
     except UnsafeHost as exc:
         raise _invalid(f"the issuer is not a public address ({exc})") from exc
+    if urlsplit(claims["actor"]).scheme not in ("https", "http"):
+        raise _invalid("the actor is not a web address")
     decision = activitypub.peer_policy.decide_inbound(issuer)
     if not decision.allowed:
         raise ApiError(ErrorCode.JOIN_REFUSED, message=f"Federation policy refused {issuer}: {decision.reason}")
 
     try:
-        actor = await activitypub.fetch_remote_actor(actor_uri=claims["actor"])
+        actor = await activitypub.fetch_remote_actor(actor_uri=claims["actor"], guarded=True)
     except Exception as exc:
         logger.info("Could not fetch the actor {actor}: {error}", actor=claims["actor"], error=exc)
         raise _invalid("the home server's key could not be fetched") from exc

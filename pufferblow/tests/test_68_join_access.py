@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from pufferblow.api.activitypub.activitypub_manager import ActivityPubManager
 from pufferblow.api.database.tables.declarative_base import Base
+from pufferblow.api.errors import ApiError
 from pufferblow.api.federation.identity_assertion import (
     AssertionInvalid,
     sign_assertion,
@@ -244,7 +245,7 @@ def remote(client, monkeypatch):
     monkeypatch.setattr("pufferblow.api.routes.federation_join.assert_public", lambda host: None)
     person = _Remote()
 
-    async def fetch(actor_uri: str):
+    async def fetch(actor_uri: str, **_):
         if actor_uri != person.actor_uri:
             raise ValueError("unknown actor")
         stored = api_initializer.database_handler.get_activitypub_actor_by_uri(actor_uri=actor_uri)
@@ -366,7 +367,7 @@ def test_a_visitor_whose_home_is_a_private_address_is_not_fetched(client: TestCl
     person = _Remote(host="127.0.0.1:9")
     fetched = []
 
-    async def fetch(actor_uri: str):
+    async def fetch(actor_uri: str, **_):
         fetched.append(actor_uri)
         return person.row
 
@@ -419,3 +420,56 @@ def test_the_home_server_signs_for_its_own_people_only(client: TestClient):
     assert body["audience"] == "there.example:7002" and body["handle"].startswith("person_")
     own = client.post("/api/v1/federation/assertions", json={"auth_token": person["auth_token"], "audience": instance_id_of(api_initializer.config)})
     assert own.status_code == 400
+
+
+# ── the fetch made for a stranger's address ───────────────────────────────────
+
+
+def _resolver(address: str):
+    return lambda host, port: [(2, 1, 6, "", (address, port))]
+
+
+@pytest.mark.asyncio
+async def test_a_stranger_cannot_point_the_fetch_at_a_private_address():
+    from pufferblow.api.federation.nodeinfo import UnsafeHost, fetch_public_json
+
+    for address in ("127.0.0.1", "10.1.2.3", "169.254.169.254", "::1"):
+        with pytest.raises(UnsafeHost):
+            await fetch_public_json("https://evil.example/ap/users/x", resolve=_resolver(address), allow_private=False)
+    with pytest.raises(UnsafeHost):
+        await fetch_public_json("http://evil.example/ap/users/x", resolve=_resolver("93.184.216.34"), allow_private=False)
+    with pytest.raises(UnsafeHost):
+        await fetch_public_json("https://user:pw@evil.example/", resolve=_resolver("93.184.216.34"), allow_private=False)
+
+
+@pytest.mark.asyncio
+async def test_the_fetch_goes_to_the_address_it_checked_and_does_not_follow_redirects(monkeypatch):
+    import httpx
+
+    from pufferblow.api.federation import nodeinfo
+
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((str(request.url), request.headers["host"], request.extensions.get("sni_hostname")))
+        return httpx.Response(302, headers={"Location": "http://169.254.169.254/latest/meta-data"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(nodeinfo.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    with pytest.raises(httpx.HTTPStatusError):
+        await nodeinfo.fetch_public_json("https://home.example/ap/users/a", resolve=_resolver("93.184.216.34"), allow_private=False)
+    # One request, to the address that was checked, under the real name; the redirect was not followed.
+    assert seen == [("https://93.184.216.34/ap/users/a", "home.example", "home.example")]
+
+
+def test_someone_who_left_is_refused_by_the_older_checks_too(client: TestClient, remote: _Remote):
+    from pufferblow.api.dependencies import get_current_user_from_node_session  # noqa: F401
+    from pufferblow.api.routes.system_routes.shared import extract_user
+
+    joined = _join(client, remote).json()
+    assert extract_user(joined["auth_token"]) == joined["user"]["user_id"]
+    client.post("/api/v1/federation/leave", json={"auth_token": joined["auth_token"]})
+    with pytest.raises(ApiError):
+        extract_user(joined["auth_token"])
+    refused = api_initializer.security_checks_handler.check_user(auth_token=joined["auth_token"])
+    assert refused is not None and refused.status_code == 403

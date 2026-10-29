@@ -92,6 +92,11 @@ class SecurityChecksHandler:
                     },
                 )
 
+            # A token is not enough: someone waiting, declined, or who left is not a member.
+            refused = self.user_manager.membership_error(user_id)
+            if refused:
+                return ORJSONResponse(status_code=403, content={"error": refused})
+
         # Then check if the user_id exists
         if user_id is not None:
             user_exists = self.user_manager.check_user(user_id=user_id)

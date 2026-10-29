@@ -12,6 +12,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
+from pufferblow.api.errors import ApiError
 from pufferblow.api.schemas import UploadAuthForm
 from pufferblow.api.storage.path_utils import (
     extract_local_media_path,
@@ -80,8 +81,12 @@ async def parse_upload_auth_form(
 
 
 def extract_user(auth_token: str) -> str:
-    """Extract current user id from auth token."""
-    return extract_user_id(auth_token=auth_token)
+    """Extract current user id from auth token (and refuse someone who is not an active member)."""
+    user_id = extract_user_id(auth_token=auth_token)
+    refused = api_initializer.user_manager.membership_error(user_id)
+    if refused:
+        raise ApiError(refused)
+    return user_id
 
 
 def require_component(component: str):

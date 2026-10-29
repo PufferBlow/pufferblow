@@ -270,6 +270,9 @@ def get_current_user_from_node_session(session_token: str) -> str:
     session_payload = api_initializer.decentralized_auth_manager.introspect_session(
         session_token=session_token
     )
+    refused = api_initializer.user_manager.membership_error(session_payload["user_id"])
+    if refused:
+        raise ApiError(refused)
     logger.info(
         "NODE_SESSION_INTROSPECT_OK user_id={user_id} node_id={node_id}",
         user_id=session_payload.get("user_id"),

@@ -8,10 +8,12 @@ Redirects are not followed, the answer is size-limited, and only JSON is read.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import os
 import socket
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -48,6 +50,58 @@ def assert_public(host: str, resolve: Resolver = socket.getaddrinfo, allow_priva
         address = ipaddress.ip_address(info[4][0].split("%")[0])
         if not address.is_global:
             raise UnsafeHost(f"{name} resolves to a non-public address")
+
+
+def public_addresses(host: str, port: int, resolve: Resolver = socket.getaddrinfo, allow_private: bool | None = None) -> list[str]:
+    """The addresses ``host`` resolves to, each checked: all of them must be public (unless a lab says otherwise)."""
+    if allow_private is None:
+        allow_private = private_federation_allowed()
+    try:
+        infos = resolve(host, port)
+    except OSError as exc:
+        raise UnsafeHost(f"{host} does not resolve") from exc
+    addresses = [info[4][0].split("%")[0] for info in infos]
+    if not addresses:
+        raise UnsafeHost(f"{host} does not resolve")
+    if not allow_private:
+        for address in addresses:
+            if not ipaddress.ip_address(address).is_global:
+                raise UnsafeHost(f"{host} resolves to a non-public address")
+    return addresses
+
+
+async def fetch_public_json(url: str, *, resolve: Resolver = socket.getaddrinfo, allow_private: bool | None = None, accept: str = "application/json") -> Any:
+    """GET a JSON document from a stranger's address without being able to be pointed anywhere else.
+
+    The name is resolved once, every address is checked, and the connection goes to the address that was checked (so
+    the name cannot resolve somewhere else a moment later). Redirects are not followed, the answer is size-limited,
+    and plain ``http`` is only for a lab.
+    """
+    if allow_private is None:
+        allow_private = private_federation_allowed()
+    parts = urlsplit(url)
+    if parts.scheme not in ("https", "http") or (parts.scheme == "http" and not allow_private):
+        raise UnsafeHost("only https addresses are fetched")
+    if parts.username or parts.password or not parts.hostname:
+        raise UnsafeHost("the address is not a plain host")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    loop = asyncio.get_running_loop()
+    addresses = await loop.run_in_executor(None, lambda: public_addresses(parts.hostname, port, resolve, allow_private))
+    ip = addresses[0]
+    pinned_host = f"[{ip}]" if ":" in ip else ip
+    pinned = urlunsplit((parts.scheme, f"{pinned_host}:{port}", parts.path or "/", parts.query, ""))
+    headers = {"Accept": accept, "User-Agent": USER_AGENT, "Host": parts.netloc}
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=False) as client:
+        async with client.stream("GET", pinned, headers=headers, extensions={"sni_hostname": parts.hostname}) as response:
+            response.raise_for_status()
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    raise ValueError("The answer is too large.")
+                chunks.append(chunk)
+    return json.loads(b"".join(chunks))
 
 
 Fetcher = Callable[[str], Awaitable[Any]]

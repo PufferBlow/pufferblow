@@ -485,9 +485,12 @@ class ActivityPubManager:
 
         raise ValueError(f"Failed to resolve remote actor from handle '{handle}': {last_error}")
 
-    async def fetch_remote_actor(self, actor_uri: str) -> object:
+    async def fetch_remote_actor(self, actor_uri: str, *, guarded: bool = False) -> object:
         """
         Fetch and cache a remote actor.
+
+        ``guarded``: the address came from a stranger (an unauthenticated request), so it is fetched only if it is
+        public, without following redirects and with a size limit.
         """
         existing = self.database_handler.get_activitypub_actor_by_uri(actor_uri=actor_uri)
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -496,7 +499,14 @@ class ActivityPubManager:
             if age.total_seconds() < 3600:
                 return existing
 
-        actor_doc = await self._http_get_json(actor_uri)
+        if guarded:
+            from pufferblow.api.federation.nodeinfo import fetch_public_json
+
+            actor_doc = await fetch_public_json(actor_uri, accept="application/activity+json, application/json")
+            if not isinstance(actor_doc, dict):
+                raise ValueError("Remote actor document is not an object")
+        else:
+            actor_doc = await self._http_get_json(actor_uri)
         inbox_uri = actor_doc.get("inbox")
         outbox_uri = actor_doc.get("outbox")
         preferred_username = actor_doc.get("preferredUsername") or actor_uri.rsplit("/", 1)[-1]
