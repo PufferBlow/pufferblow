@@ -19,6 +19,10 @@ class SignupRequest(BaseModel):
     """SignupRequest class."""
     username: str
     password: str
+    # Needed when the server is invite-only (and lets someone skip the wait on a request-to-join server).
+    invite_code: str | None = None
+    # For a request-to-join server: what to tell the people who decide.
+    message: str | None = Field(default=None, max_length=300)
 
 
 class SigninRequest(BaseModel):
@@ -702,6 +706,8 @@ class ServerSettingsRequest(BaseModel):
     server_description: str | None = None
     welcome_message: str | None = Field(default=None, max_length=500)
     is_private: bool | None = None
+    # ``open``, ``invite`` or ``request``: who may join (see ``api/server/join_policy.py``).
+    join_mode: str | None = Field(default=None, pattern="^(open|invite|request)$")
     max_users: int | None = None
     max_message_length: int | None = None
     max_image_size: int | None = Field(default=None, ge=1)

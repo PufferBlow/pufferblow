@@ -12,6 +12,7 @@ from pufferblow.api.database.tables.server import Server
 # Appearance defaults
 from pufferblow.api.utils.appearance import derive_accent_color
 from pufferblow.api.utils.default_art import default_avatar_url, default_banner_url
+from pufferblow.api.models.config_model import instance_id_of
 
 
 class ServerManager:
@@ -41,10 +42,7 @@ class ServerManager:
         Returns:
             None.
         """
-        host_port = (
-            f"{self.database_handler.config.API_HOST}:"
-            f"{self.database_handler.config.API_PORT}"
-        )
+        host_port = instance_id_of(self.database_handler.config)
         # `server_id` IS the instance's addressable identity.
         #
         # Previously server_id was a random UUID, which gave us a stable

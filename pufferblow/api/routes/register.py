@@ -11,6 +11,7 @@ from pufferblow.api.routes.bots import router as bots_router
 from pufferblow.api.routes.channels import router as channels_router
 from pufferblow.api.routes.core import router as core_router
 from pufferblow.api.routes.dm_calls import router as dm_calls_router
+from pufferblow.api.routes.federation_join import router as federation_join_router
 from pufferblow.api.routes.federation_peers import router as federation_peers_router
 from pufferblow.api.routes.friends import router as friends_router
 from pufferblow.api.routes.identity_keys import router as identity_keys_router
@@ -18,6 +19,7 @@ from pufferblow.api.routes.internal_voice import router as internal_voice_router
 from pufferblow.api.routes.messages import router as messages_router
 from pufferblow.api.routes.moderation import router as moderation_router
 from pufferblow.api.routes.notifications import router as notifications_router
+from pufferblow.api.routes.server_access import router as server_access_router
 from pufferblow.api.routes.stickers import router as stickers_router
 from pufferblow.api.routes.storage import (
     router as storage_router,
@@ -49,6 +51,8 @@ def register_routers(api: FastAPI) -> None:
     api.include_router(friends_router, tags=["friends"])
     api.include_router(identity_keys_router, tags=["identity-keys"])
     api.include_router(federation_peers_router, tags=["federation"])
+    api.include_router(federation_join_router, tags=["federation"])
+    api.include_router(server_access_router, tags=["server-access"])
     api.include_router(stickers_router, tags=["stickers"])
     api.include_router(storage_router, tags=["storage"])
     api.include_router(admin_router, tags=["admin"])

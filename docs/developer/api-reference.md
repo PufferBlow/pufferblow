@@ -221,6 +221,10 @@ Response on success (201):
 
 - 409 — username already exists.
 - 503 — operator hasn't run `pufferblow setup` yet.
+- 403 `join.invite_required` / `join.invite_invalid` — the server is invite-only and no valid code was given (see
+  [Joining a server](#joining-a-server)). `invite_code` and `message` are optional fields of the body.
+- 202 `{ "status": "pending", "request_id" }` — the server is request-to-join. The account exists but cannot sign
+  in (`403 auth.membership_pending`) until an owner or moderator approves it (`auth.membership_denied` if declined).
 
 ### `POST /api/v1/users/signin`
 
@@ -730,6 +734,58 @@ Activities from, and deliveries to, a refused host are not processed (the inbox 
 | `POST /api/v1/federation/peers/import` `{auth_token, hosts, status?}` | Add up to 500 hosts (default `blocked`). Returns `{added, skipped, invalid}`; known hosts keep what they have |
 
 Each change is written to the audit log.
+
+
+## Joining a server
+
+A server decides who comes in with its **join mode**, shown in the public `GET /api/v1/system/server-info` as
+`join_mode` and changed with `PUT /api/v1/system/server-info` `{auth_token, join_mode}` (needs
+`manage_server_settings`):
+
+- `open` — anyone. `invite` — a valid invitation code is needed. `request` — people ask and the owner or a moderator
+  decides (a valid code skips the wait).
+
+The same rule applies to **creating an account** on the server (`POST /users/signup`) and to **joining with an account
+you already have on another server** (below). Nobody makes a second account to join.
+
+### Joining with an account from another server
+
+1. On *your own* server, ask for a signed assertion for the server you want to join. It is good for 60 seconds and for
+   that server only.
+
+   `POST /api/v1/federation/assertions` `{ auth_token, audience: "host:port" }` → `{ assertion, handle, expires_in }`
+2. Present it to the server you are joining.
+
+   `POST /api/v1/federation/join` `{ assertion, invite_code?, message? }`
+   - 200 `{ status: "joined", server_id, user, auth_token, refresh_token, ... }` — you are a member (shown as
+     `name@your-server`) and these are *that* server's tokens.
+   - 202 `{ status: "pending", request_id }` — waiting for approval.
+   - 401 `join.assertion_invalid` (malformed, expired, for another server, already used, or not signed by the home
+     server's key), 403 `join.refused` (federation policy), `join.invite_required`, `join.invite_invalid`,
+     `auth.membership_denied`.
+3. A pending request is checked again with `POST /api/v1/federation/join/status` `{ assertion }` (a fresh assertion);
+   it returns `joined` with tokens once approved.
+4. `POST /api/v1/federation/leave` `{ auth_token }` gives the membership up (tokens stop working; your home account is
+   untouched). A private server asks for a code again if you return.
+
+### Invitation codes and requests to join
+
+Need `manage_invites` / `manage_join_requests` (the owner, admins and moderators have them by default).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/server/invites?auth_token=` | Every code with `uses`, `max_uses`, `expires_at` and `state` (`active`, `used_up`, `expired`, `revoked`) |
+| `POST /api/v1/server/invites` `{auth_token, note?, max_uses?, expires_in_hours?}` | Make a code (12 characters). 201 |
+| `DELETE /api/v1/server/invites/{code}?auth_token=` | Revoke it. People already in stay in |
+| `GET /api/v1/server/join-requests?auth_token=&status=` | Requests (`pending`, `approved`, `denied`), newest first, with the pending count |
+| `POST /api/v1/server/join-requests/{id}/approve` `{auth_token}` | Let them in (a local account can sign in at once; someone from another server gets in the next time they check) |
+| `POST /api/v1/server/join-requests/{id}/deny` `{auth_token}` | Decline |
+
+Every change is written to the audit log. A new request sends a realtime `join_request.created` event to the people who
+can decide, and a decision sends `join_request.decided` to a local requester.
+
+Codes cannot be probed: a code that does not exist, was revoked, has expired or is used up all answer
+`join.invite_invalid`, and spending a code is one atomic update.
 
 ## Messages
 

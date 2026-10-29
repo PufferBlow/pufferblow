@@ -309,3 +309,19 @@ and pulls the new key.
 - **An old followee's profile shows "deleted account."** The remote
   actor returned 410 Gone on our last fetch. Their server marked them
   deleted. Pufferblow honors that and keeps the marker.
+
+
+## Naming an instance that is not where it listens
+
+An instance is known by `host:port` (the host in every `name@host`), and by default that is the address it listens
+on. Behind a container or a proxy those differ. Set the public name separately:
+
+```toml
+[server]
+api_host = "0.0.0.0"
+api_port = 7575
+public_host = "chat.example.org:443"   # or PUFFERBLOW_PUBLIC_HOST
+public_scheme = "https"                # or PUFFERBLOW_PUBLIC_SCHEME (http for local test setups)
+```
+
+The public name is fixed when the instance is first set up, as the listening address always was.

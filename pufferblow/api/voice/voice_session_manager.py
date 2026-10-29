@@ -24,6 +24,7 @@ from pufferblow.api.database.tables.voice_sessions import (
     VoiceSessionParticipant,
 )
 from pufferblow.api.websocket.websocket_manager import WebSocketsManager
+from pufferblow.api.models.config_model import instance_id_of
 
 
 class VoiceSessionManager:
@@ -71,8 +72,7 @@ class VoiceSessionManager:
 
     def _instance_id(self) -> str:
         """Return canonical local instance identifier."""
-        cfg = self.database_handler.config
-        return f"{cfg.API_HOST}:{cfg.API_PORT}"
+        return instance_id_of(self.database_handler.config)
 
     def _default_signaling_url(self) -> str:
         """Build fallback public signaling url if explicit env/config is missing."""

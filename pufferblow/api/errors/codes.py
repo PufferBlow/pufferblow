@@ -69,6 +69,13 @@ class ErrorCode:
     AUTH_TOKEN_REQUIRED = "auth.token_required"
     AUTH_INVALID_TOKEN = "auth.invalid_token"
     AUTH_USER_BANNED = "auth.user_banned"
+    # Joining: a server that decides who comes in (see ``api/server/join_policy.py``).
+    AUTH_MEMBERSHIP_PENDING = "auth.membership_pending"
+    AUTH_MEMBERSHIP_DENIED = "auth.membership_denied"
+    JOIN_INVITE_REQUIRED = "join.invite_required"
+    JOIN_INVITE_INVALID = "join.invite_invalid"
+    JOIN_ASSERTION_INVALID = "join.assertion_invalid"
+    JOIN_REFUSED = "join.refused"
     AUTH_PRIVILEGE_DENIED = "auth.privilege_denied"
     # Sign-in: deliberately collapsed code covering both
     # "username doesn't exist" and "wrong password". One code on the
@@ -262,6 +269,36 @@ ERROR_REGISTRY: dict[str, ErrorSpec] = {
                     "``details.field`` is ``'password'`` and ``details.rules`` "
                     "carries the list of unsatisfied checks (``min_length``, "
                     "``max_length``, …).",
+    ),
+    ErrorCode.AUTH_MEMBERSHIP_PENDING: ErrorSpec(
+        ErrorCode.AUTH_MEMBERSHIP_PENDING, 403,
+        "Your request to join is waiting for a moderator to approve it.",
+        description="The account exists but the server needs its owner or a moderator to approve it first.",
+    ),
+    ErrorCode.AUTH_MEMBERSHIP_DENIED: ErrorSpec(
+        ErrorCode.AUTH_MEMBERSHIP_DENIED, 403,
+        "Your request to join this server was declined.",
+        description="A moderator declined the request to join.",
+    ),
+    ErrorCode.JOIN_INVITE_REQUIRED: ErrorSpec(
+        ErrorCode.JOIN_INVITE_REQUIRED, 403,
+        "This server is invite-only. Enter an invitation code to join.",
+        description="The server's join mode is 'invite' and no code was given.",
+    ),
+    ErrorCode.JOIN_INVITE_INVALID: ErrorSpec(
+        ErrorCode.JOIN_INVITE_INVALID, 403,
+        "That invitation code isn't valid. It may have expired or been used up.",
+        description="The code does not exist, was revoked, has expired or has no uses left. One answer for all of them, so codes cannot be probed.",
+    ),
+    ErrorCode.JOIN_ASSERTION_INVALID: ErrorSpec(
+        ErrorCode.JOIN_ASSERTION_INVALID, 401,
+        "Couldn't confirm who you are from your home server.",
+        description="The signed identity assertion was malformed, expired, for another server, already used, or did not verify against the home server's key.",
+    ),
+    ErrorCode.JOIN_REFUSED: ErrorSpec(
+        ErrorCode.JOIN_REFUSED, 403,
+        "This server doesn't accept people from your server.",
+        description="The federation policy (mode and peer status) refuses the home instance.",
     ),
     ErrorCode.AUTH_SIGNUP_DISABLED: ErrorSpec(
         ErrorCode.AUTH_SIGNUP_DISABLED, 503,

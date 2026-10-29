@@ -78,6 +78,8 @@ class Users(Base):
     origin_server: Mapped[str] = mapped_column(String(255), default="", index=True)
     status: Mapped[str] = mapped_column(String(24), default="offline", index=True)
     roles_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # ``active``; ``pending`` while someone waits for a request-to-join to be decided (no sign-in until then); ``denied``.
+    membership_status: Mapped[str] = mapped_column(String(12), nullable=False, default="active", server_default="active")
     last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     joined_servers_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     auth_token: Mapped[str] = mapped_column(String, default="", index=True)

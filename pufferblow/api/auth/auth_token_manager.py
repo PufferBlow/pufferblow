@@ -8,6 +8,7 @@ from typing import Any
 
 from pufferblow.api.database.database_handler import DatabaseHandler
 from pufferblow.api.encrypt.encrypt import Encrypt
+from pufferblow.api.models.config_model import instance_id_of
 
 
 class AuthTokenManager:
@@ -27,7 +28,7 @@ class AuthTokenManager:
     def _instance_id(self) -> str:
         """Instance id."""
         config = self.database_handler.config
-        return f"{config.API_HOST}:{config.API_PORT}"
+        return instance_id_of(config)
 
     @staticmethod
     def _b64url_encode(data: bytes) -> str:

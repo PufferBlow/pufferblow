@@ -1,12 +1,23 @@
 import pufferblow.core.constants as constants
 
 
+def instance_id_of(config) -> str:
+    """The ``host:port`` this instance is known by: its public address when one is set, else where it listens."""
+    public = str(getattr(config, "PUBLIC_HOST", "") or "").strip()
+    return public or f"{config.API_HOST}:{config.API_PORT}"
+
+
 class Config:
     """Configuration model class."""
 
     # API related parameters
     API_HOST: str = "127.0.0.1"
     API_PORT: int = 7575
+    # What this instance is called by everyone else (the host in every ``name@host``), when that is not where it
+    # listens: a container binds 0.0.0.0 but is reached as ``host.docker.internal:7577``. None means "where it listens".
+    PUBLIC_HOST: str | None = None
+    # ``http`` or ``https`` for the public address; None keeps the default (https, except for local hosts).
+    PUBLIC_SCHEME: str | None = None
     LOGS_PATH: str = f"{constants.HOME}/.pufferblow/logs/pufferblow.log"
     WORKERS: int = 7
     RATE_LIMIT_DURATION: int = 5

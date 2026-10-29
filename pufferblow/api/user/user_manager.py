@@ -33,6 +33,7 @@ from pufferblow.api.roles.constants import DEFAULT_ROLE_ID, OWNER_ROLE_ID
 from pufferblow.api.user.status import normalize_user_status
 from pufferblow.api.utils.appearance import derive_accent_color
 from pufferblow.api.utils.default_art import default_avatar_url, default_banner_url
+from pufferblow.api.models.config_model import instance_id_of
 
 
 # ── LQIP URL resolution ───────────────────────────────────────────────
@@ -100,6 +101,7 @@ class UserManager:
         password: str,
         is_admin: bool | None = False,
         is_owner: bool | None = False,
+        membership_status: str = "active",
     ) -> Users:
         """Sign up a new user with provided credentials.
 
@@ -149,9 +151,10 @@ class UserManager:
         new_user.auth_token = (
             auth_token  # Pass plain token to be encrypted in DB handler
         )
-        new_user.origin_server = f"{self.config.API_HOST}:{self.config.API_PORT}"
+        new_user.origin_server = instance_id_of(self.config)
         new_user.auth_token_expire_time = auth_token_expire_time
         new_user.status = "online"
+        new_user.membership_status = membership_status
 
         # Appearance defaults. avatar_kind / banner_kind default at the
         # column level too, but setting them here makes the intent
@@ -207,7 +210,7 @@ class UserManager:
             user_id=user.user_id, data=user.auth_token, associated_to="auth_token"
         )
 
-        current_instance = f"{self.config.API_HOST}:{self.config.API_PORT}"
+        current_instance = instance_id_of(self.config)
         if str(user.origin_server) != current_instance:
             return (None, False, "instance_mismatch")
 
@@ -215,6 +218,12 @@ class UserManager:
             return (None, False, "banned")
 
         if self._password_matches(user_id=user.user_id, stored=user.password, given=password):
+            # Only said once the password is right, so this cannot be used to find out who has an account.
+            status = getattr(user, "membership_status", "active") or "active"
+            if status == "pending":
+                return (None, False, "membership_pending")
+            if status == "denied":
+                return (None, False, "membership_denied")
             return (user, True, None)
 
         return (None, False, "invalid_password")
@@ -280,7 +289,7 @@ class UserManager:
         if not canonical:
             return False, "invalid_target", None
 
-        own_host_port = f"{self.config.API_HOST}:{self.config.API_PORT}"
+        own_host_port = instance_id_of(self.config)
         if canonical == own_host_port:
             return False, "self_join", None
 

@@ -292,6 +292,9 @@ def _build_server_info_payload(state: ServerState) -> dict:
         "version": getattr(config, "VERSION", "1.0.0") if config else "1.0.0",
         "max_users": None,
         "is_private": bool(getattr(settings, "is_private", False)),
+        # Who may join: ``open``, ``invite`` (needs a code) or ``request`` (a moderator approves). Public, so a client
+        # can say what to ask for before anyone signs in.
+        "join_mode": database_handler.get_join_mode(),
         "creation_date": created_at.isoformat() if created_at else None,
         "avatar_url": getattr(server, "avatar_url", None),
         "banner_url": getattr(server, "banner_url", None),
@@ -552,6 +555,16 @@ async def update_server_info_route(request: ServerSettingsRequest):
     if request.is_private is not None:
         server_settings_updates["is_private"] = request.is_private
         updated_fields.append("is_private")
+    if request.join_mode is not None:
+        database_handler.set_join_mode(request.join_mode)
+        updated_fields.append("join_mode")
+        log_activity(
+            activity_type="server_settings_updated",
+            user_id=user_id,
+            title=f"Who can join changed to '{request.join_mode}'",
+            description=f"The join mode is now {request.join_mode}",
+            metadata={"field": "join_mode", "new_value": request.join_mode, "setting_type": "server_settings"},
+        )
     if request.max_message_length is not None:
         server_settings_updates["max_message_length"] = request.max_message_length
         updated_fields.append("max_message_length")

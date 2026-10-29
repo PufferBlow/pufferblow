@@ -2,12 +2,15 @@ import json
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Form, UploadFile, exceptions
+from fastapi.responses import JSONResponse
 from loguru import logger
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.dependencies import get_current_user
 from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.logger.msgs import info
+from pufferblow.api.server.join_announce import announce_join_request
+from pufferblow.api.server.join_policy import ACTIVE, PENDING, JoinPolicy
 from pufferblow.api.notifications.notifications_manager import is_reserved_username
 from pufferblow.api.schemas import (
     AuthTokenQuery,
@@ -172,11 +175,34 @@ async def signup_new_user(request: SignupRequest):
             details={"field": "username", "username": request.username},
         )
 
+    # The server decides who comes in (open / invite code / request), the same way for everyone: this may raise.
+    admission = JoinPolicy(api_initializer.database_handler).admit(request.invite_code)
+
     user_data = api_initializer.user_manager.sign_up(
-        username=request.username, password=request.password
+        username=request.username,
+        password=request.password,
+        membership_status=ACTIVE if admission == ACTIVE else PENDING,
     )
 
     logger.info(info.INFO_NEW_USER_SIGNUP_SUCCESSFULLY(user=user_data))
+
+    if admission == PENDING:
+        join_request = api_initializer.database_handler.create_join_request(
+            kind="local",
+            handle=request.username,
+            user_id=str(user_data.user_id),
+            message=request.message,
+        )
+        await announce_join_request(join_request)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status_code": 202,
+                "status": "pending",
+                "message": "Your request to join was sent. You can sign in once a moderator approves it.",
+                "request_id": join_request["request_id"],
+            },
+        )
 
     api_initializer.database_handler.create_activity_audit_entry(
         ActivityAudit(
@@ -262,6 +288,10 @@ def _sign_in(username: str, password: str) -> dict:
                 ErrorCode.AUTH_INSTANCE_MISMATCH,
                 details={"home_server": getattr(user, "origin_server", None)},
             )
+        if failure_reason == "membership_pending":
+            raise ApiError(ErrorCode.AUTH_MEMBERSHIP_PENDING)
+        if failure_reason == "membership_denied":
+            raise ApiError(ErrorCode.AUTH_MEMBERSHIP_DENIED)
         if failure_reason == "banned":
             raise ApiError(
                 ErrorCode.AUTH_USER_BANNED,

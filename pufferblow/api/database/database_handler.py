@@ -22,6 +22,7 @@ from pufferblow.api.database.federation_mixin import DatabaseFederationMixin
 from pufferblow.api.database.identity_keys_mixin import DatabaseIdentityKeysMixin
 from pufferblow.api.database.health_mixin import DatabaseHealthMixin
 from pufferblow.api.database.protocol_mixin import DatabaseProtocolMixin
+from pufferblow.api.database.server_access_mixin import DatabaseServerAccessMixin
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.database.tables.activity_metrics import ActivityMetrics
 from pufferblow.api.database.tables.activitypub import (
@@ -120,7 +121,7 @@ def _as_uuid(value):
     return value if isinstance(value, _uuid.UUID) else _uuid.UUID(str(value))
 
 
-class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin, DatabaseChannelOrgMixin, DatabaseFederationMixin, DatabaseIdentityKeysMixin, DatabaseDmMembersMixin):
+class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin, DatabaseChannelOrgMixin, DatabaseFederationMixin, DatabaseIdentityKeysMixin, DatabaseDmMembersMixin, DatabaseServerAccessMixin):
     """Database handler for PufferBlow's API"""
     def __init__(
         self, database_engine: sqlalchemy.create_engine, encrypt_manager: Encrypt, config: Config
@@ -447,6 +448,18 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         except Exception as exc:
             logger.warning(
                 "bot-authoring column migration skipped due to error: {err}",
+                err=str(exc),
+            )
+
+        # Join access: users.membership_status and the privileges for invitation codes and join requests.
+        try:
+            from pufferblow.api.database import join_access
+
+            with self.database_engine.begin() as conn:
+                join_access.apply(conn)
+        except Exception as exc:
+            logger.warning(
+                "join-access migration skipped due to error: {err}",
                 err=str(exc),
             )
 
@@ -5358,6 +5371,9 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 "name": "Manage Stickers",
                 "category": "server_management",
             },
+            # Who comes in: invitation codes, and approving requests to join.
+            {"id": "manage_invites", "name": "Manage Invitation Codes", "category": "moderation"},
+            {"id": "manage_join_requests", "name": "Manage Join Requests", "category": "moderation"},
         ]
 
         # Default roles data
@@ -5395,6 +5411,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     "view_files",
                     "manage_background_tasks",
                     "manage_stickers",
+                    "manage_invites",
+                    "manage_join_requests",
                 ],
             },
             {
@@ -5427,6 +5445,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     "view_files",
                     "manage_background_tasks",
                     "manage_stickers",
+                    "manage_invites",
+                    "manage_join_requests",
                 ],
             },
             {
@@ -5448,6 +5468,8 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     "moderate_content",
                     "upload_files",
                     "view_files",
+                    "manage_invites",
+                    "manage_join_requests",
                 ],
             },
             {

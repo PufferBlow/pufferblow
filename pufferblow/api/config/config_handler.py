@@ -156,6 +156,11 @@ class ConfigHandler:
             config_toml.get("server", {}).get("api_port")
             or _env_int("PUFFERBLOW_API_PORT", int(config.API_PORT))
         )
+        config.PUBLIC_HOST = (
+            str(config_toml.get("server", {}).get("public_host") or os.getenv("PUFFERBLOW_PUBLIC_HOST") or "").strip() or None
+        )
+        scheme = str(config_toml.get("server", {}).get("public_scheme") or os.getenv("PUFFERBLOW_PUBLIC_SCHEME") or "").strip().lower()
+        config.PUBLIC_SCHEME = scheme if scheme in {"http", "https"} else None
         config.WORKERS = (
             config_toml.get("server", {}).get("workers")
             or _env_int("PUFFERBLOW_WORKERS", int(config.WORKERS))

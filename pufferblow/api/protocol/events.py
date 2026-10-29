@@ -15,6 +15,8 @@ CHANNEL_UPDATED = "channel.updated"
 PRESENCE_CHANGED = "presence.changed"
 NOTIFICATION_CREATED = "notification.created"
 TYPING_STARTED = "typing.started"
+JOIN_REQUEST_CREATED = "join_request.created"
+JOIN_REQUEST_DECIDED = "join_request.decided"
 
 #: How long a client shows someone as typing after one `typing.started`, unless renewed.
 TYPING_EXPIRES_MS = 8_000
@@ -30,6 +32,8 @@ EVENT_NAMES = (
     PRESENCE_CHANGED,
     NOTIFICATION_CREATED,
     TYPING_STARTED,
+    JOIN_REQUEST_CREATED,
+    JOIN_REQUEST_DECIDED,
 )
 
 

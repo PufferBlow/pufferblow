@@ -68,6 +68,14 @@ def get_current_user(auth_token: str) -> str:
         token_preview=_token_preview(auth_token),
     )
 
+    account = api_initializer.database_handler.get_user(user_id=user_id)
+    membership = (getattr(account, "membership_status", None) or "active") if account is not None else "active"
+    if membership == "pending":
+        raise ApiError(ErrorCode.AUTH_MEMBERSHIP_PENDING)
+    if membership in ("denied", "remote"):
+        # ``remote``: a member who left. Their tokens stop working at once.
+        raise ApiError(ErrorCode.AUTH_MEMBERSHIP_DENIED)
+
     moderation_state = api_initializer.user_manager.get_user_moderation_state(
         user_id=user_id
     )

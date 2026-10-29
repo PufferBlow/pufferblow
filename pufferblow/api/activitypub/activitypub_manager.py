@@ -153,7 +153,8 @@ class ActivityPubManager:
         if server_id and "/" not in server_id and "@" not in server_id and " " not in server_id:
             host = server_id.rsplit(":", 1)[0] if server_id.count(":") == 1 else server_id
             local = host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or host.endswith(".local")
-            return f"{'http' if local else 'https'}://{server_id}"
+            scheme = getattr(self.database_handler.config, "PUBLIC_SCHEME", None) or ("http" if local else "https")
+            return f"{scheme}://{server_id}"
         return self.build_base_url()
 
     def _actor_uri_of(self, user_id: str) -> str:
@@ -169,9 +170,14 @@ class ActivityPubManager:
             return request_base_url.rstrip("/")
 
         config = self.database_handler.config
-        host = str(config.API_HOST).strip()
-        port = str(config.API_PORT).strip()
-        scheme = "https" if host not in {"127.0.0.1", "localhost"} else "http"
+        public = str(getattr(config, "PUBLIC_HOST", "") or "").strip()
+        host, _, port = public.rpartition(":") if public.count(":") == 1 else (public, "", "")
+        if not public:
+            host = str(config.API_HOST).strip()
+            port = str(config.API_PORT).strip()
+        scheme = getattr(config, "PUBLIC_SCHEME", None) or ("https" if host not in {"127.0.0.1", "localhost"} else "http")
+        if public and not port:
+            return f"{scheme}://{public}"
         if (scheme == "https" and port == "443") or (scheme == "http" and port == "80"):
             return f"{scheme}://{host}"
         return f"{scheme}://{host}:{port}"
@@ -533,7 +539,8 @@ class ActivityPubManager:
             preferred_username=remote_actor.preferred_username,
             actor_uri=remote_actor.actor_uri,
         )
-        user = self.user_manager.sign_up(username=username, password=generated_password)
+        # ``remote``: known here (a DM, a friend request), but not a member until they join through the join policy.
+        user = self.user_manager.sign_up(username=username, password=generated_password, membership_status="remote")
         remote_domain = remote_actor.actor_uri.split("/")[2] if "://" in remote_actor.actor_uri else ""
         self.database_handler.update_user_origin_server(
             user_id=str(user.user_id), origin_server=remote_domain or "remote"
