@@ -5411,6 +5411,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
             # Who comes in: invitation codes, and approving requests to join.
             {"id": "manage_invites", "name": "Manage Invitation Codes", "category": "moderation"},
             {"id": "manage_join_requests", "name": "Manage Join Requests", "category": "moderation"},
+            {"id": "kick_users", "name": "Kick Users", "category": "moderation"},
         ]
 
         # Default roles data
@@ -5450,6 +5451,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     "manage_stickers",
                     "manage_invites",
                     "manage_join_requests",
+                    "kick_users",
                 ],
             },
             {
@@ -5473,6 +5475,7 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                     "view_files",
                     "manage_invites",
                     "manage_join_requests",
+                    "kick_users",
                 ],
             },
             {

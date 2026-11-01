@@ -803,6 +803,13 @@ class PrivilegeListRequest(BaseModel):
     auth_token: str = Field(min_length=1)
 
 
+class DeleteAccountRequest(BaseModel):
+    """Delete your own account. The password is asked for again: a stolen session alone must not be enough."""
+
+    auth_token: str = Field(min_length=1)
+    password: str = Field(min_length=1, max_length=256)
+
+
 class RoleCreateRequest(BaseModel):
     """Create a custom instance role."""
 

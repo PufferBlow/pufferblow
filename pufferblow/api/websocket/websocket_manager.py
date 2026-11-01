@@ -258,6 +258,13 @@ class WebSocketsManager:
             )
             raise
 
+    async def disconnect_user(self, user_id: str) -> int:
+        """Close every connection a person has (they were removed, or deleted their account). How many were open."""
+        sockets = [ws for ws, info in list(self.active_connections.items()) if isinstance(info, dict) and str(info.get("user_id")) == str(user_id)]
+        for websocket in sockets:
+            await self.disconnect(websocket)
+        return len(sockets)
+
     async def disconnect(self, websocket: WebSocket) -> None:
         """
         Disconnects a client

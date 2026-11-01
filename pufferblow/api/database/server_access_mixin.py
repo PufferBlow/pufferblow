@@ -184,6 +184,57 @@ class DatabaseServerAccessMixin:
             # Whoever is no longer a member cannot trade an old refresh token for a new session.
             self.delete_user_refresh_tokens(user_id)
 
+    def erase_account(self, user_id: str, ghost_name: str, avatar_url: str, banner_url: str) -> None:
+        """Blank an account out and drop what only made sense with it (friends, blocks, signing keys, sessions)."""
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+
+        from pufferblow.api.database.tables.friend_request_blocks import FriendRequestBlocks
+        from pufferblow.api.database.tables.friendships import Friendships
+        from pufferblow.api.database.tables.identity_keys import IdentityKeys
+
+        uid = uuid.UUID(str(user_id))
+        # These tables keep the id as a native UUID on Postgres and as text on SQLite.
+        fid = uid if self.database_engine.dialect.name == "postgresql" else str(uid)
+        with self.database_session() as session:
+            session.execute(
+                update(Users)
+                .where(Users.user_id == uid)
+                .values(
+                    username=ghost_name,
+                    about=None,
+                    avatar_url=avatar_url,
+                    banner_url=banner_url,
+                    avatar_kind="identicon",
+                    banner_kind="default",
+                    accent_color=None,
+                    avatar_seed=str(uid),
+                    pronouns=None,
+                    custom_status=None,
+                    profile_settings=None,
+                    status="offline",
+                    roles_ids=[],
+                    joined_servers_ids=[],
+                    membership_status="deleted",
+                    auth_token="",
+                    auth_token_expire_time=None,
+                )
+            )
+            session.execute(delete(Friendships).where(or_(Friendships.requester_id == fid, Friendships.addressee_id == fid)))
+            session.execute(delete(FriendRequestBlocks).where(or_(FriendRequestBlocks.blocker_id == fid, FriendRequestBlocks.blocked_id == fid)))
+            session.execute(delete(IdentityKeys).where(IdentityKeys.user_id == str(uid)))
+            session.commit()
+        try:
+            # Their federation key pair goes too (the table is not there on a bare test database).
+            from pufferblow.api.database.tables.activitypub import ActivityPubActor
+
+            with self.database_session() as session:
+                session.execute(delete(ActivityPubActor).where(ActivityPubActor.user_id == uid, ActivityPubActor.is_local.is_(True)))
+                session.commit()
+        except (OperationalError, ProgrammingError):
+            pass
+        self._invalidate_user_cache(user_id)
+        self.delete_user_refresh_tokens(user_id)
+
     def user_ids_with_privilege(self, privilege_id: str) -> list[str]:
         """Local people whose roles include this privilege (the owner always counts)."""
         from pufferblow.api.database.tables.roles import Roles

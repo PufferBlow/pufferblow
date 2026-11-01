@@ -4,6 +4,7 @@ import hmac
 import hashlib
 import json
 import random
+import secrets
 import string
 import uuid
 
@@ -34,6 +35,9 @@ from pufferblow.api.user.status import normalize_user_status
 from pufferblow.api.utils.appearance import derive_accent_color
 from pufferblow.api.utils.default_art import default_avatar_url, default_banner_url
 from pufferblow.api.models.config_model import instance_id_of
+
+#: The name an erased account is left under. Nobody can sign up with it, so nobody can pose as a deleted person.
+DELETED_PREFIX = "deleted_"
 
 
 # ── LQIP URL resolution ───────────────────────────────────────────────
@@ -224,6 +228,8 @@ class UserManager:
                 return (None, False, "membership_pending")
             if status == "denied":
                 return (None, False, "membership_denied")
+            if status == "kicked":
+                return (None, False, "membership_removed")
             return (user, True, None)
 
         return (None, False, "invalid_password")
@@ -541,6 +547,10 @@ class UserManager:
             return ErrorCode.AUTH_MEMBERSHIP_PENDING
         if status in ("denied", "remote"):
             return ErrorCode.AUTH_MEMBERSHIP_DENIED
+        if status == "kicked":
+            return ErrorCode.AUTH_MEMBERSHIP_REMOVED
+        if status == "deleted":
+            return ErrorCode.AUTH_INVALID_TOKEN
         return None
 
     def check_user(
@@ -615,6 +625,21 @@ class UserManager:
 
         # Check if 'owner' role is in the user's roles_ids
         return OWNER_ROLE_ID in user_data.roles_ids if user_data.roles_ids else False
+
+    def delete_account(self, user_id: str) -> None:
+        """Erase an account the person no longer wants (only they can ask).
+
+        The name, picture, bio, password, sign-ins, friends and keys are gone; the row stays under a name nobody can take,
+        so the messages they wrote keep their place in the conversation (shown as "Deleted user").
+        """
+        ghost = f"{DELETED_PREFIX}{uuid.UUID(str(user_id)).hex[:8]}"
+        self.update_user_password(user_id=str(user_id), new_password=secrets.token_urlsafe(32))
+        self.database_handler.erase_account(
+            user_id=str(user_id),
+            ghost_name=ghost,
+            avatar_url=default_avatar_url(str(user_id)),
+            banner_url=default_banner_url(str(user_id)),
+        )
 
     def get_user_role_ids(self, user_id: str) -> list[str]:
         """Return normalized role ids for a user."""

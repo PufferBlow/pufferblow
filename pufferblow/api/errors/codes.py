@@ -72,6 +72,8 @@ class ErrorCode:
     # Joining: a server that decides who comes in (see ``api/server/join_policy.py``).
     AUTH_MEMBERSHIP_PENDING = "auth.membership_pending"
     AUTH_MEMBERSHIP_DENIED = "auth.membership_denied"
+    AUTH_MEMBERSHIP_REMOVED = "auth.membership_removed"
+    ACCOUNT_OWNER_CANNOT_DELETE = "account.owner_cannot_delete"
     JOIN_INVITE_REQUIRED = "join.invite_required"
     JOIN_INVITE_INVALID = "join.invite_invalid"
     JOIN_ASSERTION_INVALID = "join.assertion_invalid"
@@ -279,6 +281,16 @@ ERROR_REGISTRY: dict[str, ErrorSpec] = {
         ErrorCode.AUTH_MEMBERSHIP_DENIED, 403,
         "Your request to join this server was declined.",
         description="A moderator declined the request to join.",
+    ),
+    ErrorCode.AUTH_MEMBERSHIP_REMOVED: ErrorSpec(
+        ErrorCode.AUTH_MEMBERSHIP_REMOVED, 403,
+        "You were removed from this server.",
+        description="A moderator removed this account from the server. The account itself still exists.",
+    ),
+    ErrorCode.ACCOUNT_OWNER_CANNOT_DELETE: ErrorSpec(
+        ErrorCode.ACCOUNT_OWNER_CANNOT_DELETE, 409,
+        "The owner cannot delete their account. Hand the server over first.",
+        description="The server owner asked to delete their own account.",
     ),
     ErrorCode.JOIN_INVITE_REQUIRED: ErrorSpec(
         ErrorCode.JOIN_INVITE_REQUIRED, 403,

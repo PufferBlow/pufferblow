@@ -7,12 +7,14 @@ from loguru import logger
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.dependencies import get_current_user
+from pufferblow.api.user.user_manager import DELETED_PREFIX
 from pufferblow.api.errors import ApiError, ErrorCode
 from pufferblow.api.logger.msgs import info
 from pufferblow.api.server.join_announce import announce_join_request
 from pufferblow.api.server.join_policy import ACTIVE, PENDING, JoinPolicy
 from pufferblow.api.notifications.notifications_manager import is_reserved_username
 from pufferblow.api.schemas import (
+    DeleteAccountRequest,
     AuthTokenQuery,
     EditProfileRequest,
     JoinServerRequest,
@@ -169,7 +171,7 @@ async def signup_new_user(request: SignupRequest):
     _validate_username_format(request.username)
     _validate_password_strength(request.password)
 
-    if api_initializer.user_manager.check_username(request.username):
+    if request.username.lower().startswith(DELETED_PREFIX) or api_initializer.user_manager.check_username(request.username):
         raise ApiError(
             ErrorCode.AUTH_USERNAME_TAKEN,
             details={"field": "username", "username": request.username},
@@ -292,6 +294,8 @@ def _sign_in(username: str, password: str) -> dict:
             raise ApiError(ErrorCode.AUTH_MEMBERSHIP_PENDING)
         if failure_reason == "membership_denied":
             raise ApiError(ErrorCode.AUTH_MEMBERSHIP_DENIED)
+        if failure_reason == "membership_removed":
+            raise ApiError(ErrorCode.AUTH_MEMBERSHIP_REMOVED)
         if failure_reason == "banned":
             raise ApiError(
                 ErrorCode.AUTH_USER_BANNED,
@@ -794,3 +798,31 @@ def _leave_error_message(code: str | None) -> str:
         "user_not_found": "That account no longer exists.",
         "invalid_target": "The instance address looks malformed.",
     }.get(code or "", "Could not leave that instance.")
+
+
+@router.post("/delete", status_code=200)
+async def delete_account_route(request: DeleteAccountRequest) -> dict:
+    """Delete your own account. Only the person it belongs to can do this (not staff), and has to give their password.
+
+    What they wrote stays, shown as "Deleted user". The server owner has to hand the server over first.
+    """
+    user_id = get_current_user(request.auth_token)
+    users = api_initializer.user_manager
+    if users.is_server_owner(user_id=user_id):
+        raise ApiError(ErrorCode.ACCOUNT_OWNER_CANNOT_DELETE)
+    if not users.check_user_password(user_id=user_id, password=request.password):
+        raise ApiError(ErrorCode.AUTH_INVALID_CREDENTIALS)
+    username = api_initializer.database_handler.get_user(user_id=user_id).username
+    users.delete_account(user_id)
+    await api_initializer.websockets_manager.disconnect_user(user_id)
+    api_initializer.database_handler.create_activity_audit_entry(
+        ActivityAudit(
+            activity_id=str(uuid.uuid4()),
+            activity_type="account_deleted",
+            user_id=str(user_id),
+            title=f"{username} deleted their account",
+            description="The person deleted their own account.",
+            metadata_json=json.dumps({"user_id": str(user_id)}),
+        )
+    )
+    return {"status_code": 200, "deleted": True}

@@ -14,6 +14,7 @@ import sqlalchemy as sa
 NEW_PRIVILEGES = (
     ("manage_invites", "Manage Invitation Codes", "moderation"),
     ("manage_join_requests", "Manage Join Requests", "moderation"),
+    ("kick_users", "Kick Users", "moderation"),
 )
 
 #: The built-in roles that get them: the owner runs the server; moderators decide who comes in.

@@ -37,6 +37,44 @@ def _audit(user_id: str, title: str, description: str, **meta) -> None:
     )
 
 
+# ── removing someone ──────────────────────────────────────────
+
+
+@router.post("/members/{user_id}/kick", status_code=200)
+async def kick_member_route(user_id: str, auth_token: str = Body(..., embed=True), reason: str | None = Body(default=None, embed=True, max_length=300)):
+    """Take someone's membership away. Their account stays; they just cannot get into this server any more."""
+    actor_id = require_privilege(auth_token, "kick_users")
+    users = api_initializer.user_manager
+    database = api_initializer.database_handler
+    if str(actor_id) == str(user_id):
+        raise ApiError(ErrorCode.VALIDATION_FIELD_RANGE, message="You cannot remove yourself.", details={"field": "user_id"})
+    target = database.get_user(user_id=user_id)
+    if target is None:
+        raise ApiError(ErrorCode.RESOURCE_NOT_FOUND)
+    if users.is_server_owner(user_id=user_id):
+        raise ApiError(ErrorCode.AUTH_PRIVILEGE_DENIED, message="The server owner cannot be removed.")
+    # Moderators remove members; only the owner removes a moderator.
+    if "moderator" in (target.roles_ids or []) and not users.is_server_owner(user_id=actor_id):
+        raise ApiError(ErrorCode.AUTH_PRIVILEGE_DENIED, message="Only the owner can remove a moderator.")
+    database.set_membership_status(user_id, "kicked")
+    await api_initializer.websockets_manager.disconnect_user(user_id)
+    _audit(actor_id, f"{target.username} was removed", "A moderator removed this person from the server.", target_user_id=str(user_id), reason=reason)
+    return {"status_code": 200, "removed": True, "user_id": str(user_id)}
+
+
+@router.post("/members/{user_id}/reinstate", status_code=200)
+async def reinstate_member_route(user_id: str, auth_token: str = Body(..., embed=True)):
+    """Let someone who was removed back in."""
+    actor_id = require_privilege(auth_token, "kick_users")
+    database = api_initializer.database_handler
+    target = database.get_user(user_id=user_id)
+    if target is None or getattr(target, "membership_status", "active") != "kicked":
+        raise ApiError(ErrorCode.RESOURCE_NOT_FOUND)
+    database.set_membership_status(user_id, "active")
+    _audit(actor_id, f"{target.username} was let back in", "A moderator reinstated this person.", target_user_id=str(user_id))
+    return {"status_code": 200, "reinstated": True, "user_id": str(user_id)}
+
+
 # ── invitation codes ──────────────────────────────────────────
 
 
