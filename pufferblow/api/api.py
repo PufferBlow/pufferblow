@@ -68,11 +68,18 @@ async def lifespan(app: FastAPI):
 
     _mount_static_routes()
 
+    publisher = getattr(api_initializer, "event_publisher", None)
+    if hasattr(publisher, "start"):
+        await publisher.start()
+
     async with lifespan_background_tasks(), health_sampling(
         build_instance_health_payload, lambda: getattr(api_initializer, "database_handler", None)
     ):
         logger.success("Server ready — accepting requests")
         yield
+
+    if hasattr(publisher, "stop"):
+        await publisher.stop()
 
     logger.info("Server shutting down…")
     if api_initializer.database_handler is not None:

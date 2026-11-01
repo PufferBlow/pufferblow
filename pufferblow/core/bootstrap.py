@@ -285,7 +285,13 @@ class APIInitializer:
         )
         self.principal_resolver = AnyPrincipalResolver(self.user_principal_resolver, self.bot_principal_resolver)
 
-        self.event_publisher = InProcessPublisher(self.websockets_manager, seq_store=self.database_handler)
+        if self.database_handler.database_engine.dialect.name == "postgresql":
+            # Several workers, one database: events and cache changes travel between them through it.
+            from pufferblow.api.events.pg_bus import PostgresPublisher
+
+            self.event_publisher = PostgresPublisher(self.websockets_manager, self.database_handler)
+        else:
+            self.event_publisher = InProcessPublisher(self.websockets_manager, seq_store=self.database_handler)
         self.message_service = MessageService(
             messages_manager=self.messages_manager,
             channels_manager=self.channels_manager,

@@ -20,6 +20,7 @@ from pufferblow.api.database.channel_org_mixin import DatabaseChannelOrgMixin
 from pufferblow.api.database.dm_members_mixin import DatabaseDmMembersMixin
 from pufferblow.api.database.federation_mixin import DatabaseFederationMixin
 from pufferblow.api.database.identity_keys_mixin import DatabaseIdentityKeysMixin
+from pufferblow.api.database.realtime_bus_mixin import DatabaseRealtimeBusMixin
 from pufferblow.api.database.health_mixin import DatabaseHealthMixin
 from pufferblow.api.database.protocol_mixin import DatabaseProtocolMixin
 from pufferblow.api.database.server_access_mixin import DatabaseServerAccessMixin
@@ -121,7 +122,7 @@ def _as_uuid(value):
     return value if isinstance(value, _uuid.UUID) else _uuid.UUID(str(value))
 
 
-class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin, DatabaseChannelOrgMixin, DatabaseFederationMixin, DatabaseIdentityKeysMixin, DatabaseDmMembersMixin, DatabaseServerAccessMixin):
+class DatabaseHandler(DatabaseRealtimeBusMixin, DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, DatabaseProtocolMixin, DatabaseHealthMixin, DatabaseChannelOrgMixin, DatabaseFederationMixin, DatabaseIdentityKeysMixin, DatabaseDmMembersMixin, DatabaseServerAccessMixin):
     """Database handler for PufferBlow's API"""
     def __init__(
         self, database_engine: sqlalchemy.create_engine, encrypt_manager: Encrypt, config: Config
@@ -462,6 +463,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 "join-access migration skipped due to error: {err}",
                 err=str(exc),
             )
+
+        # Triggers that tell every worker when something it may have cached has changed (PostgreSQL only).
+        try:
+            from pufferblow.api.database import bus_setup
+
+            with self.database_engine.begin() as conn:
+                bus_setup.apply(conn)
+        except Exception as exc:
+            logger.warning("realtime-bus triggers skipped due to error: {err}", err=str(exc))
 
         # There is no Admin role: its holders become moderators and the role is removed.
         try:
