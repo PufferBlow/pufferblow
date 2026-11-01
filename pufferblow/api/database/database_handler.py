@@ -2415,6 +2415,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
 
         return key[0]
 
+    def get_message_keys(self, message_ids: list[str]) -> dict[str, Keys]:
+        """The encryption key of each of these messages, by message id, in one query (a page of history needs all of them)."""
+        ids = [str(m) for m in message_ids if m]
+        if not ids:
+            return {}
+        with self.database_session() as session:
+            rows = session.execute(select(Keys).where(Keys.associated_to == "message", Keys.message_id.in_(ids))).scalars().all()
+        return {str(row.message_id): row for row in rows}
+
     def get_auth_token_expire_time(self, user_id: str, auth_token: str) -> str:
         """
         Fetch the expire time for the given `auth_token`

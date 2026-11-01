@@ -4,6 +4,7 @@ import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import ORJSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
@@ -128,22 +129,18 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         if not client_ip:
             client_ip = request.client.host
 
-        if api_initializer.database_handler.check_is_ip_blocked(ip=client_ip):
-            # Count this rejection on the BlockedIPS row so the operator
-            # tab can show how many times this IP has knocked on the
-            # door since it was blocked. Best-effort — failures here
-            # must not gate the 403 response.
-            try:
-                api_initializer.database_handler.increment_blocked_ip_attempt(ip=client_ip)
-            except Exception:
-                pass
-            return ORJSONResponse(
-                status_code=403,
-                content={
-                    "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
-                },
-            )
+        # Everything below until `call_next` reads the cache and the database, and runs on every request. Done on the
+        # event loop it would hold up every other request (and the health check) for as long as it takes, so it runs on
+        # a worker thread and only the verdict comes back.
+        if str(api_initializer.database_handler.database_engine.url).startswith("sqlite://"):
+            return await self._dispatch_in_process(request, call_next, client_ip)
+        refused = await run_in_threadpool(self._screen, request.url.path, client_ip)
+        if refused is not None:
+            return refused
+        return await call_next(request)
 
+    def _limits(self, path: str) -> tuple[int, int, int]:
+        """The window (minutes), how many requests it allows, and how many warnings before a block, for this path."""
         server_settings = api_initializer.database_handler.get_server_settings()
         if server_settings is None:
             base_window_minutes = api_initializer.config.RATE_LIMIT_DURATION
@@ -154,33 +151,51 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             base_max_requests = server_settings.max_rate_limit_requests
             max_rate_limit_warnings = server_settings.max_rate_limit_warnings
 
-        endpoint_bucket = self._get_bucket(request.url.path)
         bucket_multiplier = {
             "auth": 0.2,
             "uploads": 0.15,
             "messages": 0.5,
             "default": 1.0,
-        }.get(endpoint_bucket, 1.0)
+        }.get(self._get_bucket(path), 1.0)
+        return max(base_window_minutes, 1), max(5, int(base_max_requests * bucket_multiplier)), max_rate_limit_warnings
 
-        window_minutes = max(base_window_minutes, 1)
-        max_requests = max(5, int(base_max_requests * bucket_multiplier))
+    def _blocked_response(self, client_ip: str):
+        """The answer for an address that is blocked (and a count of how often it knocked), or None."""
+        if not api_initializer.database_handler.check_is_ip_blocked(ip=client_ip):
+            return None
+        # Count this rejection on the BlockedIPS row so the operator tab can show how many times this IP has knocked
+        # on the door since it was blocked. Best-effort: failures here must not gate the 403 response.
+        try:
+            api_initializer.database_handler.increment_blocked_ip_attempt(ip=client_ip)
+        except Exception:
+            pass
+        return ORJSONResponse(
+            status_code=403,
+            content={
+                "message": "Malicious activities detected, you have been blocked. To get unblocked you can try reaching out to the server owner to manually unblock you."
+            },
+        )
 
-        # SQLite test harness has no memcache daemon — fall back to
-        # the per-process implementation so the existing tests still
-        # exercise the threshold logic deterministically.
-        if str(
-            api_initializer.database_handler.database_engine.url
-        ).startswith("sqlite://"):
-            return await self._fallback.dispatch(
-                request=request,
-                call_next=call_next,
-                client_ip=client_ip,
-                window_minutes=window_minutes,
-                max_requests=max_requests,
-                max_rate_limit_warnings=max_rate_limit_warnings,
-            )
+    def _screen(self, path: str, client_ip: str):
+        """Blocked address? Over the limit? A response to send instead of the request, or None to let it through."""
+        blocked = self._blocked_response(client_ip)
+        if blocked is not None:
+            return blocked
+        window_minutes, max_requests, max_rate_limit_warnings = self._limits(path)
+        return self._verdict_via_memcache(
+            client_ip=client_ip,
+            window_minutes=window_minutes,
+            max_requests=max_requests,
+            max_rate_limit_warnings=max_rate_limit_warnings,
+        )
 
-        return await self._dispatch_via_memcache(
+    async def _dispatch_in_process(self, request, call_next, client_ip: str):
+        """The SQLite test harness has no memcache daemon: the per-process implementation keeps the threshold logic testable."""
+        blocked = self._blocked_response(client_ip)
+        if blocked is not None:
+            return blocked
+        window_minutes, max_requests, max_rate_limit_warnings = self._limits(request.url.path)
+        return await self._fallback.dispatch(
             request=request,
             call_next=call_next,
             client_ip=client_ip,
@@ -189,17 +204,15 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             max_rate_limit_warnings=max_rate_limit_warnings,
         )
 
-    async def _dispatch_via_memcache(
+    def _verdict_via_memcache(
         self,
         *,
-        request,
-        call_next,
         client_ip: str,
         window_minutes: int,
         max_requests: int,
         max_rate_limit_warnings: int,
     ):
-        """Run the rate-limit checks against the shared memcache counters."""
+        """Run the rate-limit checks against the shared memcache counters: a response to send, or None to let it through."""
         from pufferblow.api.cache.memcache import (
             get_cache,
             rate_limit_cooldown_key,
@@ -243,20 +256,16 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             # Memcache unreachable — fail OPEN. A flaky daemon must
             # not become a denial-of-service vector against the
             # server itself.
-            return await call_next(request)
+            return None
 
+        # Only the current minute is counted. (This used to read the earlier minutes of the window with `cache.get`, but
+        # counters are stored as plain numbers, which `get` cannot unpickle: every one of those reads came back empty,
+        # costing up to four round trips per request and counting nothing. Counting the whole window would make the
+        # limit up to five times stricter than what has been enforced, so that is a decision, not a side effect.)
         windowed_total = int(current_count)
-        for back in range(1, max(1, window_minutes)):
-            prev = cache.get(rate_limit_counter_key(client_ip, minute_bucket - back))
-            if prev is None:
-                continue
-            try:
-                windowed_total += int(prev)
-            except (TypeError, ValueError):
-                continue
 
         if windowed_total < max_requests:
-            return await call_next(request)
+            return None
 
         warnings_count = cache.incr(
             rate_limit_warnings_key(client_ip),
@@ -574,8 +583,14 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if self.is_form_data_route(request_url):
             return await call_next(request)
 
-        query_params = request.query_params
+        # These look people up in the cache and the database: on a worker thread, not the event loop.
+        refused = await run_in_threadpool(self._screen_request, request, request_url, request.query_params)
+        if refused is not None:
+            return refused
+        return await call_next(request)
 
+    def _screen_request(self, request, request_url: str, query_params):
+        """Every check a privileged route's query goes through: a response to send instead, or None."""
         injection_response = self._check_sql_injection(request, query_params)
         if injection_response is not None:
             return injection_response
@@ -584,11 +599,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if validation_error is not None:
             return validation_error
 
-        exception = self._run_param_checks(request_url, query_params)
-        if exception is not None:
-            return exception
-
-        return await call_next(request)
+        return self._run_param_checks(request_url, query_params)
 
     def _check_sql_injection(self, request, query_params):
         """Detect SQL injection signatures in query params.

@@ -782,17 +782,25 @@ class MessagesManager:
         reactions_by_message = self.database_handler.get_reactions_for_messages(
             message_ids=message_ids
         )
+        # One query for every key on the page, not one per message.
+        keys_by_message = self.database_handler.get_message_keys(message_ids)
 
         for message_tuple in messages:
             message_data = message_tuple[0]
             user_data = message_tuple[1]
 
             try:
-                raw_message = self.decrypt_message(
-                    user_id=str(message_data.sender_id),
-                    message_id=message_data.message_id,
-                    encrypted_message=base64.b64decode(message_data.hashed_message),
-                )
+                key = keys_by_message.get(str(message_data.message_id))
+                if key is not None and str(key.user_id) == str(message_data.sender_id):
+                    raw_message = self.encrypt_manager.decrypt(
+                        ciphertext=base64.b64decode(message_data.hashed_message), key=key.key_value, iv=key.iv
+                    )
+                else:
+                    raw_message = self.decrypt_message(
+                        user_id=str(message_data.sender_id),
+                        message_id=message_data.message_id,
+                        encrypted_message=base64.b64decode(message_data.hashed_message),
+                    )
             except Exception as exc:
                 logger.warning(
                     "Failed to decrypt message_id={message_id} sender_id={sender_id}: {error}",

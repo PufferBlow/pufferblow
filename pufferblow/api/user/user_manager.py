@@ -382,13 +382,15 @@ class UserManager:
 
         users_id = self.database_handler.get_users_id()
 
+        # One list is one request: people with the same roles resolve to the same thing, so each set of roles is looked up
+        # once for the whole list instead of once per person (that was ~5 cache reads for each of hundreds of members).
+        shared: dict = {}
         for user_id in users_id:
-            is_account_owner = self.auth_token_manager.check_users_auth_token(
-                user_id=user_id, raw_auth_token=auth_token
-            )
+            # The token is the viewer's: it is the account owner's token for their own entry and for nobody else's.
+            is_account_owner = str(user_id) == str(viewer_user_id)
 
             user_data = self.user_profile(
-                user_id=user_id, is_account_owner=is_account_owner
+                user_id=user_id, is_account_owner=is_account_owner, shared=shared
             )
             # Erased accounts, and people waiting or declined (they are on the join requests screen), are not members.
             if user_data.get("membership_status") in ("deleted", "pending", "denied"):
@@ -409,9 +411,14 @@ class UserManager:
         user_id: str,
         is_account_owner: bool | None = False,
         viewer_user_id: str | None = None,
+        shared: dict | None = None,
     ) -> dict:
         """
         Fetch the user's profile metadata.
+
+        ``shared``: a dict kept by a caller that builds many profiles at once (the member list). Roles are resolved once
+        per distinct set of roles and the per-profile log line is skipped, which is what made a long list cost hundreds
+        of cache reads.
 
         Block privacy: when ``viewer_user_id`` is provided and the
         target has the viewer in their ``friend_request_blocks``, we
@@ -521,18 +528,29 @@ class UserManager:
         for data in element_to_pop:
             user_data.pop(data)
 
-        resolved_roles = self.get_user_roles(user_id=str(user_data["user_id"]))
-        user_data["resolved_roles"] = resolved_roles
-        user_data["resolved_privileges"] = sorted(
-            self.get_user_privileges(user_id=str(user_data["user_id"]))
-        )
+        if shared is None:
+            resolved_roles = self.get_user_roles(user_id=str(user_data["user_id"]))
+            user_data["resolved_roles"] = resolved_roles
+            user_data["resolved_privileges"] = sorted(
+                self.get_user_privileges(user_id=str(user_data["user_id"]))
+            )
+        else:
+            role_ids = tuple(user.roles_ids or []) or (DEFAULT_ROLE_ID,)
+            if role_ids not in shared:
+                roles = self._resolve_roles(role_ids)
+                shared[role_ids] = (roles, sorted({p for r in roles for p in (r.get("privileges_ids") or [])}))
+            roles, privileges = shared[role_ids]
+            # Copies: callers may change what they are given, and it is shared between people.
+            user_data["resolved_roles"] = [dict(r) for r in roles]
+            user_data["resolved_privileges"] = list(privileges)
         user_data["moderation_state"] = self.get_user_moderation_state(
             user_id=str(user_data["user_id"])
         )
 
-        logger.info(
-            info.INFO_REQUEST_USER_PROFILE(user_data=user_data, viewer_user_id=user_id)
-        )
+        if shared is None:
+            logger.info(
+                info.INFO_REQUEST_USER_PROFILE(user_data=user_data, viewer_user_id=user_id)
+            )
 
         return user_data
 
@@ -650,8 +668,12 @@ class UserManager:
 
     def get_user_roles(self, user_id: str) -> list[dict]:
         """Return resolved role payloads for a user."""
+        return self._resolve_roles(self.get_user_role_ids(user_id=user_id))
+
+    def _resolve_roles(self, role_ids) -> list[dict]:
+        """The payloads for these role ids (an unknown id is skipped)."""
         resolved_roles: list[dict] = []
-        for role_id in self.get_user_role_ids(user_id=user_id):
+        for role_id in role_ids:
             role = self.database_handler.get_role(role_id=role_id)
             if role is None:
                 continue
