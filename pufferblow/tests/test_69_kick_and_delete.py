@@ -89,6 +89,30 @@ def test_you_can_delete_your_own_account_and_what_you_wrote_stays_under_a_ghost_
     assert client.post("/api/v1/users/profile", json={"auth_token": token}).status_code in (401, 403)
 
 
+def test_only_a_current_member_can_be_removed(client: TestClient):
+    _, mod = _person("moderator")
+    member, _ = _person()
+    assert _kick(client, mod, member).status_code == 200
+    assert _kick(client, mod, member).status_code == 404  # already removed
+
+    gone, gone_token = _person()
+    client.post("/api/v1/users/delete", json={"auth_token": gone_token, "password": PASSWORD})
+    assert _kick(client, mod, gone).status_code == 404
+    # ...and staff cannot bring an erased account back
+    assert client.post(f"/api/v1/server/members/{gone.user_id}/reinstate", json={"auth_token": mod}).status_code == 404
+    assert api_initializer.database_handler.get_user(user_id=str(gone.user_id)).membership_status == "deleted"
+
+
+def test_staff_by_privilege_are_removed_only_by_the_owner(client: TestClient):
+    """A custom role that can ban people counts as staff, whatever it is called."""
+    _, mod = _person("moderator")
+    owner, owner_token = _person(owner=True)
+    api_initializer.database_handler.create_role(role_id="warden", role_name="Warden", privileges_ids=["ban_users"])
+    warden, _ = _person("warden")
+    assert _kick(client, mod, warden).status_code == 403
+    assert _kick(client, owner_token, warden).status_code == 200
+
+
 def test_the_owner_hands_the_server_over_before_deleting(client: TestClient):
     _, owner_token = _person(owner=True)
     reply = client.post("/api/v1/users/delete", json={"auth_token": owner_token, "password": PASSWORD})
@@ -97,7 +121,11 @@ def test_the_owner_hands_the_server_over_before_deleting(client: TestClient):
 
 def test_nobody_can_sign_up_as_a_deleted_account(client: TestClient):
     reply = client.post("/api/v1/users/signup", json={"username": "deleted_ab12cd34", "password": PASSWORD})
-    assert reply.status_code == 409
+    assert reply.status_code == 400 and reply.json()["error_code"] == "auth.username_invalid"
+    # Renaming is no way round it.
+    person, token = _person()
+    renamed = client.put("/api/v1/users/profile", json={"auth_token": token, "new_username": "Deleted_user_1"})
+    assert renamed.status_code in (400, 422), renamed.text
 
 
 def test_the_privilege_to_remove_people_is_given_to_moderators_on_existing_servers():

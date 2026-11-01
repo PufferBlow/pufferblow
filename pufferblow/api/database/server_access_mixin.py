@@ -191,6 +191,7 @@ class DatabaseServerAccessMixin:
         from pufferblow.api.database.tables.friend_request_blocks import FriendRequestBlocks
         from pufferblow.api.database.tables.friendships import Friendships
         from pufferblow.api.database.tables.identity_keys import IdentityKeys
+        from pufferblow.api.database.tables.keys import Keys
 
         uid = uuid.UUID(str(user_id))
         # These tables keep the id as a native UUID on Postgres and as text on SQLite.
@@ -201,6 +202,7 @@ class DatabaseServerAccessMixin:
                 .where(Users.user_id == uid)
                 .values(
                     username=ghost_name,
+                    password="",
                     about=None,
                     avatar_url=avatar_url,
                     banner_url=banner_url,
@@ -222,6 +224,8 @@ class DatabaseServerAccessMixin:
             session.execute(delete(Friendships).where(or_(Friendships.requester_id == fid, Friendships.addressee_id == fid)))
             session.execute(delete(FriendRequestBlocks).where(or_(FriendRequestBlocks.blocker_id == fid, FriendRequestBlocks.blocked_id == fid)))
             session.execute(delete(IdentityKeys).where(IdentityKeys.user_id == str(uid)))
+            # The keys that sealed their password and sign-in (not the ones for messages: those stay readable).
+            session.execute(delete(Keys).where(Keys.user_id == fid, Keys.associated_to.in_(["password", "auth_token"])))
             session.commit()
         try:
             # Their federation key pair goes too (the table is not there on a bare test database).

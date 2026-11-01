@@ -4,7 +4,6 @@ import hmac
 import hashlib
 import json
 import random
-import secrets
 import string
 import uuid
 
@@ -633,7 +632,6 @@ class UserManager:
         so the messages they wrote keep their place in the conversation (shown as "Deleted user").
         """
         ghost = f"{DELETED_PREFIX}{uuid.UUID(str(user_id)).hex[:8]}"
-        self.update_user_password(user_id=str(user_id), new_password=secrets.token_urlsafe(32))
         self.database_handler.erase_account(
             user_id=str(user_id),
             ghost_name=ghost,

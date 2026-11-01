@@ -96,7 +96,8 @@ def _validate_username_format(username: str) -> None:
             details={"field": "username"},
         )
     # Names like "everyone" belong to mentions, not to people; this guards sign-up and renaming alike.
-    if is_reserved_username(username):
+    # The name an erased account is left under is nobody's to take (signing up, renaming, any path).
+    if is_reserved_username(username) or username.strip().lower().startswith(DELETED_PREFIX):
         raise ApiError(
             ErrorCode.AUTH_USERNAME_INVALID,
             message=f"Username is reserved: {username!r}",
@@ -171,7 +172,7 @@ async def signup_new_user(request: SignupRequest):
     _validate_username_format(request.username)
     _validate_password_strength(request.password)
 
-    if request.username.lower().startswith(DELETED_PREFIX) or api_initializer.user_manager.check_username(request.username):
+    if api_initializer.user_manager.check_username(request.username):
         raise ApiError(
             ErrorCode.AUTH_USERNAME_TAKEN,
             details={"field": "username", "username": request.username},
@@ -275,7 +276,7 @@ def _sign_in(username: str, password: str) -> dict:
     # The server-side ``message`` field carries the specific reason
     # for logs so operators can still debug — only the public
     # surface stays generic.
-    if not api_initializer.user_manager.check_username(username=username):
+    if username.lower().startswith(DELETED_PREFIX) or not api_initializer.user_manager.check_username(username=username):
         raise ApiError(
             ErrorCode.AUTH_INVALID_CREDENTIALS,
             message=f"Sign-in attempt for unknown username {username!r}",

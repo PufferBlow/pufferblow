@@ -21,6 +21,8 @@ from pufferblow.core.bootstrap import api_initializer
 router = APIRouter(prefix="/api/v1/server")
 
 MAX_NOTE = 120
+#: Holding any of these makes someone staff for the purpose of who may remove whom.
+STAFF_PRIVILEGES = ("kick_users", "ban_users", "manage_join_requests")
 STATUSES = ("pending", "approved", "denied")
 
 
@@ -53,8 +55,12 @@ async def kick_member_route(user_id: str, auth_token: str = Body(..., embed=True
         raise ApiError(ErrorCode.RESOURCE_NOT_FOUND)
     if users.is_server_owner(user_id=user_id):
         raise ApiError(ErrorCode.AUTH_PRIVILEGE_DENIED, message="The server owner cannot be removed.")
-    # Moderators remove members; only the owner removes a moderator.
-    if "moderator" in (target.roles_ids or []) and not users.is_server_owner(user_id=actor_id):
+    # Only someone who is a member right now can be removed (not a person waiting, declined, already removed or erased).
+    if (getattr(target, "membership_status", "active") or "active") != "active":
+        raise ApiError(ErrorCode.RESOURCE_NOT_FOUND)
+    # Members are removed by staff; staff (anyone who can themselves remove or ban people, whatever their role is
+    # called) are removed only by the owner.
+    if not users.is_server_owner(user_id=actor_id) and any(users.has_privilege(user_id=user_id, privilege_id=p) for p in STAFF_PRIVILEGES):
         raise ApiError(ErrorCode.AUTH_PRIVILEGE_DENIED, message="Only the owner can remove a moderator.")
     database.set_membership_status(user_id, "kicked")
     await api_initializer.websockets_manager.disconnect_user(user_id)
