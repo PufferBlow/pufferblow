@@ -11,7 +11,7 @@ from typing import Any, Callable, TypeVar
 import sqlalchemy
 from loguru import logger
 from sqlalchemy import and_, delete, func, or_, select, text, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from pufferblow.api.database.metrics_files_mixin import DatabaseMetricsFilesMixin
@@ -2608,7 +2608,18 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
 
     # ActivityPub
 
-    def upsert_activitypub_actor(
+    def upsert_activitypub_actor(self, *args, **kwargs) -> ActivityPubActor:
+        """Upsert activitypub actor.
+
+        Two requests can make the same actor at the same moment (the first join of a person, a first DM): the second
+        insert loses to the unique address, and is simply done again as an update of the row that won.
+        """
+        try:
+            return self._upsert_activitypub_actor_once(*args, **kwargs)
+        except IntegrityError:
+            return self._upsert_activitypub_actor_once(*args, **kwargs)
+
+    def _upsert_activitypub_actor_once(
         self,
         actor_uri: str,
         preferred_username: str,
@@ -2620,7 +2631,6 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
         shared_inbox_uri: str | None = None,
         private_key_pem: str | None = None,
     ) -> ActivityPubActor:
-        """Upsert activitypub actor."""
         with self.database_session() as session:
             stmt = select(ActivityPubActor).where(ActivityPubActor.actor_uri == actor_uri)
             existing = session.execute(stmt).fetchone()
@@ -2647,11 +2657,15 @@ class DatabaseHandler(DatabaseRuntimeConfigMixin, DatabaseMetricsFilesMixin, Dat
                 actor.inbox_uri = inbox_uri
                 actor.outbox_uri = outbox_uri
                 actor.shared_inbox_uri = shared_inbox_uri
-                actor.public_key_pem = public_key_pem
+                # A local actor's key pair is made once. A second, racing request that made its own pair must not
+                # replace the first one's: what was already signed with it would no longer verify.
+                keeps_its_keys = bool(actor.is_local and actor.private_key_pem)
+                if not keeps_its_keys:
+                    actor.public_key_pem = public_key_pem
                 actor.is_local = is_local
                 if user_id:
                     actor.user_id = uuid.UUID(str(user_id))
-                if private_key_pem:
+                if private_key_pem and not keeps_its_keys:
                     actor.private_key_pem = private_key_pem
                 if not is_local:
                     actor.fetched_at = datetime.datetime.now(datetime.timezone.utc)

@@ -515,3 +515,13 @@ def test_no_custom_role_can_take_the_retired_admin_id(client: TestClient):
     _, owner = _staff()
     reply = client.post("/api/v1/system/roles", json={"auth_token": owner, "role_name": "Admin", "privileges_ids": ["send_messages"]})
     assert reply.status_code == 409, reply.text
+
+
+def test_a_racing_request_cannot_replace_a_local_actors_keys(client: TestClient):
+    database = api_initializer.database_handler
+    uri = f"http://{instance_id_of(api_initializer.config)}/ap/users/{uuid.uuid4()}"
+    common = dict(actor_uri=uri, preferred_username="racer", inbox_uri=uri + "/inbox", outbox_uri=uri + "/outbox", is_local=True)
+    first = database.upsert_activitypub_actor(public_key_pem="PUBLIC-A", private_key_pem="PRIVATE-A", **common)
+    again = database.upsert_activitypub_actor(public_key_pem="PUBLIC-B", private_key_pem="PRIVATE-B", **common)
+    assert (first.public_key_pem, first.private_key_pem) == ("PUBLIC-A", "PRIVATE-A")
+    assert (again.public_key_pem, again.private_key_pem) == ("PUBLIC-A", "PRIVATE-A")
