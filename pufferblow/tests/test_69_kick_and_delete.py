@@ -143,3 +143,17 @@ def test_the_privilege_to_remove_people_is_given_to_moderators_on_existing_serve
         held = {role: row for role, row in conn.execute(sa.text("SELECT role_id, privileges_ids FROM roles"))}
         assert "kick_users" in held["owner"] and "kick_users" in held["moderator"] and "kick_users" not in held["user"]
         assert conn.execute(sa.text("SELECT COUNT(*) FROM privileges WHERE privilege_id = 'kick_users'")).scalar() == 1
+
+
+def test_the_members_list_hides_erased_accounts_and_marks_who_was_removed(client: TestClient):
+    _, mod = _person("moderator")
+    removed, _ = _person()
+    gone, gone_token = _person()
+    kept, _ = _person()
+    _kick(client, mod, removed)
+    client.post("/api/v1/users/delete", json={"auth_token": gone_token, "password": PASSWORD})
+
+    listed = {u["user_id"]: u for u in client.get("/api/v1/users/list", params={"auth_token": mod}).json()["users"]}
+    assert str(gone.user_id) not in listed
+    assert listed[str(removed.user_id)]["membership_status"] == "kicked"
+    assert listed[str(kept.user_id)]["membership_status"] == "active"

@@ -390,6 +390,9 @@ class UserManager:
             user_data = self.user_profile(
                 user_id=user_id, is_account_owner=is_account_owner
             )
+            # Erased accounts, and people waiting or declined (they are on the join requests screen), are not members.
+            if user_data.get("membership_status") in ("deleted", "pending", "denied"):
+                continue
 
             users.append(user_data)
 

@@ -133,6 +133,7 @@ class Users(Base):
             "origin_server": self.origin_server,
             "inbox_id": self.inbox_id,
             "roles_ids": self.roles_ids,
+            "membership_status": self.membership_status or "active",
             "last_seen": self.last_seen,
             "joined_servers_ids": self.joined_servers_ids,
             "auth_token_expire_time": self.auth_token_expire_time,
