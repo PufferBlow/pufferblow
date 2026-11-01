@@ -13,25 +13,25 @@ router = APIRouter()
 
 
 @router.get("/")
-async def redirect_route():
+def redirect_route():
     """Redirect root to API info route."""
     return responses.RedirectResponse("/api/v1/info")
 
 
 @router.get("/api/v1", status_code=200)
-async def home_route():
+def home_route():
     """Redirect API root to info route."""
     return responses.RedirectResponse("/api/v1/info")
 
 
 @router.get("/api/v1/info", status_code=200)
-async def server_info_route():
+def server_info_route():
     """Get minimal server status payload."""
     return {"status_code": 200}
 
 
 @router.post("/api/v1/auth/refresh", status_code=200)
-async def refresh_auth_token(request: RefreshTokenRequest):
+def refresh_auth_token(request: RefreshTokenRequest):
     """Refresh an access token using a valid refresh token."""
     try:
         payload = api_initializer.auth_token_manager.validate_refresh_token(
@@ -87,7 +87,7 @@ async def refresh_auth_token(request: RefreshTokenRequest):
 
 
 @router.post("/api/v1/auth/revoke", status_code=200)
-async def revoke_refresh_token_route(request: RefreshTokenRequest):
+def revoke_refresh_token_route(request: RefreshTokenRequest):
     """Revoke a refresh token (logout session)."""
     api_initializer.auth_token_manager.revoke_refresh_token(request.refresh_token)
     return {

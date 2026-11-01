@@ -11,6 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
 from fastapi import Body
 
@@ -249,7 +250,7 @@ async def instance_health_details_route(auth_token: str):
     has been up, per-check timings, request latency over the last day, resource use, 90 days of uptime,
     recent incidents and the instances this one is linked to.
     """
-    require_server_owner(auth_token)
+    await run_in_threadpool(require_server_owner, auth_token)
     import asyncio
 
     return {"status_code": 200, "health": await asyncio.to_thread(build_instance_health_details)}
@@ -356,7 +357,7 @@ def _build_server_info_payload(state: ServerState) -> dict:
 
 
 @router.get("/api/v1/system/latest-release", status_code=200)
-async def get_latest_release_route():
+def get_latest_release_route():
     """Get latest PufferBlow release information."""
     manager = _background_manager_or_none()
     if manager is None:
@@ -384,7 +385,7 @@ async def get_latest_release_route():
 
 
 @router.get("/api/v1/system/server-stats", status_code=200)
-async def get_server_stats_route():
+def get_server_stats_route():
     """Get server statistics snapshot."""
     manager = _background_manager_or_none()
     if manager is None:
@@ -418,7 +419,7 @@ async def get_server_stats_route():
 
 
 @router.get("/api/v1/system/server-info", status_code=200)
-async def get_server_info_route():
+def get_server_info_route():
     """Get server configuration info."""
     return {
         "status_code": 200,
@@ -427,7 +428,7 @@ async def get_server_info_route():
 
 
 @router.get("/api/v1/system/instance-health", status_code=200)
-async def get_instance_health_route():
+def get_instance_health_route():
     """Get instance health summary including mirrored media-sfu /healthz."""
     payload = build_instance_health_payload()
     return {
@@ -437,7 +438,7 @@ async def get_instance_health_route():
 
 
 @router.post("/api/v1/system/server-usage", status_code=200)
-async def get_server_usage_route():
+def get_server_usage_route():
     """Get real-time server usage statistics."""
     try:
         import time
@@ -534,7 +535,7 @@ async def get_server_usage_route():
 
 
 @router.put("/api/v1/system/server-info", status_code=200)
-async def update_server_info_route(request: ServerSettingsRequest):
+def update_server_info_route(request: ServerSettingsRequest):
     """Update server configuration settings."""
     user_id = require_privilege(request.auth_token, "manage_server_settings")
     database_handler = require_component("database_handler")
@@ -687,7 +688,7 @@ async def update_server_info_route(request: ServerSettingsRequest):
 
 
 @router.put("/api/v1/system/server-appearance", status_code=200)
-async def update_server_appearance_route(
+def update_server_appearance_route(
     auth_token: str = Body(..., embed=True),
     avatar_kind: str | None = Body(default=None),
     banner_kind: str | None = Body(default=None),
@@ -793,7 +794,7 @@ async def update_server_appearance_route(
 
 
 @router.post("/api/v1/system/runtime-config", status_code=200)
-async def get_runtime_config_route(request: RuntimeConfigRequest):
+def get_runtime_config_route(request: RuntimeConfigRequest):
     """Get runtime configuration saved in database."""
     require_privilege(request.auth_token, "manage_server_settings")
     user_id = extract_user_id(auth_token=request.auth_token)
@@ -811,7 +812,7 @@ async def get_runtime_config_route(request: RuntimeConfigRequest):
 
 
 @router.put("/api/v1/system/runtime-config", status_code=200)
-async def update_runtime_config_route(request: RuntimeConfigUpdateRequest):
+def update_runtime_config_route(request: RuntimeConfigUpdateRequest):
     """Update runtime configuration values in database."""
     require_privilege(request.auth_token, "manage_server_settings")
     database_handler = require_component("database_handler")
@@ -863,7 +864,7 @@ async def update_runtime_config_route(request: RuntimeConfigUpdateRequest):
 
 
 @router.post("/api/v1/system/activity-metrics", status_code=200)
-async def get_activity_metrics_route(request: AuthTokenQuery):
+def get_activity_metrics_route(request: AuthTokenQuery):
     """Get current activity metrics for the control panel dashboard."""
     require_privilege(request.auth_token, "view_server_stats")
     database_handler = require_component("database_handler")
@@ -878,7 +879,7 @@ async def get_activity_metrics_route(request: AuthTokenQuery):
 
 
 @router.post("/api/v1/system/server-overview", status_code=200)
-async def get_server_overview_route(request: AuthTokenQuery):
+def get_server_overview_route(request: AuthTokenQuery):
     """Get comprehensive server overview data for control panel."""
     require_privilege(request.auth_token, "view_server_stats")
     database_handler = require_component("database_handler")

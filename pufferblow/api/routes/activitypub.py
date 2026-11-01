@@ -8,6 +8,7 @@ import base64
 import json
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from pufferblow.api.dependencies import get_current_user
@@ -45,7 +46,7 @@ def _request_base_url(request: Request) -> str:
 
 
 @router.get("/.well-known/nodeinfo", status_code=200)
-async def nodeinfo_discovery(request: Request):
+def nodeinfo_discovery(request: Request):
     """NodeInfo discovery document — points probing peers at `/nodeinfo/2.0`.
 
     Many federated servers check this before trusting a peer at all, so its
@@ -64,7 +65,7 @@ async def nodeinfo_discovery(request: Request):
 
 
 @router.get("/nodeinfo/2.0", status_code=200)
-async def nodeinfo_document():
+def nodeinfo_document():
     """NodeInfo 2.0 document. No config toggle for open registrations exists
     yet — signup is unconditionally open today, so that's what's reported.
     """
@@ -81,7 +82,7 @@ async def nodeinfo_document():
 
 
 @router.get("/.well-known/webfinger", status_code=200)
-async def webfinger(resource: str, request: Request):
+def webfinger(resource: str, request: Request):
     """
     WebFinger endpoint for local ActivityPub actors.
     """
@@ -108,7 +109,7 @@ async def webfinger(resource: str, request: Request):
 
 
 @router.get("/ap/users/{user_id}", status_code=200)
-async def get_actor_document(user_id: str, request: Request):
+def get_actor_document(user_id: str, request: Request):
     """
     ActivityPub actor endpoint for local users.
     """
@@ -124,7 +125,7 @@ async def get_actor_document(user_id: str, request: Request):
 
 
 @router.get("/ap/users/{user_id}/outbox", status_code=200)
-async def get_actor_outbox(
+def get_actor_outbox(
     user_id: str, request: Request, page: int = 1, limit: int = 20
 ):
     """
@@ -219,7 +220,7 @@ def _ordered_collection_or_page(
 
 
 @router.get("/ap/users/{user_id}/followers", status_code=200)
-async def get_actor_followers(
+def get_actor_followers(
     user_id: str, request: Request, page: int = 1, limit: int = 20
 ):
     """ActivityPub followers collection for a local actor."""
@@ -246,7 +247,7 @@ async def get_actor_followers(
 
 
 @router.get("/ap/users/{user_id}/following", status_code=200)
-async def get_actor_following(
+def get_actor_following(
     user_id: str, request: Request, page: int = 1, limit: int = 20
 ):
     """ActivityPub following collection for a local actor."""
@@ -359,7 +360,7 @@ async def follow_remote_actor(request_body: ActivityPubFollowRequest, request: R
     """
     Follow a remote ActivityPub account from a local user.
     """
-    user_id = get_current_user(request_body.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request_body.auth_token)
     base_url = _request_base_url(request)
     try:
         result = await api_initializer.activitypub_manager.send_follow(
@@ -384,7 +385,7 @@ async def unfollow_remote_actor(request_body: ActivityPubFollowRequest, request:
     Unfollow a remote ActivityPub account from a local user — sends
     Undo(Follow) and drops the local follow row.
     """
-    user_id = get_current_user(request_body.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request_body.auth_token)
     base_url = _request_base_url(request)
     try:
         result = await api_initializer.activitypub_manager.send_undo_follow(
@@ -423,7 +424,7 @@ async def send_direct_message(request_body: DirectMessageSendRequest, request: R
 
     At least one of the three must be non-empty.
     """
-    user_id = get_current_user(request_body.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request_body.auth_token)
     base_url = _request_base_url(request)
 
     # Validate "at least one of body / attachments / stickers".
@@ -519,7 +520,7 @@ async def forward_message(
     caller to be a participant in its conversation (reuses the DM
     reaction/edit check in `ActivityPubManager.user_can_access_dm_message`).
     """
-    user_id = get_current_user(request_body.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request_body.auth_token)
     base_url = _request_base_url(request)
 
     row = api_initializer.database_handler.get_message_by_id(message_id=message_id)
@@ -582,7 +583,7 @@ async def add_dm_message_reaction(
     Mirrors the channel reaction route's idempotency contract: re-applying
     the same emoji is a no-op (200, `already_present: true`).
     """
-    user_id = get_current_user(request_body.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request_body.auth_token)
     base_url = _request_base_url(request)
     try:
         result = await api_initializer.activitypub_manager.add_dm_reaction(
@@ -611,7 +612,7 @@ async def remove_dm_message_reaction(
     Idempotent: removing a reaction the viewer never applied returns 200
     with `already_absent: true`.
     """
-    user_id = get_current_user(auth_token)
+    user_id = await run_in_threadpool(get_current_user, auth_token)
     base_url = _request_base_url(request)
     try:
         result = await api_initializer.activitypub_manager.remove_dm_reaction(
@@ -638,7 +639,7 @@ async def load_direct_messages(
     """
     Load direct message conversation with local or remote peer.
     """
-    user_id = get_current_user(query.auth_token)
+    user_id = await run_in_threadpool(get_current_user, query.auth_token)
     base_url = _request_base_url(request)
 
     try:
@@ -682,7 +683,7 @@ async def edit_direct_message(
         raise HTTPException(
             status_code=400, detail="Edited message cannot be empty."
         )
-    user_id = get_current_user(auth_token)
+    user_id = await run_in_threadpool(get_current_user, auth_token)
     try:
         result = api_initializer.messages_manager.edit_message(
             message_id=message_id,
@@ -736,7 +737,7 @@ async def delete_direct_message(message_id: str, request: Request, auth_token: s
     resolve the peer); a federation hiccup is logged but never blocks the
     local delete.
     """
-    user_id = get_current_user(auth_token)
+    user_id = await run_in_threadpool(get_current_user, auth_token)
     row = api_initializer.database_handler.get_message_by_id(message_id=message_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -763,7 +764,7 @@ async def delete_direct_message(message_id: str, request: Request, auth_token: s
 
 
 @router.get("/api/v1/dms/conversations/{conversation_id}/settings", status_code=200)
-async def get_dm_conversation_settings(conversation_id: str, auth_token: str):
+def get_dm_conversation_settings(conversation_id: str, auth_token: str):
     """Read a conversation's per-conversation settings.
 
     Returns the row if present, or a defaulted shape (
@@ -792,7 +793,7 @@ async def get_dm_conversation_settings(conversation_id: str, auth_token: str):
 
 
 @router.patch("/api/v1/dms/conversations/{conversation_id}/settings", status_code=200)
-async def update_dm_conversation_settings(
+def update_dm_conversation_settings(
     conversation_id: str,
     auth_token: str = Body(..., embed=True),
     disappear_after_seconds: int | None = Body(..., embed=True),
@@ -818,7 +819,7 @@ async def update_dm_conversation_settings(
 
 
 @router.get("/api/v1/dms/conversations", status_code=200)
-async def list_dm_conversations(request: Request, auth_token: str):
+def list_dm_conversations(request: Request, auth_token: str):
     """List the viewer's DM conversations, most-recent-first.
 
     Powers the conversation-list sidebar on the client. Each entry
@@ -859,7 +860,7 @@ def _require_dm_member(user_id: str, conversation_id: str) -> None:
 
 
 @router.get("/api/v1/dms/conversations/{conversation_id}/search", status_code=200)
-async def search_direct_messages(
+def search_direct_messages(
     conversation_id: str,
     auth_token: str,
     q: str = "",
@@ -907,7 +908,7 @@ async def search_direct_messages(
 
 
 @router.get("/api/v1/dms/conversations/{conversation_id}/pins", status_code=200)
-async def list_direct_message_pins(conversation_id: str, auth_token: str):
+def list_direct_message_pins(conversation_id: str, auth_token: str):
     """A conversation's pinned messages, newest pin first."""
     user_id = get_current_user(auth_token)
     _require_dm_member(user_id, conversation_id)
@@ -926,7 +927,7 @@ async def _tell_dm_peer_about_pins(user_id: str, message_id: str, request: Reque
 @router.put("/api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin", status_code=200)
 async def pin_direct_message(conversation_id: str, message_id: str, request: Request, auth_token: str):
     """Pin a message in a conversation. Either person may; it is idempotent and a conversation holds up to 50."""
-    user_id = get_current_user(auth_token)
+    user_id = await run_in_threadpool(get_current_user, auth_token)
     _require_dm_member(user_id, conversation_id)
     message = api_initializer.database_handler.get_message_by_id(message_id)
     if message is None or str(message.conversation_id or "") != conversation_id:
@@ -942,7 +943,7 @@ async def pin_direct_message(conversation_id: str, message_id: str, request: Req
 @router.delete("/api/v1/dms/conversations/{conversation_id}/messages/{message_id}/pin", status_code=200)
 async def unpin_direct_message(conversation_id: str, message_id: str, request: Request, auth_token: str):
     """Unpin a message in a conversation (either person may). Idempotent."""
-    user_id = get_current_user(auth_token)
+    user_id = await run_in_threadpool(get_current_user, auth_token)
     _require_dm_member(user_id, conversation_id)
     removed = api_initializer.database_handler.unpin_message(conversation_id, message_id)
     if removed:

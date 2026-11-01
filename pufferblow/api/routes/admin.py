@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, exceptions
+from fastapi.concurrency import run_in_threadpool
 
 from pufferblow.api.database.tables.blocked_ips import BlockedIPS
 from pufferblow.api.logger.logger import logger
@@ -42,7 +43,7 @@ def set_api_initializer(initializer: Any) -> None:
 
 
 @router.post("/api/v1/blocked-ips/list", status_code=200)
-async def list_blocked_ips_route(request: AuthTokenQuery) -> dict:
+def list_blocked_ips_route(request: AuthTokenQuery) -> dict:
     """
     List all blocked IPs with details. Server Owner only.
 
@@ -68,7 +69,7 @@ async def list_blocked_ips_route(request: AuthTokenQuery) -> dict:
 
 
 @router.post("/api/v1/blocked-ips/block", status_code=201)
-async def block_ip_route(request: BlockIPRequest) -> dict:
+def block_ip_route(request: BlockIPRequest) -> dict:
     """
     Add an IP address to the blocked list. Server Owner only.
 
@@ -115,7 +116,7 @@ async def block_ip_route(request: BlockIPRequest) -> dict:
 
 
 @router.post("/api/v1/blocked-ips/unblock", status_code=200)
-async def unblock_ip_route(request: UnblockIPRequest) -> dict:
+def unblock_ip_route(request: UnblockIPRequest) -> dict:
     """
     Remove an IP address from the blocked list. Server Owner only.
 
@@ -203,7 +204,7 @@ _TASK_META: dict[str, dict[str, str]] = {
 
 
 @router.post("/api/v1/background-tasks/status", status_code=200)
-async def get_background_tasks_status_route_enriched(request: AuthTokenQuery) -> dict:
+def get_background_tasks_status_route_enriched(request: AuthTokenQuery) -> dict:
     """Get status of all background tasks with human-readable metadata."""
     user_id = require_privilege(request.auth_token, "manage_background_tasks")
 
@@ -250,7 +251,7 @@ async def run_background_task_route(request: RunTaskRequest) -> dict:
         403 FORBIDDEN: User is not server owner
         404 NOT FOUND: Invalid auth_token
     """
-    user_id = require_privilege(request.auth_token, "manage_background_tasks")
+    user_id = await run_in_threadpool(require_privilege, request.auth_token, "manage_background_tasks")
 
     try:
         if not hasattr(api_initializer, "background_tasks_manager"):
@@ -281,7 +282,7 @@ async def run_background_task_route(request: RunTaskRequest) -> dict:
 
 
 @router.post("/api/v1/background-tasks/toggle", status_code=200)
-async def toggle_background_task_route(request: ToggleTaskRequest) -> dict:
+def toggle_background_task_route(request: ToggleTaskRequest) -> dict:
     """Enable or disable a background task."""
     require_privilege(request.auth_token, "manage_background_tasks")
 
@@ -311,7 +312,7 @@ async def toggle_background_task_route(request: ToggleTaskRequest) -> dict:
 
 
 @router.post("/api/v1/background-tasks/backup-config", status_code=200)
-async def update_backup_config_route(request: BackupConfigRequest) -> dict:
+def update_backup_config_route(request: BackupConfigRequest) -> dict:
     """Update database backup configuration and re-register the backup task."""
     require_privilege(request.auth_token, "manage_background_tasks")
 
@@ -368,7 +369,7 @@ async def update_backup_config_route(request: BackupConfigRequest) -> dict:
 
 
 @router.post("/api/v1/background-tasks/backup-config/get", status_code=200)
-async def get_backup_config_route(request: AuthTokenQuery) -> dict:
+def get_backup_config_route(request: AuthTokenQuery) -> dict:
     """Get current database backup configuration."""
     require_privilege(request.auth_token, "manage_background_tasks")
 

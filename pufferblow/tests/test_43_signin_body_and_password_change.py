@@ -63,7 +63,7 @@ def users(monkeypatch):
 
 
 def test_signing_in_with_a_json_body(users):
-    response = asyncio.run(routes.signin_user(SigninQuery(username="ada", password="correct horse")))
+    response = routes.signin_user(SigninQuery(username="ada", password="correct horse"))  # a plain function: it runs on a worker thread
     assert response["auth_token"] == "a" and response["refresh_token"] == "r"
 
 
@@ -74,7 +74,7 @@ def test_the_body_route_refuses_bad_credentials_like_the_query_route(users):
         lambda: routes.signin_user(SigninQuery(username="nobody", password="x")),
     ):
         with pytest.raises(ApiError) as caught:
-            asyncio.run(call())
+            call()
         assert caught.value.code == ErrorCode.AUTH_INVALID_CREDENTIALS
 
 

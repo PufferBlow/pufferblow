@@ -14,6 +14,7 @@ import json
 
 from datetime import datetime
 from fastapi import APIRouter, exceptions
+from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from pufferblow.api.database.channel_org_mixin import MAX_PINS_PER_CHANNEL, CategoryNameTaken
@@ -49,7 +50,7 @@ def channels_route():
 
 
 @router.post("/list/", status_code=200)
-async def list_channels_route(request: AuthTokenQuery):
+def list_channels_route(request: AuthTokenQuery):
     """
     Get list of all available channels.
     
@@ -94,7 +95,7 @@ async def list_channels_route(request: AuthTokenQuery):
 
 
 @router.get("/read-history", status_code=200)
-async def get_read_history_route(auth_token: str):
+def get_read_history_route(auth_token: str):
     """
     Return the current user's read-message history and unread counts per accessible channel.
     """
@@ -125,7 +126,7 @@ async def get_read_history_route(auth_token: str):
 
 
 @router.post("/{channel_id}/mark_all_read", status_code=200)
-async def mark_channel_read_route(channel_id: str, auth_token: str):
+def mark_channel_read_route(channel_id: str, auth_token: str):
     """Mark every visible message in a channel as read for the viewer.
 
     Visibility window matches `get_unread_message_counts_by_channel`'s
@@ -149,7 +150,7 @@ async def mark_channel_read_route(channel_id: str, auth_token: str):
 
 
 @router.post("/mark_all_read", status_code=200)
-async def mark_server_read_route(auth_token: str):
+def mark_server_read_route(auth_token: str):
     """Bulk-mark every accessible channel as read.
 
     Single DB transaction. Backs the server-dropdown "Mark All As Read"
@@ -195,7 +196,7 @@ async def create_new_channel_route(request: CreateChannelRequest):
     logger.debug(f"Channel name: {request.channel_name}")
     logger.debug(f"Is private: {request.is_private}")
 
-    user_id = require_privilege(request.auth_token, "create_channels")
+    user_id = await run_in_threadpool(require_privilege, request.auth_token, "create_channels")
     logger.debug(f"User {user_id} is authorized to create channels")
 
     # Check if channel name already exists
@@ -284,7 +285,7 @@ async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
         404 NOT FOUND: Channel does not exist
         409 CONFLICT: New channel name collides with an existing one
     """
-    user_id = require_privilege(request.auth_token, "edit_channels")
+    user_id = await run_in_threadpool(require_privilege, request.auth_token, "edit_channels")
 
     existing = api_initializer.database_handler.get_channel_data(channel_id=channel_id)
     if existing is None:
@@ -365,14 +366,14 @@ async def update_channel_route(channel_id: str, request: UpdateChannelRequest):
 
 
 @router.get("/categories", status_code=200)
-async def list_categories_route(auth_token: str):
+def list_categories_route(auth_token: str):
     """The channel categories, in order. Any signed-in member may read them; channels point at one with ``category_id``."""
     get_current_user(auth_token)
     return {"status_code": 200, "categories": api_initializer.database_handler.list_categories()}
 
 
 @router.post("/categories", status_code=201)
-async def create_category_route(request: CategoryRequest):
+def create_category_route(request: CategoryRequest):
     """Add a category at the end (needs ``edit_channels``). 409 if the name is taken."""
     require_privilege(request.auth_token, "edit_channels")
     try:
@@ -383,14 +384,14 @@ async def create_category_route(request: CategoryRequest):
 
 
 @router.put("/categories/order", status_code=200)
-async def reorder_categories_route(request: CategoryOrderRequest):
+def reorder_categories_route(request: CategoryOrderRequest):
     """Put the named categories first, in the given order (needs ``edit_channels``)."""
     require_privilege(request.auth_token, "edit_channels")
     return {"status_code": 200, "categories": api_initializer.database_handler.reorder_categories(request.category_ids)}
 
 
 @router.put("/categories/{category_id}", status_code=200)
-async def rename_category_route(category_id: str, request: CategoryRequest):
+def rename_category_route(category_id: str, request: CategoryRequest):
     """Rename a category (needs ``edit_channels``)."""
     require_privilege(request.auth_token, "edit_channels")
     try:
@@ -403,7 +404,7 @@ async def rename_category_route(category_id: str, request: CategoryRequest):
 
 
 @router.delete("/categories/{category_id}", status_code=200)
-async def delete_category_route(category_id: str, auth_token: str):
+def delete_category_route(category_id: str, auth_token: str):
     """Delete a category (needs ``edit_channels``). Its channels stay, uncategorised."""
     require_privilege(auth_token, "edit_channels")
     if not api_initializer.database_handler.delete_category(category_id):
@@ -421,7 +422,7 @@ async def _announce_pins(channel_id: str, message_id: str, pinned: bool) -> None
 
 
 @router.get("/{channel_id}/pins", status_code=200)
-async def list_pins_route(channel_id: str, auth_token: str):
+def list_pins_route(channel_id: str, auth_token: str):
     """The channel's pinned messages, newest pin first. Anyone who can read the channel can read its pins."""
     user_id = get_current_user(auth_token)
     check_channel_access(user_id=user_id, channel_id=channel_id)
@@ -436,7 +437,7 @@ async def list_pins_route(channel_id: str, auth_token: str):
 @router.put("/{channel_id}/messages/{message_id}/pin", status_code=200)
 async def pin_message_route(channel_id: str, message_id: str, auth_token: str):
     """Pin a message (needs ``moderate_content``). Idempotent; a channel holds up to 50 pins."""
-    user_id = require_privilege(auth_token, "moderate_content")
+    user_id = await run_in_threadpool(require_privilege, auth_token, "moderate_content")
     check_channel_access(user_id=user_id, channel_id=channel_id)
     message = api_initializer.database_handler.get_message_by_id(message_id)
     if message is None or str(message.channel_id) != channel_id:
@@ -452,7 +453,7 @@ async def pin_message_route(channel_id: str, message_id: str, auth_token: str):
 @router.delete("/{channel_id}/messages/{message_id}/pin", status_code=200)
 async def unpin_message_route(channel_id: str, message_id: str, auth_token: str):
     """Unpin a message (needs ``moderate_content``). Idempotent."""
-    user_id = require_privilege(auth_token, "moderate_content")
+    user_id = await run_in_threadpool(require_privilege, auth_token, "moderate_content")
     check_channel_access(user_id=user_id, channel_id=channel_id)
     removed = api_initializer.database_handler.unpin_message(channel_id, message_id)
     if removed:
@@ -474,7 +475,7 @@ async def delete_channel_route(auth_token: str, channel_id: str):
         403 FORBIDDEN: User is not admin/owner
         404 NOT FOUND: Channel not found
     """
-    user_id = require_privilege(auth_token, "delete_channels")
+    user_id = await run_in_threadpool(require_privilege, auth_token, "delete_channels")
 
     # Delete the channel
     api_initializer.channels_manager.delete_channel(channel_id=channel_id)
@@ -514,7 +515,7 @@ async def add_user_to_private_channel_route(
         403 FORBIDDEN: User is not admin/owner
         404 NOT FOUND: Channel or user not found
     """
-    user_id = require_privilege(auth_token, "manage_channel_users")
+    user_id = await run_in_threadpool(require_privilege, auth_token, "manage_channel_users")
 
     # Check if targeted user exists
     if not api_initializer.user_manager.check_user(user_id=to_add_user_id):
@@ -579,7 +580,7 @@ async def remove_user_from_channel_route(
         403 FORBIDDEN: User is not admin/owner or trying to remove admin/owner
         404 NOT FOUND: Channel or user not found
     """
-    user_id = require_privilege(auth_token, "manage_channel_users")
+    user_id = await run_in_threadpool(require_privilege, auth_token, "manage_channel_users")
 
     if api_initializer.user_manager.has_privilege(
         user_id=to_remove_user_id, privilege_id="view_private_channels"
@@ -634,7 +635,7 @@ async def remove_user_from_channel_route(
     status_code=200,
     response_model=VoiceChannelJoinResponse,
 )
-async def join_voice_channel_route(auth_token: str, channel_id: str):
+def join_voice_channel_route(auth_token: str, channel_id: str):
     """Join a voice channel."""
     user_id = get_current_user(auth_token)
     check_channel_access(user_id, channel_id)
@@ -671,7 +672,7 @@ async def join_voice_channel_route(auth_token: str, channel_id: str):
 
 
 @router.post("/{channel_id}/leave-audio", status_code=200)
-async def leave_voice_channel_route(auth_token: str, channel_id: str):
+def leave_voice_channel_route(auth_token: str, channel_id: str):
     """Leave a voice channel."""
     user_id = get_current_user(auth_token)
 
@@ -697,7 +698,7 @@ async def leave_voice_channel_route(auth_token: str, channel_id: str):
     status_code=200,
     response_model=VoiceChannelStatusResponse,
 )
-async def get_voice_channel_status_route(auth_token: str, channel_id: str):
+def get_voice_channel_status_route(auth_token: str, channel_id: str):
     """Get voice channel status including participants."""
     user_id = get_current_user(auth_token)
     check_channel_access(user_id, channel_id)

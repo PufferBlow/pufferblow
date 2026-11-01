@@ -51,7 +51,7 @@ def _with_preview(notification: dict, user_id: str, access: dict[str, bool]) -> 
 
 
 @router.get("/", status_code=200)
-async def list_notifications(
+def list_notifications(
     auth_token: str,
     limit: int | None = NOTIFICATIONS_DEFAULT_LIMIT,
     unread_only: bool | None = False,
@@ -90,7 +90,7 @@ async def list_notifications(
 
 
 @router.get("/unread_count", status_code=200)
-async def notifications_unread_count(auth_token: str):
+def notifications_unread_count(auth_token: str):
     """Cheap unread-badge count for the viewer."""
     user_id = get_current_user(auth_token)
     return {
@@ -102,7 +102,7 @@ async def notifications_unread_count(auth_token: str):
 
 
 @router.post("/{notification_id}/read", status_code=200)
-async def mark_notification_read(auth_token: str, notification_id: str):
+def mark_notification_read(auth_token: str, notification_id: str):
     """Mark a single notification read. Idempotent."""
     user_id = get_current_user(auth_token)
     changed = api_initializer.notifications_manager.mark_read(
@@ -118,7 +118,7 @@ async def mark_notification_read(auth_token: str, notification_id: str):
 
 
 @router.post("/read-all", status_code=200)
-async def mark_all_notifications_read(auth_token: str):
+def mark_all_notifications_read(auth_token: str):
     """Mark every unread notification for the viewer as read."""
     user_id = get_current_user(auth_token)
     marked = api_initializer.notifications_manager.mark_all_read(user_id=user_id)
@@ -135,7 +135,7 @@ async def mark_all_notifications_read(auth_token: str):
 
 
 @router.get("/preferences", status_code=200)
-async def list_notification_preferences(auth_token: str):
+def list_notification_preferences(auth_token: str):
     """Return every persisted notification preference for the viewer.
 
     Only deviations from the default (notify normally) are stored, so the
@@ -154,7 +154,7 @@ async def list_notification_preferences(auth_token: str):
 
 
 @router.put("/preferences/{channel_id}", status_code=200)
-async def upsert_notification_preference(
+def upsert_notification_preference(
     channel_id: str,
     auth_token: str,
     muted: bool = Body(default=False, embed=True),
@@ -187,7 +187,7 @@ async def upsert_notification_preference(
 
 
 @router.delete("/preferences/{channel_id}", status_code=200)
-async def reset_notification_preference(channel_id: str, auth_token: str):
+def reset_notification_preference(channel_id: str, auth_token: str):
     """Reset a channel's preferences to defaults (delete the row).
 
     Idempotent — returns ``existed=False`` when no row was stored.
@@ -204,7 +204,7 @@ async def reset_notification_preference(channel_id: str, auth_token: str):
 
 
 @router.put("/preferences", status_code=200)
-async def bulk_set_notification_preference(
+def bulk_set_notification_preference(
     auth_token: str,
     muted: bool = Body(default=False, embed=True),
 ):

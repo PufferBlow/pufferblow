@@ -29,7 +29,7 @@ class RegisterKeyRequest(BaseModel):
 
 
 @router.put("", status_code=200)
-async def register_identity_key(request: RegisterKeyRequest) -> dict:
+def register_identity_key(request: RegisterKeyRequest) -> dict:
     """Register the caller's public key. ``created`` is false when this exact key was already registered."""
     user_id = get_current_user(request.auth_token)
     try:
@@ -50,14 +50,14 @@ async def register_identity_key(request: RegisterKeyRequest) -> dict:
 
 
 @router.get("/{user_id}", status_code=200)
-async def list_identity_keys(user_id: str, auth_token: str) -> dict:
+def list_identity_keys(user_id: str, auth_token: str) -> dict:
     """A person's registered keys. Any signed-in user can read them: they are public."""
     get_current_user(auth_token)
     return {"status_code": 200, "user_id": user_id, "keys": api_initializer.database_handler.list_identity_keys(user_id)}
 
 
 @router.delete("/{key_id}", status_code=200)
-async def delete_identity_key(key_id: str, auth_token: str) -> dict:
+def delete_identity_key(key_id: str, auth_token: str) -> dict:
     """Remove one of the caller's own keys (a lost device, say)."""
     user_id = get_current_user(auth_token)
     if not api_initializer.database_handler.delete_identity_key(user_id, key_id):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from pufferblow.api.dependencies import get_current_user
 from pufferblow.api.errors import ApiError, ErrorCode
@@ -69,7 +70,7 @@ def _checked_badge(badge: dict, privileges_ids: list[str]) -> dict:
 
 
 @router.post("/roles/list", status_code=200)
-async def list_roles_route(request: RoleListRequest):
+def list_roles_route(request: RoleListRequest):
     """List instance roles for the active home instance."""
     get_current_user(request.auth_token)
     database_handler = require_component("database_handler")
@@ -83,7 +84,7 @@ async def list_roles_route(request: RoleListRequest):
 
 
 @router.post("/privileges/list", status_code=200)
-async def list_privileges_route(request: PrivilegeListRequest):
+def list_privileges_route(request: PrivilegeListRequest):
     """List privileges that can be attached to custom roles."""
     require_server_owner(request.auth_token)
     database_handler = require_component("database_handler")
@@ -101,7 +102,7 @@ async def list_privileges_route(request: PrivilegeListRequest):
 
 
 @router.post("/roles", status_code=201)
-async def create_role_route(request: RoleCreateRequest):
+def create_role_route(request: RoleCreateRequest):
     """Create a custom instance role."""
     owner_user_id = require_server_owner(request.auth_token)
     database_handler = require_component("database_handler")
@@ -160,7 +161,7 @@ async def create_role_route(request: RoleCreateRequest):
 @router.put("/roles/{role_id}", status_code=200)
 async def update_role_route(role_id: str, request: RoleUpdateRequest):
     """Update a custom instance role."""
-    owner_user_id = require_server_owner(request.auth_token)
+    owner_user_id = await run_in_threadpool(require_server_owner, request.auth_token)
     database_handler = require_component("database_handler")
     role_name = request.role_name.strip()
     if not role_name:
@@ -230,7 +231,7 @@ async def update_role_route(role_id: str, request: RoleUpdateRequest):
 
 
 @router.delete("/roles/{role_id}", status_code=200)
-async def delete_role_route(role_id: str, auth_token: str):
+def delete_role_route(role_id: str, auth_token: str):
     """Delete a custom instance role."""
     owner_user_id = require_server_owner(auth_token)
     database_handler = require_component("database_handler")
@@ -263,7 +264,7 @@ async def delete_role_route(role_id: str, auth_token: str):
 @router.put("/users/{target_user_id}/roles", status_code=200)
 async def update_user_roles_route(target_user_id: str, request: UserRolesUpdateRequest):
     """Replace a user's assigned role ids on this instance."""
-    owner_user_id = require_server_owner(request.auth_token)
+    owner_user_id = await run_in_threadpool(require_server_owner, request.auth_token)
     database_handler = require_component("database_handler")
     user_manager = require_component("user_manager")
 
@@ -317,7 +318,7 @@ async def upload_role_badge_image_route(
     file: UploadFile = Form(..., description="A 128 x 128 PNG under 256 KB"),
 ):
     """Upload the picture for an image badge; the role's badge then points at the returned `url`."""
-    owner_user_id = require_server_owner(form_data.auth_token)
+    owner_user_id = await run_in_threadpool(require_server_owner, form_data.auth_token)
     storage_manager = require_component("storage_manager")
 
     content = await file.read(IMAGE_MAX_BYTES + 1)

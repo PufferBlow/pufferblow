@@ -33,12 +33,12 @@ def _serve(folder: str, filename: str) -> FileResponse:
 
 
 @router.get("/assets/avatars/{filename}", include_in_schema=True)
-async def default_avatar(filename: str):
+def default_avatar(filename: str):
     """A default avatar (SVG or PNG), e.g. ``pb-avatar-happy-brass.png``."""
     return _serve("avatars", filename)
 
 
 @router.get("/assets/banners/{filename}", include_in_schema=True)
-async def default_banner(filename: str):
+def default_banner(filename: str):
     """A default banner (SVG or PNG), e.g. ``pb-banner-happy-brass.png``."""
     return _serve("banners", filename)

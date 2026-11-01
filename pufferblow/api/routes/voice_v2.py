@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v2/voice")
 
 
 @router.post("/channels/{channel_id}/sessions", status_code=200)
-async def create_or_join_voice_session(channel_id: str, request: VoiceSessionCreateRequest):
+def create_or_join_voice_session(channel_id: str, request: VoiceSessionCreateRequest):
     """Create or join active SFU voice session for a channel."""
     user_id = get_current_user(request.auth_token)
     check_channel_access(user_id=user_id, channel_id=channel_id)
@@ -43,7 +43,7 @@ async def create_or_join_voice_session(channel_id: str, request: VoiceSessionCre
 
 
 @router.get("/channels/{channel_id}/participants", status_code=200)
-async def get_voice_channel_participants(channel_id: str, auth_token: str):
+def get_voice_channel_participants(channel_id: str, auth_token: str):
     """Return participants in the active voice session for a channel (read-only, no join required)."""
     user_id = get_current_user(auth_token)
     check_channel_access(user_id=user_id, channel_id=channel_id)
@@ -70,7 +70,7 @@ async def get_voice_channel_participants(channel_id: str, auth_token: str):
 
 
 @router.post("/sessions/{session_id}/leave", status_code=200)
-async def leave_voice_session(session_id: str, request: VoiceSessionLeaveRequest):
+def leave_voice_session(session_id: str, request: VoiceSessionLeaveRequest):
     """Leave voice session for current user."""
     user_id = get_current_user(request.auth_token)
 
@@ -90,7 +90,7 @@ async def leave_voice_session(session_id: str, request: VoiceSessionLeaveRequest
 
 
 @router.get("/sessions/{session_id}", status_code=200)
-async def get_voice_session_status(session_id: str, auth_token: str):
+def get_voice_session_status(session_id: str, auth_token: str):
     """Get current voice session state and participant metadata."""
     user_id = get_current_user(auth_token)
     payload = api_initializer.voice_session_manager.get_session_status(session_id)
@@ -106,7 +106,7 @@ async def get_voice_session_status(session_id: str, auth_token: str):
 
 
 @router.post("/sessions/{session_id}/actions", status_code=200)
-async def apply_voice_session_action(session_id: str, request: VoiceSessionActionRequest):
+def apply_voice_session_action(session_id: str, request: VoiceSessionActionRequest):
     """Apply self-scoped audio state actions inside a voice session."""
     user_id = get_current_user(request.auth_token)
 

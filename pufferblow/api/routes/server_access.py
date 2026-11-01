@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Body
+from fastapi.concurrency import run_in_threadpool
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
 from pufferblow.api.dependencies import require_privilege
@@ -45,7 +46,7 @@ def _audit(user_id: str, title: str, description: str, **meta) -> None:
 @router.post("/members/{user_id}/kick", status_code=200)
 async def kick_member_route(user_id: str, auth_token: str = Body(..., embed=True), reason: str | None = Body(default=None, embed=True, max_length=300)):
     """Take someone's membership away. Their account stays; they just cannot get into this server any more."""
-    actor_id = require_privilege(auth_token, "kick_users")
+    actor_id = await run_in_threadpool(require_privilege, auth_token, "kick_users")
     users = api_initializer.user_manager
     database = api_initializer.database_handler
     if str(actor_id) == str(user_id):
@@ -69,7 +70,7 @@ async def kick_member_route(user_id: str, auth_token: str = Body(..., embed=True
 
 
 @router.post("/members/{user_id}/reinstate", status_code=200)
-async def reinstate_member_route(user_id: str, auth_token: str = Body(..., embed=True)):
+def reinstate_member_route(user_id: str, auth_token: str = Body(..., embed=True)):
     """Let someone who was removed back in."""
     actor_id = require_privilege(auth_token, "kick_users")
     database = api_initializer.database_handler
@@ -85,7 +86,7 @@ async def reinstate_member_route(user_id: str, auth_token: str = Body(..., embed
 
 
 @router.get("/invites", status_code=200)
-async def list_invites_route(auth_token: str):
+def list_invites_route(auth_token: str):
     """Every invitation code, newest first, with how it stands (``active``, ``used_up``, ``expired`` or ``revoked``)."""
     require_privilege(auth_token, "manage_invites")
     database = api_initializer.database_handler
@@ -93,7 +94,7 @@ async def list_invites_route(auth_token: str):
 
 
 @router.post("/invites", status_code=201)
-async def create_invite_route(
+def create_invite_route(
     auth_token: str = Body(..., embed=True),
     note: str | None = Body(default=None, embed=True, max_length=MAX_NOTE),
     max_uses: int | None = Body(default=None, embed=True, ge=1, le=100_000),
@@ -109,7 +110,7 @@ async def create_invite_route(
 
 
 @router.delete("/invites/{code}", status_code=200)
-async def revoke_invite_route(code: str, auth_token: str):
+def revoke_invite_route(code: str, auth_token: str):
     """End a code now. People already in stay in."""
     user_id = require_privilege(auth_token, "manage_invites")
     if not api_initializer.database_handler.revoke_invite(code.strip().upper()):
@@ -122,7 +123,7 @@ async def revoke_invite_route(code: str, auth_token: str):
 
 
 @router.get("/join-requests", status_code=200)
-async def list_join_requests_route(auth_token: str, status: str | None = None):
+def list_join_requests_route(auth_token: str, status: str | None = None):
     """Requests to join, newest first. ``status`` narrows to ``pending``, ``approved`` or ``denied``."""
     require_privilege(auth_token, "manage_join_requests")
     if status is not None and status not in STATUSES:

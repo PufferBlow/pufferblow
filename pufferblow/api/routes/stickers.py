@@ -28,6 +28,7 @@ the boundary, not the URL.
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, File, Form, UploadFile, exceptions
+from fastapi.concurrency import run_in_threadpool
 
 from pufferblow.api.dependencies import get_current_user, require_privilege
 from pufferblow.api.stickers.stickers_manager import StickersError
@@ -42,7 +43,7 @@ def _raise_from_stickers_error(exc: StickersError) -> None:
 
 
 @router.get("", status_code=200)
-async def list_stickers_route(auth_token: str):
+def list_stickers_route(auth_token: str):
     """Return all active stickers, picker-ordered.
 
     Open to any signed-in user — the chat picker needs the library
@@ -59,7 +60,7 @@ async def list_stickers_route(auth_token: str):
 
 
 @router.get("/all", status_code=200)
-async def list_all_stickers_route(auth_token: str):
+def list_all_stickers_route(auth_token: str):
     """Return every sticker including deactivated ones (admin view)."""
     require_privilege(auth_token, "manage_stickers")
     stickers = api_initializer.stickers_manager.list_all()
@@ -85,7 +86,7 @@ async def upload_sticker_route(
     Returns the canonical wire shape of the new sticker row, so the
     client can append to its cached library list without a refetch.
     """
-    user_id = require_privilege(auth_token, "manage_stickers")
+    user_id = await run_in_threadpool(require_privilege, auth_token, "manage_stickers")
     try:
         sticker = await api_initializer.stickers_manager.upload_sticker(
             file=file,
@@ -100,7 +101,7 @@ async def upload_sticker_route(
 
 
 @router.patch("/{sticker_id}", status_code=200)
-async def update_sticker_route(
+def update_sticker_route(
     sticker_id: str,
     auth_token: str,
     display_name: str | None = Body(default=None, embed=True),
@@ -133,7 +134,7 @@ async def update_sticker_route(
 
 
 @router.delete("/{sticker_id}", status_code=200)
-async def delete_sticker_route(sticker_id: str, auth_token: str):
+def delete_sticker_route(sticker_id: str, auth_token: str):
     """Hard-delete a sticker.
 
     Already-sent messages keep rendering because they reference the

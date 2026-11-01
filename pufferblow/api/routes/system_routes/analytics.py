@@ -82,7 +82,7 @@ async def get_channel_creation_chart_route(request: ChartRequest):
 
 
 @router.post("/api/v1/system/charts/user-status", status_code=200)
-async def get_user_status_chart_route(request: UserStatusChartRequest):
+def get_user_status_chart_route(request: UserStatusChartRequest):
     """Get user status distribution chart data.
 
     Unlike the time-series charts, user_status is a *snapshot* —

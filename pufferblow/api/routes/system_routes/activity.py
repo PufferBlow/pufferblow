@@ -54,7 +54,7 @@ def _colorize_log_line(line: str) -> str:
 
 
 @router.post("/api/v1/system/logs", status_code=200)
-async def get_server_logs_route(request: ServerLogsRequest):
+def get_server_logs_route(request: ServerLogsRequest):
     """Get server logs with filtering options."""
     user_id = require_privilege(request.auth_token, "view_audit_logs")
     config = api_initializer.config
@@ -122,7 +122,7 @@ async def get_server_logs_route(request: ServerLogsRequest):
 
 
 @router.post("/api/v1/system/recent-activity", status_code=200)
-async def get_recent_activity_route(request: RecentActivityRequest):
+def get_recent_activity_route(request: RecentActivityRequest):
     """Get recent activity events from the server."""
     try:
         user_manager = require_component("user_manager")

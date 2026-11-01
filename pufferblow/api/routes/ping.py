@@ -15,6 +15,7 @@ Endpoints
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from pufferblow.api.dependencies import (
@@ -74,7 +75,7 @@ async def send_ping(body: PingSendRequest, request: Request):
 
     A ping expires after 5 minutes if not acknowledged.
     """
-    user_id = get_current_user(body.auth_token)
+    user_id = await run_in_threadpool(get_current_user, body.auth_token)
     ensure_user_not_timed_out(user_id, "send pings")
 
     base_url = _request_base_url(request)
@@ -111,7 +112,7 @@ async def ping_instance(body: PingInstanceRequest):
 
     Requires the ``view_server_stats`` privilege.
     """
-    user_id = require_privilege(body.auth_token, "view_server_stats")
+    user_id = await run_in_threadpool(require_privilege, body.auth_token, "view_server_stats")
     pm = _ping_manager()
 
     try:
@@ -140,7 +141,7 @@ async def ack_ping(ping_id: str, body: PingAckRequest, request: Request):
     the original sender via WebSocket, and (for federated pings) sends a
     ``PingAck`` ActivityPub activity back to the remote instance.
     """
-    user_id = get_current_user(body.auth_token)
+    user_id = await run_in_threadpool(get_current_user, body.auth_token)
     base_url = _request_base_url(request)
     pm = _ping_manager()
 
@@ -167,7 +168,7 @@ async def ack_ping(ping_id: str, body: PingAckRequest, request: Request):
 
 
 @router.get("/history", status_code=200, response_model=PingHistoryResponse)
-async def get_ping_history(query: PingHistoryQuery = Depends()):
+def get_ping_history(query: PingHistoryQuery = Depends()):
     """
     Retrieve paginated ping history for the authenticated user.
 
@@ -199,7 +200,7 @@ async def get_ping_history(query: PingHistoryQuery = Depends()):
 
 
 @router.get("/pending", status_code=200, response_model=PingPendingResponse)
-async def get_pending_pings(auth_token: str):
+def get_pending_pings(auth_token: str):
     """
     Return all pending (unacknowledged) inbound pings for the current user.
 
@@ -224,7 +225,7 @@ async def get_pending_pings(auth_token: str):
 
 
 @router.get("/stats", status_code=200, response_model=PingStatsResponse)
-async def get_ping_stats(auth_token: str):
+def get_ping_stats(auth_token: str):
     """
     Return aggregated ping statistics for the authenticated user.
 
@@ -253,7 +254,7 @@ async def get_ping_stats(auth_token: str):
 
 
 @router.delete("/{ping_id}", status_code=200)
-async def dismiss_ping(ping_id: str, auth_token: str):
+def dismiss_ping(ping_id: str, auth_token: str):
     """
     Dismiss (delete) a ping record.
 

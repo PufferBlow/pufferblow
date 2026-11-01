@@ -9,6 +9,7 @@ This module handles all message-related operations including:
 """
 
 from fastapi import APIRouter, Depends, Form, UploadFile, exceptions
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 
 from pufferblow.api.schemas import (
@@ -113,7 +114,7 @@ async def parse_send_message_form(
 
 
 @router.get("/load_messages", status_code=200, response_model=LoadMessagesResponse)
-async def channel_load_messages(
+def channel_load_messages(
     auth_token: str,
     channel_id: str,
     page: int | None = 1,
@@ -215,7 +216,7 @@ async def channel_load_messages(
 
 
 @router.get("/search", status_code=200, response_model=SearchMessagesResponse)
-async def channel_search_messages(
+def channel_search_messages(
     auth_token: str,
     channel_id: str,
     q: str = "",
@@ -356,7 +357,9 @@ async def channel_send_message(
     auth_token = validated_form.auth_token
     message = validated_form.message
 
-    max_message_length, _ = _get_message_and_attachment_policy()
+    # The checks and writes below are blocking calls (database, cache). They run on worker threads: done on the event
+    # loop, each send would hold up every other request on the server for as long as it takes.
+    max_message_length, _ = await run_in_threadpool(_get_message_and_attachment_policy)
 
     # Check message size against instance settings
     if len(message) > max_message_length:
@@ -371,9 +374,9 @@ async def channel_send_message(
             detail="Either a message or attachments must be provided.", status_code=400
         )
 
-    principal = api_initializer.user_principal_resolver.resolve(auth_token)
+    principal = await run_in_threadpool(api_initializer.user_principal_resolver.resolve, auth_token)
     # Fail before any upload work if the sender could not post here anyway.
-    api_initializer.authorizer.require_send(principal, channel_id)
+    await run_in_threadpool(api_initializer.authorizer.require_send, principal, channel_id)
 
     nonce = validated_form.nonce
     if nonce is None:
@@ -384,7 +387,7 @@ async def channel_send_message(
     # elsewhere is not mistaken for this send.
     store = api_initializer.database_handler
     operation = f"http.send_message:{channel_id}"
-    state, stored = store.reserve_idempotency_key(principal.id, operation, nonce)
+    state, stored = await run_in_threadpool(store.reserve_idempotency_key, principal.id, operation, nonce)
     if state == "completed":
         return {**(stored or {}), "duplicate": True}
     if state == "in_progress":
@@ -395,9 +398,9 @@ async def channel_send_message(
         response = await _send_channel_message(principal, channel_id, validated_form, attachments, sticker_ids, descriptions)
     except BaseException:
         # Nothing was committed, or we cannot tell: free the key so a retry runs for real.
-        store.release_idempotency_key(principal.id, operation, nonce)
+        await run_in_threadpool(store.release_idempotency_key, principal.id, operation, nonce)
         raise
-    store.complete_idempotency_key(principal.id, operation, nonce, jsonable_encoder(response))
+    await run_in_threadpool(store.complete_idempotency_key, principal.id, operation, nonce, jsonable_encoder(response))
     return response
 
 
@@ -412,7 +415,7 @@ async def _send_channel_message(
     """Upload the attachments, then create the message and publish it."""
     message = validated_form.message
     sent_at = validated_form.sent_at
-    _, max_total_attachment_mb = _get_message_and_attachment_policy()
+    _, max_total_attachment_mb = await run_in_threadpool(_get_message_and_attachment_policy)
 
     attachment_objects = await store_attachments(
         principal, channel_id, attachments, max_total_mb=max_total_attachment_mb, descriptions=descriptions
@@ -421,7 +424,8 @@ async def _send_channel_message(
     # Persisting, sticker resolution, mention notifications and the real-time event all live in
     # the shared MessageService, so this route and the WebSocket `message.create` command behave
     # identically.
-    outcome = api_initializer.message_service.create(
+    outcome = await run_in_threadpool(
+        api_initializer.message_service.create,
         principal,
         channel_id,
         message,
@@ -443,7 +447,7 @@ async def _send_channel_message(
 
 
 @router.put("/mark_message_as_read")
-async def channel_mark_message_as_read(
+def channel_mark_message_as_read(
     auth_token: str, channel_id: str, message_id: str
 ):
     """

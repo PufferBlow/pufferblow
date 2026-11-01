@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/v1/auth/decentralized")
 
 
 @router.post("/challenge", status_code=200)
-async def issue_decentralized_challenge_route(request: DecentralizedChallengeRequest):
+def issue_decentralized_challenge_route(request: DecentralizedChallengeRequest):
     """Issue a node-auth challenge.
 
     First step of the decentralized handshake used by SDK bots and
@@ -36,7 +36,7 @@ async def issue_decentralized_challenge_route(request: DecentralizedChallengeReq
 
 
 @router.post("/verify", status_code=200)
-async def verify_decentralized_challenge_route(request: DecentralizedVerifyRequest):
+def verify_decentralized_challenge_route(request: DecentralizedVerifyRequest):
     """Verify a signed challenge and issue a node session token.
 
     Second step of the decentralized handshake. The node signs the
@@ -56,7 +56,7 @@ async def verify_decentralized_challenge_route(request: DecentralizedVerifyReque
 
 
 @router.post("/introspect", status_code=200)
-async def introspect_decentralized_session_route(
+def introspect_decentralized_session_route(
     request: DecentralizedSessionIntrospectRequest,
 ):
     """Introspect decentralized session route."""
@@ -67,7 +67,7 @@ async def introspect_decentralized_session_route(
 
 
 @router.post("/revoke", status_code=200)
-async def revoke_decentralized_session_route(request: DecentralizedSessionRevokeRequest):
+def revoke_decentralized_session_route(request: DecentralizedSessionRevokeRequest):
     """Revoke decentralized session route."""
     user_id = get_current_user(request.auth_token)
     active_sessions = api_initializer.database_handler.list_active_decentralized_node_sessions(

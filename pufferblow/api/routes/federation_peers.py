@@ -10,6 +10,7 @@ import json
 import uuid
 
 from fastapi import APIRouter, Body
+from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from pufferblow.api.database.tables.activity_audit import ActivityAudit
@@ -60,7 +61,7 @@ def _require_peer(host: str) -> dict:
 
 
 @router.get("/peers", status_code=200)
-async def list_peers_route(auth_token: str):
+def list_peers_route(auth_token: str):
     """The federation mode, every peer, and how many are in each status."""
     require_server_owner(auth_token)
     database = api_initializer.database_handler
@@ -69,7 +70,7 @@ async def list_peers_route(auth_token: str):
 
 
 @router.put("/mode", status_code=200)
-async def set_mode_route(auth_token: str = Body(..., embed=True), mode: str = Body(..., embed=True)):
+def set_mode_route(auth_token: str = Body(..., embed=True), mode: str = Body(..., embed=True)):
     """Set the federation mode: ``open``, ``allowlist`` or ``closed``."""
     user_id = require_server_owner(auth_token)
     try:
@@ -81,7 +82,7 @@ async def set_mode_route(auth_token: str = Body(..., embed=True), mode: str = Bo
 
 
 @router.post("/peers", status_code=201)
-async def add_peer_route(auth_token: str = Body(..., embed=True), host: str = Body(..., embed=True), status: str = Body("federating", embed=True)):
+def add_peer_route(auth_token: str = Body(..., embed=True), host: str = Body(..., embed=True), status: str = Body("federating", embed=True)):
     """Add an instance by hand (approving it, by default). 409 if it is already a peer."""
     user_id = require_server_owner(auth_token)
     clean = _host(host)
@@ -97,7 +98,7 @@ async def add_peer_route(auth_token: str = Body(..., embed=True), host: str = Bo
 
 
 @router.put("/peers/{host}/status", status_code=200)
-async def set_peer_status_route(host: str, auth_token: str = Body(..., embed=True), status: str = Body(..., embed=True)):
+def set_peer_status_route(host: str, auth_token: str = Body(..., embed=True), status: str = Body(..., embed=True)):
     """Accept (``federating``), ``limited``, ``blocked`` or ``pending`` for a peer."""
     user_id = require_server_owner(auth_token)
     clean = _host(host)
@@ -111,7 +112,7 @@ async def set_peer_status_route(host: str, auth_token: str = Body(..., embed=Tru
 
 
 @router.put("/peers/{host}/policy", status_code=200)
-async def set_peer_policy_route(host: str, auth_token: str = Body(..., embed=True), policy: dict = Body(..., embed=True)):
+def set_peer_policy_route(host: str, auth_token: str = Body(..., embed=True), policy: dict = Body(..., embed=True)):
     """Set some of a peer's switches: ``media``, ``voice``, ``discover`` (true or false)."""
     user_id = require_server_owner(auth_token)
     clean = _host(host)
@@ -125,7 +126,7 @@ async def set_peer_policy_route(host: str, auth_token: str = Body(..., embed=Tru
 
 
 @router.delete("/peers/{host}", status_code=200)
-async def delete_peer_route(host: str, auth_token: str):
+def delete_peer_route(host: str, auth_token: str):
     """Forget a peer. If it federates again later it is treated as new."""
     user_id = require_server_owner(auth_token)
     clean = _host(host)
@@ -138,7 +139,7 @@ async def delete_peer_route(host: str, auth_token: str):
 @router.post("/peers/{host}/refresh", status_code=200)
 async def refresh_peer_route(host: str, auth_token: str = Body(..., embed=True)):
     """Ask the peer what it is (software, version, users) and keep the answer. Never sends anything to a private address."""
-    require_server_owner(auth_token)
+    await run_in_threadpool(require_server_owner, auth_token)
     clean = _host(host)
     _require_peer(clean)
     try:
@@ -152,7 +153,7 @@ async def refresh_peer_route(host: str, auth_token: str = Body(..., embed=True))
 
 
 @router.post("/peers/import", status_code=200)
-async def import_peers_route(
+def import_peers_route(
     auth_token: str = Body(..., embed=True),
     hosts: list[str] = Body(..., embed=True),
     status: str = Body("blocked", embed=True),

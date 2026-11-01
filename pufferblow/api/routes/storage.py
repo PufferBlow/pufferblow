@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request, UploadFile, Form, exceptions, responses
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import delete, select
 
 from pufferblow.api.database.tables.channels import Channels
@@ -254,7 +255,7 @@ async def upload_storage_file(
     ),
 ) -> dict:
     """Upload a file to storage. Server Owner only."""
-    user_id = require_privilege(auth_token, "upload_files")
+    user_id = await run_in_threadpool(require_privilege, auth_token, "upload_files")
 
     if directory not in ALLOWED_UPLOAD_DIRECTORIES:
         raise exceptions.HTTPException(
@@ -311,7 +312,7 @@ async def upload_storage_file(
 
 
 @router.post("/api/v1/storage/files", status_code=200)
-async def list_storage_files_route(request: StorageFilesRequest) -> dict:
+def list_storage_files_route(request: StorageFilesRequest) -> dict:
     """List files in storage directories. Server Owner only."""
     require_privilege(request.auth_token, "view_files")
 
@@ -507,7 +508,7 @@ async def list_storage_files_route(request: StorageFilesRequest) -> dict:
 
 
 @router.post("/api/v1/storage/file-info", status_code=200)
-async def get_storage_file_info_route(request: StorageFileInfoRequest) -> dict:
+def get_storage_file_info_route(request: StorageFileInfoRequest) -> dict:
     """Get metadata for a storage file by hash URL. Server Owner only."""
     require_privilege(request.auth_token, "view_files")
 
@@ -552,7 +553,7 @@ async def get_storage_file_info_route(request: StorageFileInfoRequest) -> dict:
 @router.post("/api/v1/storage/delete-file", status_code=200)
 async def delete_storage_file_route(request: StorageDeleteFileRequest) -> dict:
     """Delete a storage file. Server Owner only."""
-    require_privilege(request.auth_token, "delete_files")
+    await run_in_threadpool(require_privilege, request.auth_token, "delete_files")
 
     if await _is_file_protected(request.file_url):
         raise exceptions.HTTPException(
@@ -592,7 +593,7 @@ async def cleanup_orphaned_storage_files_route(
     request: CleanupOrphanedRequest,
 ) -> dict:
     """Remove unreferenced files from storage. Server Owner only."""
-    require_privilege(request.auth_token, "manage_storage")
+    await run_in_threadpool(require_privilege, request.auth_token, "manage_storage")
 
     storage_root = _get_storage_root()
     if not storage_root.exists():

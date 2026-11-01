@@ -28,6 +28,7 @@ URL layout:
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, exceptions
+from fastapi.concurrency import run_in_threadpool
 
 from pufferblow.api.dependencies import get_current_user
 from pufferblow.api.friends.friends_manager import FriendsError
@@ -68,7 +69,7 @@ async def send_friend_request_route(
     creating a duplicate. Inspect `friendship.status` to know whether
     the action moved the graph.
     """
-    actor_user_id = get_current_user(auth_token)
+    actor_user_id = await run_in_threadpool(get_current_user, auth_token)
 
     # Resolve the target — either by id (local only) or by handle
     # (local OR remote via WebFinger).
@@ -123,7 +124,7 @@ async def send_friend_request_route(
 
 
 @router.get("/requests", status_code=200)
-async def list_friend_requests_route(auth_token: str):
+def list_friend_requests_route(auth_token: str):
     """List the actor's incoming + outgoing pending requests.
 
     Split by direction so the UI can label each section without
@@ -141,7 +142,7 @@ async def list_friend_requests_route(auth_token: str):
 
 
 @router.post("/requests/{friendship_id}/accept", status_code=200)
-async def accept_friend_request_route(friendship_id: str, auth_token: str):
+def accept_friend_request_route(friendship_id: str, auth_token: str):
     """Accept a pending request the actor received.
 
     Only the addressee can accept. Manager raises 403 otherwise.
@@ -160,7 +161,7 @@ async def accept_friend_request_route(friendship_id: str, auth_token: str):
 
 
 @router.delete("/requests/{friendship_id}", status_code=200)
-async def cancel_or_reject_friend_request_route(
+def cancel_or_reject_friend_request_route(
     friendship_id: str, auth_token: str
 ):
     """Cancel (if actor is sender) or reject (if actor is recipient).
@@ -182,7 +183,7 @@ async def cancel_or_reject_friend_request_route(
 
 
 @router.get("", status_code=200)
-async def list_friends_route(auth_token: str):
+def list_friends_route(auth_token: str):
     """Return the actor's accepted friends.
 
     Each entry includes `other_user_id` (the side of the pair that
@@ -200,7 +201,7 @@ async def list_friends_route(auth_token: str):
 
 
 @router.delete("/{other_user_id}", status_code=200)
-async def unfriend_route(other_user_id: str, auth_token: str):
+def unfriend_route(other_user_id: str, auth_token: str):
     """Unfriend a user by their user_id.
 
     Idempotent — returns `{ "removed": false }` if there was no
@@ -223,7 +224,7 @@ async def unfriend_route(other_user_id: str, auth_token: str):
 
 
 @router.post("/blocks", status_code=201)
-async def block_friend_requests_route(
+def block_friend_requests_route(
     auth_token: str,
     target_user_id: str = Body(..., embed=True),
 ):
@@ -253,7 +254,7 @@ async def block_friend_requests_route(
 
 
 @router.delete("/blocks/{blocked_user_id}", status_code=200)
-async def unblock_friend_requests_route(
+def unblock_friend_requests_route(
     blocked_user_id: str, auth_token: str
 ):
     """Lift a friend-request block. Idempotent."""
@@ -268,7 +269,7 @@ async def unblock_friend_requests_route(
 
 
 @router.get("/blocks", status_code=200)
-async def list_friend_request_blocks_route(auth_token: str):
+def list_friend_request_blocks_route(auth_token: str):
     """Return every user the actor has blocked from sending requests.
 
     Used by the client's Blocked tab to render the unblock list.

@@ -47,7 +47,7 @@ def _public(bot) -> dict:
 
 
 @router.post("", status_code=201)
-async def create_bot(request: CreateBotRequest) -> dict:
+def create_bot(request: CreateBotRequest) -> dict:
     """Create a bot. The token in the response is shown once and cannot be recovered."""
     owner_id = require_server_owner(request.auth_token)
     try:
@@ -72,14 +72,14 @@ async def create_bot(request: CreateBotRequest) -> dict:
 
 
 @router.get("", status_code=200)
-async def list_bots(auth_token: str) -> dict:
+def list_bots(auth_token: str) -> dict:
     """The instance's bots, newest first. Tokens are never returned."""
     require_server_owner(auth_token)
     return {"status_code": 200, "bots": [_public(bot) for bot in api_initializer.database_handler.list_bots()]}
 
 
 @router.delete("/{bot_id}", status_code=200)
-async def revoke_bot(bot_id: str, auth_token: str) -> dict:
+def revoke_bot(bot_id: str, auth_token: str) -> dict:
     """Revoke a bot. Its token stops verifying immediately; open sockets are closed at the next ping."""
     require_server_owner(auth_token)
     if api_initializer.database_handler.get_bot(bot_id) is None:

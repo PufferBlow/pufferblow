@@ -7,6 +7,7 @@ validates auth and relays; it never touches media.
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
 from pufferblow.api.dependencies import ensure_user_not_timed_out, get_current_user
 from pufferblow.api.voice.dm_call_manager import CallBusy
@@ -39,7 +40,7 @@ def _was_rung(call: dict, recipient_id: str) -> bool:
 @router.post("/{callee_id}/invite", status_code=200)
 async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
     """Ring another user for a 1:1 voice call."""
-    user_id = get_current_user(request.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request.auth_token)
     ensure_user_not_timed_out(user_id, "start voice calls")
 
     if api_initializer.database_handler.get_user(user_id=callee_id) is None:
@@ -86,7 +87,7 @@ async def invite_dm_call(callee_id: str, request: DmCallInviteRequest):
 @router.post("/{call_id}/accept", status_code=200)
 async def accept_dm_call(call_id: str, request: DmCallActionRequest):
     """Accept an incoming DM call, signaling the caller to begin offering."""
-    user_id = get_current_user(request.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request.auth_token)
 
     try:
         call = api_initializer.dm_call_manager.accept(call_id=call_id, user_id=user_id)
@@ -110,7 +111,7 @@ async def accept_dm_call(call_id: str, request: DmCallActionRequest):
 @router.post("/{call_id}/reject", status_code=200)
 async def reject_dm_call(call_id: str, request: DmCallActionRequest):
     """Reject (or cancel) a DM call before/while it's ringing."""
-    user_id = get_current_user(request.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request.auth_token)
 
     try:
         call = api_initializer.dm_call_manager.reject(call_id=call_id, user_id=user_id)
@@ -131,7 +132,7 @@ async def reject_dm_call(call_id: str, request: DmCallActionRequest):
 @router.post("/{call_id}/end", status_code=200)
 async def end_dm_call(call_id: str, request: DmCallActionRequest):
     """End an in-progress DM call."""
-    user_id = get_current_user(request.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request.auth_token)
 
     try:
         call = api_initializer.dm_call_manager.end(call_id=call_id, user_id=user_id)
@@ -152,7 +153,7 @@ async def end_dm_call(call_id: str, request: DmCallActionRequest):
 @router.post("/{call_id}/signal", status_code=200)
 async def relay_dm_call_signal(call_id: str, request: DmCallSignalRequest):
     """Relay one SDP offer/answer or ICE candidate to the other participant."""
-    user_id = get_current_user(request.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request.auth_token)
 
     try:
         relayed = api_initializer.dm_call_manager.relay_signal(
@@ -178,7 +179,7 @@ async def relay_dm_call_signal(call_id: str, request: DmCallSignalRequest):
 
 
 @router.post("/{call_id}/fallback", status_code=200)
-async def request_dm_call_sfu_fallback(call_id: str, request: DmCallFallbackRequest):
+def request_dm_call_sfu_fallback(call_id: str, request: DmCallFallbackRequest):
     """Join the SFU fallback session after a failed direct P2P attempt."""
     user_id = get_current_user(request.auth_token)
 

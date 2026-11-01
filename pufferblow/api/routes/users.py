@@ -2,6 +2,7 @@ import json
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Form, UploadFile, exceptions
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -129,7 +130,7 @@ def _validate_password_strength(password: str) -> None:
 
 
 @router.get("", status_code=200)
-async def users_route():
+def users_route():
     """Users route."""
     return {"status_code": 200, "description": "This is the main users route"}
 
@@ -241,7 +242,7 @@ async def signup_new_user(request: SignupRequest):
 
 
 @router.post("/signin", status_code=200)
-async def signin_user(body: SigninQuery):
+def signin_user(body: SigninQuery):
     """Sign in to this instance with a username + password, sent as a JSON body.
 
     Returns the same session-token pair as `/signup`. See `_sign_in` for the failure modes.
@@ -250,7 +251,7 @@ async def signin_user(body: SigninQuery):
 
 
 @router.get("/signin", status_code=200, deprecated=True)
-async def signin_user_with_query(query: SigninQuery = Depends()):
+def signin_user_with_query(query: SigninQuery = Depends()):
     """Deprecated: the same sign-in with the credentials in the query string.
 
     A password in the URL ends up in access logs, proxies and browser history. Kept so older
@@ -342,7 +343,7 @@ def _sign_in(username: str, password: str) -> dict:
 
 
 @router.post("/profile", status_code=200)
-async def users_profile_route(request: UserProfileRequest):
+def users_profile_route(request: UserProfileRequest):
     """Users profile route."""
     user_id = get_current_user(request.auth_token)
     target_user_id = request.user_id if request.user_id else user_id
@@ -363,7 +364,7 @@ async def users_profile_route(request: UserProfileRequest):
 @router.put("/profile", status_code=200)
 async def edit_users_profile_route(request: EditProfileRequest):
     """Edit users profile route."""
-    user_id = get_current_user(request.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request.auth_token)
 
     if request.new_username is not None:
         # Format check before uniqueness query — same cost-saving
@@ -450,7 +451,7 @@ async def upload_user_avatar_route(
     """
     from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 
-    user_id = get_current_user(auth_token)
+    user_id = await run_in_threadpool(get_current_user, auth_token)
     avatar_url, is_duplicate = await api_initializer.user_manager.update_user_avatar(
         user_id=user_id, avatar_file=file
     )
@@ -481,7 +482,7 @@ async def upload_user_banner_route(
     """Upload user banner route."""
     from pufferblow.api.user.user_manager import _resolve_storage_lqip_url
 
-    user_id = get_current_user(auth_token)
+    user_id = await run_in_threadpool(get_current_user, auth_token)
     banner_url, is_duplicate = await api_initializer.user_manager.update_user_banner(
         user_id=user_id, banner_file=file
     )
@@ -502,7 +503,7 @@ async def upload_user_banner_route(
 
 
 @router.put("/profile/appearance", status_code=200)
-async def update_profile_appearance_route(
+def update_profile_appearance_route(
     auth_token: str = Body(..., embed=True),
     avatar_kind: str | None = Body(default=None),
     banner_kind: str | None = Body(default=None),
@@ -611,7 +612,7 @@ async def update_profile_appearance_route(
 
 
 @router.post("/profile/reset-auth-token", status_code=200)
-async def reset_users_auth_token_route(request: ResetTokenRequest):
+def reset_users_auth_token_route(request: ResetTokenRequest):
     """Reset users auth token route."""
     user_id = get_current_user(request.auth_token)
     # Reset endpoint deliberately uses a SPECIFIC "wrong password"
@@ -654,7 +655,7 @@ async def reset_users_auth_token_route(request: ResetTokenRequest):
 
 
 @router.get("/list", status_code=200)
-async def list_users_route(query: AuthTokenQuery = Depends()):
+def list_users_route(query: AuthTokenQuery = Depends()):
     """List users route."""
     viewer_user_id = get_current_user(query.auth_token)
     users = api_initializer.user_manager.list_users(
@@ -684,7 +685,7 @@ async def list_users_route(query: AuthTokenQuery = Depends()):
 
 
 @router.get("/joined-servers", status_code=200)
-async def list_joined_servers_route(query: AuthTokenQuery = Depends()):
+def list_joined_servers_route(query: AuthTokenQuery = Depends()):
     """Return the caller's joined-server identifiers.
 
     Returns the raw list of host:port strings; the client resolves
@@ -703,7 +704,7 @@ async def list_joined_servers_route(query: AuthTokenQuery = Depends()):
 
 
 @router.post("/joined-servers", status_code=201)
-async def join_server_route(request: JoinServerRequest):
+def join_server_route(request: JoinServerRequest):
     """Join a remote Pufferblow instance.
 
     Validates that ``target`` is reachable and identifies itself as
@@ -739,7 +740,7 @@ async def join_server_route(request: JoinServerRequest):
 
 
 @router.post("/joined-servers/leave", status_code=200)
-async def leave_server_route(request: JoinServerRequest):
+def leave_server_route(request: JoinServerRequest):
     """Drop a remote instance from the caller's joined-servers list.
 
     Same payload shape as the join endpoint. ``target`` is the
@@ -807,7 +808,7 @@ async def delete_account_route(request: DeleteAccountRequest) -> dict:
 
     What they wrote stays, shown as "Deleted user". The server owner has to hand the server over first.
     """
-    user_id = get_current_user(request.auth_token)
+    user_id = await run_in_threadpool(get_current_user, request.auth_token)
     users = api_initializer.user_manager
     if users.is_server_owner(user_id=user_id):
         raise ApiError(ErrorCode.ACCOUNT_OWNER_CANNOT_DELETE)

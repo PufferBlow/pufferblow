@@ -16,10 +16,12 @@ Three properties drive the wrapper:
    the daemon is gone) look identical to cache misses (because the
    key wasn't set) at the call site.
 
-2. **Process-local singleton.** The `Client` is built once per
-   process via `get_cache()`. Workers under gunicorn each build
-   their own connection on first use, which matches pymemcache's
-   own thread-safety model.
+2. **Process-local singleton, thread-safe.** The client is built once
+   per process via `get_cache()`. Requests run on many threads (sync
+   routes are served from a thread pool), and a plain pymemcache
+   `Client` is NOT thread-safe: one shared socket would hand one
+   request's answer to another. So this uses `PooledClient`, which
+   gives each call its own connection from a pool.
 
 3. **Two-tier read path for hot global keys.** A bounded in-process
    LRU sits in front of memcache via `ProcessLocalCache`. At 100K
@@ -74,22 +76,29 @@ class MemcacheCache:
         self._port = port
         self._default_ttl = default_ttl
         self._client = None  # lazy
+        self._client_lock = threading.Lock()
 
     def _ensure_client(self):
         if self._client is not None:
             return self._client
+        with self._client_lock:
+            if self._client is None:
+                self._client = self._build_client()
+        return self._client
+
+    def _build_client(self):
         # Imported lazily so a `from .memcache import get_cache` in a
         # config-reading module doesn't crash at import-time when
         # pymemcache isn't installed yet (e.g. partial CI install).
-        from pymemcache.client.base import Client
+        from pymemcache.client.base import PooledClient
 
-        self._client = Client(
+        return PooledClient(
             (self._host, self._port),
+            max_pool_size=32,
             connect_timeout=1.0,
             timeout=0.5,
             no_delay=True,
         )
-        return self._client
 
     def get(self, key: str) -> Any | None:
         try:

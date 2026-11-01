@@ -65,7 +65,7 @@ def _ensure_target_user_is_actionable(actor_user_id: str, target_user_id: str) -
 
 
 @router.post("/reports/messages", status_code=201)
-async def report_messages_route(request: MessageReportRequest) -> dict:
+def report_messages_route(request: MessageReportRequest) -> dict:
     """Submit a report for one or more messages."""
     reporter_user_id = get_current_user(request.auth_token)
 
@@ -112,7 +112,7 @@ async def report_messages_route(request: MessageReportRequest) -> dict:
 
 
 @router.post("/reports/users", status_code=201)
-async def report_user_route(request: UserReportRequest) -> dict:
+def report_user_route(request: UserReportRequest) -> dict:
     """Submit a report for a user."""
     reporter_user_id = get_current_user(request.auth_token)
 
@@ -144,7 +144,7 @@ async def report_user_route(request: UserReportRequest) -> dict:
 
 
 @router.post("/users/{target_user_id}/ban", status_code=201)
-async def ban_user_route(target_user_id: str, request: UserBanRequest) -> dict:
+def ban_user_route(target_user_id: str, request: UserBanRequest) -> dict:
     """Ban a user from the current home instance."""
     actor_user_id = require_privilege(request.auth_token, "ban_users")
     _ensure_target_user_is_actionable(actor_user_id, target_user_id)
@@ -176,7 +176,7 @@ async def ban_user_route(target_user_id: str, request: UserBanRequest) -> dict:
 
 
 @router.delete("/users/{target_user_id}/ban", status_code=200)
-async def unban_user_route(target_user_id: str, auth_token: str) -> dict:
+def unban_user_route(target_user_id: str, auth_token: str) -> dict:
     """Lift an existing user ban."""
     actor_user_id = require_privilege(auth_token, "ban_users")
 
@@ -206,7 +206,7 @@ async def unban_user_route(target_user_id: str, auth_token: str) -> dict:
 
 
 @router.post("/users/{target_user_id}/timeout", status_code=201)
-async def timeout_user_route(target_user_id: str, request: UserTimeoutRequest) -> dict:
+def timeout_user_route(target_user_id: str, request: UserTimeoutRequest) -> dict:
     """Apply a temporary messaging/voice timeout to a user."""
     actor_user_id = require_privilege(request.auth_token, "mute_users")
     _ensure_target_user_is_actionable(actor_user_id, target_user_id)
@@ -239,7 +239,7 @@ async def timeout_user_route(target_user_id: str, request: UserTimeoutRequest) -
 
 
 @router.post("/reports", status_code=200)
-async def get_reports_route(request: GetReportsRequest) -> dict:
+def get_reports_route(request: GetReportsRequest) -> dict:
     """Fetch all moderation reports (message and user)."""
     require_privilege(request.auth_token, "view_audit_logs")
 
@@ -315,7 +315,7 @@ async def get_reports_route(request: GetReportsRequest) -> dict:
 
 
 @router.post("/reports/{report_id}/resolve", status_code=200)
-async def resolve_report_route(report_id: str, request: ResolveReportRequest) -> dict:
+def resolve_report_route(report_id: str, request: ResolveReportRequest) -> dict:
     """Resolve a moderation report."""
     actor_user_id = require_privilege(request.auth_token, "view_audit_logs")
 
@@ -341,7 +341,7 @@ async def resolve_report_route(report_id: str, request: ResolveReportRequest) ->
 
 
 @router.delete("/users/{target_user_id}/timeout", status_code=200)
-async def clear_user_timeout_route(target_user_id: str, auth_token: str) -> dict:
+def clear_user_timeout_route(target_user_id: str, auth_token: str) -> dict:
     """Clear an active user timeout."""
     actor_user_id = require_privilege(auth_token, "mute_users")
 
