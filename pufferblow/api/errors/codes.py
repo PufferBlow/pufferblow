@@ -73,6 +73,7 @@ class ErrorCode:
     AUTH_MEMBERSHIP_PENDING = "auth.membership_pending"
     AUTH_MEMBERSHIP_DENIED = "auth.membership_denied"
     AUTH_MEMBERSHIP_REMOVED = "auth.membership_removed"
+    STATE_RULE_VIOLATED = "state.rule_violated"
     ACCOUNT_OWNER_CANNOT_DELETE = "account.owner_cannot_delete"
     JOIN_INVITE_REQUIRED = "join.invite_required"
     JOIN_INVITE_INVALID = "join.invite_invalid"
@@ -281,6 +282,11 @@ ERROR_REGISTRY: dict[str, ErrorSpec] = {
         ErrorCode.AUTH_MEMBERSHIP_DENIED, 403,
         "Your request to join this server was declined.",
         description="A moderator declined the request to join.",
+    ),
+    ErrorCode.STATE_RULE_VIOLATED: ErrorSpec(
+        ErrorCode.STATE_RULE_VIOLATED, 409,
+        "That change is not allowed.",
+        description="The database refused the change because it would break a rule it enforces (for example removing the last owner).",
     ),
     ErrorCode.AUTH_MEMBERSHIP_REMOVED: ErrorSpec(
         ErrorCode.AUTH_MEMBERSHIP_REMOVED, 403,

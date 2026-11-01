@@ -52,6 +52,7 @@ from pufferblow.api.database.tables.friend_request_blocks import FriendRequestBl
 from pufferblow.api.database.tables.friendships import Friendships
 from pufferblow.api.database.tables.instance_runtime_config import InstanceRuntimeConfig
 from pufferblow.api.database.tables.keys import Keys
+from pufferblow.api.database.tables.security_ledger import SecurityLedger  # noqa: F401  (so create_all makes the table)
 from pufferblow.api.database.tables.media_sfu_instances import MediaSFUInstance  # noqa: F401  (registers the table)
 from pufferblow.api.database.tables.message_reactions import BotMessageReactions, MessageReactions
 from pufferblow.api.database.tables.message_read_history import MessageReadHistory
@@ -472,6 +473,15 @@ class DatabaseHandler(DatabaseRealtimeBusMixin, DatabaseRuntimeConfigMixin, Data
                 bus_setup.apply(conn)
         except Exception as exc:
             logger.warning("realtime-bus triggers skipped due to error: {err}", err=str(exc))
+
+        # Rules the database enforces itself, and the append-only ledger of who-may-do-what changes (PostgreSQL only).
+        try:
+            from pufferblow.api.database import db_rules
+
+            with self.database_engine.begin() as conn:
+                db_rules.apply(conn)
+        except Exception as exc:
+            logger.warning("database rules skipped due to error: {err}", err=str(exc))
 
         # There is no Admin role: its holders become moderators and the role is removed.
         try:

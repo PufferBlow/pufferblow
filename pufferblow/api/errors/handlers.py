@@ -353,6 +353,28 @@ async def _handle_unhandled_exception(request: Request, exc: Exception) -> JSONR
     )
 
 
+#: Every rule the database enforces starts its message with this (see api/database/db_rules.py).
+RULE_PREFIX = "pufferblow: "
+
+
+async def _handle_database_error(request: Request, exc: Exception) -> JSONResponse:
+    """A rule the database enforces refused the change: a plain 409 that says which. Any other database error is a 500."""
+    original = str(getattr(exc, "orig", "") or "")
+    marker = original.find(RULE_PREFIX)
+    if marker < 0:
+        return await _handle_unhandled_exception(request, exc)
+    # The text is ours (written in the rule), not the database's: safe to show.
+    reason = original[marker + len(RULE_PREFIX):].splitlines()[0].strip().rstrip(".")
+    spec = get_error_spec(ErrorCode.STATE_RULE_VIOLATED)
+    return _envelope(
+        request=request,
+        code=ErrorCode.STATE_RULE_VIOLATED,
+        status=spec.status,
+        message=reason,
+        user_message=reason[:1].upper() + reason[1:] + ".",
+    )
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Wire all exception handlers onto the app. Called once during
     startup from the app factory.
@@ -380,6 +402,13 @@ def register_error_handlers(app: FastAPI) -> None:
         app.add_exception_handler(StickersError, _handle_stickers_error)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"StickersError handler not registered: {exc}")
+
+    try:
+        from sqlalchemy.exc import DBAPIError
+
+        app.add_exception_handler(DBAPIError, _handle_database_error)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"Database error handler not registered: {exc}")
 
     # Catch-all goes last so all of the above take precedence.
     app.add_exception_handler(Exception, _handle_unhandled_exception)

@@ -386,6 +386,26 @@ def maybe_configure_server_logging_from_env() -> None:
         return
 
 
+def _after_fork(server, worker) -> None:
+    """Give each worker its own connections.
+
+    The server loads its objects, and so opens a database pool and a cache connection, before gunicorn forks its
+    workers. A forked worker that kept those would share their sockets with every other worker, and requests would
+    answer each other's queries ("unexpected result from BEGIN", "server closed the connection"). Here each worker lets go
+    of what it inherited (without closing it for the others) and opens its own on first use.
+    """
+    from pufferblow.core.bootstrap import api_initializer
+
+    handler = getattr(api_initializer, "database_handler", None)
+    if handler is not None:
+        handler.database_engine.dispose(close=False)
+    from pufferblow.api.cache import memcache
+
+    cache = getattr(memcache, "_singleton", None)
+    if cache is not None and hasattr(cache, "_client"):
+        cache._client = None
+
+
 def run_gunicorn_server(*, app, config: Config, log_level_name: str) -> None:
     """Run the production API process via Gunicorn + Uvicorn workers."""
     from pufferblow.api.logger.logger import (
@@ -404,5 +424,6 @@ def run_gunicorn_server(*, app, config: Config, log_level_name: str) -> None:
         "errorlog": "-",
         "worker_class": "uvicorn.workers.UvicornWorker",
         "logger_class": StubbedGunicornLogger,
+        "post_fork": _after_fork,
     }
     StandaloneApplication(app, options).run()
