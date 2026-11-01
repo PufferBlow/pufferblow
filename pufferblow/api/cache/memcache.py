@@ -52,12 +52,29 @@ from __future__ import annotations
 
 import pickle
 import random
+import contextvars
 import threading
 import time
 from collections import OrderedDict
 from typing import Any
 
 from loguru import logger
+
+
+#: What this request has already read from the cache (raw bytes by key), or None outside a request. One request asks for
+#: the same person's record several times (the caller check, the membership check, the profile itself); the first read
+#: goes to memcached, the rest are answered from here, and each caller still gets its own fresh copy (the bytes are
+#: unpickled on every read). A write or a delete of a key in this request replaces or drops it here too.
+_request_reads: contextvars.ContextVar[dict | None] = contextvars.ContextVar("pufferblow_cache_reads", default=None)
+
+
+def begin_request_reads() -> contextvars.Token:
+    """Start remembering cache reads for the current request (see ``RequestCacheMiddleware``)."""
+    return _request_reads.set({})
+
+
+def end_request_reads(token: contextvars.Token) -> None:
+    _request_reads.reset(token)
 
 
 class MemcacheCache:
@@ -101,11 +118,17 @@ class MemcacheCache:
         )
 
     def get(self, key: str) -> Any | None:
-        try:
-            raw = self._ensure_client().get(key)
-        except Exception as exc:
-            logger.debug("memcache get failed: {err}", err=str(exc))
-            return None
+        reads = _request_reads.get()
+        if reads is not None and key in reads:
+            raw = reads[key]
+        else:
+            try:
+                raw = self._ensure_client().get(key)
+            except Exception as exc:
+                logger.debug("memcache get failed: {err}", err=str(exc))
+                return None
+            if reads is not None:
+                reads[key] = raw
         if raw is None:
             return None
         try:
@@ -126,8 +149,18 @@ class MemcacheCache:
             self._ensure_client().set(key, payload, expire=ttl or self._default_ttl)
         except Exception as exc:
             logger.debug("memcache set failed: {err}", err=str(exc))
+            reads = _request_reads.get()
+            if reads is not None:
+                reads.pop(key, None)
+            return
+        reads = _request_reads.get()
+        if reads is not None:
+            reads[key] = payload
 
     def delete(self, key: str) -> None:
+        reads = _request_reads.get()
+        if reads is not None:
+            reads.pop(key, None)
         try:
             self._ensure_client().delete(key)
         except Exception as exc:

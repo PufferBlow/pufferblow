@@ -33,6 +33,7 @@ async def main() -> None:
     parser.add_argument("--host", default="host.docker.internal:7576")
     parser.add_argument("--workers", type=int, default=60)
     parser.add_argument("--seconds", type=int, default=20)
+    parser.add_argument("--no-user-list", action="store_true", help="leave the member list out of the mix (its cost grows with the number of members)")
     args = parser.parse_args()
     base = f"http://{args.host}"
 
@@ -68,7 +69,7 @@ async def main() -> None:
                     await timed("channel list", client.post(f"{base}/api/v1/channels/list/", json={"auth_token": token}))
                 elif choice < 0.75:
                     await timed("history", client.get(f"{base}/api/v1/channels/{channel}/load_messages", params={"auth_token": token, "page": 1, "messages_per_page": 30}))
-                elif choice < 0.85:
+                elif choice < 0.85 and not args.no_user_list:
                     await timed("user list", client.get(f"{base}/api/v1/users/list", params={"auth_token": token}))
                 else:
                     await timed("send", client.post(f"{base}/api/v1/channels/{channel}/send_message", data={"auth_token": token, "message": "load"}))

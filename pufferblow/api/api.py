@@ -22,6 +22,7 @@ from pufferblow.api.routes.system_routes.server_runtime import (
 )
 from pufferblow.core.bootstrap import api_initializer
 from pufferblow.core.header_auth import HeaderAuthMiddleware
+from pufferblow.core.request_cache import RequestCacheMiddleware
 from pufferblow.server.middlewares import (
     PrivateNetworkAccessMiddleware,
     RateLimitingMiddleware,
@@ -142,6 +143,8 @@ api.add_middleware(PrivateNetworkAccessMiddleware)
 # Outermost of all: turns `Authorization: Bearer` (or the websocket bearer subprotocol) into the
 # `auth_token` parameter before the middleware above and the routes read it.
 api.add_middleware(HeaderAuthMiddleware)
+# Outermost: every request reads the cache through its own small memo (see core/request_cache.py).
+api.add_middleware(RequestCacheMiddleware)
 
 # Register the global error handlers BEFORE the routers so any
 # exception raised during route registration (e.g. an import-time

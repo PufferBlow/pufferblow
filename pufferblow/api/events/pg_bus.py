@@ -121,10 +121,22 @@ class PostgresPublisher(InProcessPublisher):
             on_connect=self._forget_local_caches,
         )
         self._listener.start()
+        self._purger = asyncio.create_task(self._purge_spool_regularly())
 
     async def stop(self) -> None:
+        if getattr(self, "_purger", None) is not None:
+            self._purger.cancel()
         if self._listener is not None:
             await asyncio.to_thread(self._listener.stop)
+
+    async def _purge_spool_regularly(self) -> None:
+        """Parked frames are removed after each new one, but a quiet server would keep the last one: so also on a timer."""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await asyncio.to_thread(self._db.purge_realtime_spool)
+            except Exception:
+                logger.exception("Could not clear the parked realtime frames")
 
     # ── sequence numbers: the database's, so every worker agrees ──────────────
 
@@ -175,6 +187,7 @@ class PostgresPublisher(InProcessPublisher):
         """Runs on the listener's thread."""
         if channel == CACHE_CHANNEL:
             invalidate_from_notification(self._db, payload)
+            self._close_sockets_of_removed_person(payload)
             return
         body = json.loads(payload)
         if body.get("o") == self.origin:
@@ -194,6 +207,22 @@ class PostgresPublisher(InProcessPublisher):
         if isinstance(seq, int):
             self._seq[target] = max(self._seq[target], seq)
         await self._connections.deliver_channel_event(target, frame)
+
+    def _close_sockets_of_removed_person(self, payload: str) -> None:
+        """Someone removed, erased, declined or who left must not keep receiving events on the sockets this worker holds.
+
+        The route that removes them closes the sockets of its own worker only; this is how every other worker finds out
+        (it also covers a change made straight in the database). Runs on the listener's thread, after the caches were
+        dropped, so the status read is the current one.
+        """
+        body = json.loads(payload)
+        if body.get("t") != "user" or self._loop is None or self._loop.is_closed():
+            return
+        ident = str(body.get("id") or "")
+        user = self._db.get_user(user_id=ident) if ident else None
+        status = (getattr(user, "membership_status", None) or "active") if user is not None else "gone"
+        if status != "active":
+            asyncio.run_coroutine_threadsafe(self._connections.disconnect_user(ident), self._loop)
 
     def _forget_local_caches(self) -> None:
         """Notifications sent while the listener was away are gone, so what this worker kept in memory may be stale."""

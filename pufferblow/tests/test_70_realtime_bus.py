@@ -46,6 +46,10 @@ class FakeSockets:
     def __init__(self) -> None:
         self.channel_frames: list[tuple[str, dict]] = []
         self.user_frames: list[tuple[str, dict]] = []
+        self.disconnected: list[str] = []
+
+    async def disconnect_user(self, user_id):
+        self.disconnected.append(user_id)
 
     async def deliver_channel_event(self, channel_id, frame):
         self.channel_frames.append((channel_id, frame))
@@ -254,3 +258,61 @@ async def test_workers_built_before_the_fork_each_get_their_own_origin_when_they
     started_as_first = built_once.origin
     await built_once.start()  # a second process, same object as it was before the fork
     assert started_as_first != built_once.origin and first_origin not in (started_as_first, built_once.origin)
+
+
+class PersonDatabase(FakeDatabase):
+    """Answers the questions the cache-change handler asks."""
+
+    config = None
+
+    def __init__(self, status) -> None:
+        super().__init__()
+        self.status = status
+
+    def get_user(self, user_id):
+        from types import SimpleNamespace
+
+        return None if self.status is None else SimpleNamespace(membership_status=self.status)
+
+    def _invalidate_user_cache(self, i): pass
+    def _invalidate_user_privileges_cache(self, i): pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status, closed", [("kicked", True), ("deleted", True), ("remote", True), (None, True), ("active", False)])
+async def test_every_worker_closes_the_sockets_of_someone_who_was_removed(monkeypatch, status, closed):
+    """The route that removes someone closes the sockets of its own worker only; the others hear it from the database."""
+    import pufferblow.api.cache.memcache as memcache
+
+    class NoCache:
+        def delete(self, key): pass
+
+    monkeypatch.setattr(memcache, "get_cache", lambda config: NoCache())
+    other_worker, sockets = worker(PersonDatabase(status))
+    other_worker._on_notification(CACHE_CHANNEL, json.dumps({"t": "user", "id": "u7"}))
+    await settle()
+    assert sockets.disconnected == (["u7"] if closed else [])
+
+
+def test_a_parked_frame_is_sealed_in_the_database_and_cleared_when_old(client):
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select, update
+
+    from pufferblow.api.database.tables.realtime_bus import RealtimeSpool
+    from pufferblow.core.bootstrap import api_initializer
+
+    database = api_initializer.database_handler
+    secret_text = "this is a private message nobody should read in a table"
+    spool_id = database.spool_realtime_frame({"data": {"message": {"content": secret_text}}})
+
+    with database.database_session() as session:
+        stored = json.dumps(session.execute(select(RealtimeSpool.frame).where(RealtimeSpool.spool_id == spool_id)).scalar_one())
+    assert secret_text not in stored and "private" not in stored
+    assert database.read_spooled_realtime_frame(spool_id)["data"]["message"]["content"] == secret_text
+
+    with database.database_session() as session:
+        session.execute(update(RealtimeSpool).where(RealtimeSpool.spool_id == spool_id).values(created_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+        session.commit()
+    assert database.purge_realtime_spool() >= 1
+    assert database.read_spooled_realtime_frame(spool_id) is None
