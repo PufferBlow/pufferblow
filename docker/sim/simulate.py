@@ -147,13 +147,16 @@ async def main() -> int:
 
     # ── invitation codes for the invite-only instance (enough for everyone who will use one) ──
     codes: list[str] = []
-    for _ in range(max(2, (args.users * 3) // 20 + 1)):
+    for _ in range(max(2, (args.users * len(HOSTS) * 2) // 20 + 1)):
         response = await net.call(HOSTS["pb2"], "POST", "/api/v1/server/invites", json={"auth_token": owners["pb2"], "note": "simulation", "max_uses": 20})
         codes.append(response.json()["invite"]["code"])
     report.notes.append(f"pb2: made {len(codes)} invitation codes of 20 uses")
 
-    def code_for(index: int) -> str:
-        return codes[(index // 20) % len(codes)]
+    handed_out = iter(range(10**9))
+
+    def code_for(_index: int) -> str:
+        # Each person who joins pb2 uses one use of the next code, so no code is asked for more than it has.
+        return codes[next(handed_out) % len(codes)]
 
     # ── people ──
     people: dict[str, list[Person]] = {key: [] for key in HOSTS}

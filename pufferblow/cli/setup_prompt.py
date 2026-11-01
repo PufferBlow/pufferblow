@@ -461,20 +461,20 @@ def run_setup_wizard(has_existing_config: bool) -> SetupWizardResult | None:
             database=db_config["database_name"],
         ):
             try:
-                import psycopg2
+                import psycopg
 
-                conn = psycopg2.connect(
+                conn = psycopg.connect(
                     host=db_config["host"],
                     port=int(db_config["port"]),
                     user=db_config["username"],
                     password=db_config["password"],
-                    database=db_config["database_name"],
+                    dbname=db_config["database_name"],
                     connect_timeout=5,
                 )
                 conn.close()
                 logger.success("Database connection successful.")
             except ImportError:
-                logger.warning("psycopg2 not available, skipping connection test.")
+                logger.warning("psycopg not available, skipping connection test.")
             except Exception as e:
                 logger.error("Database connection failed: {err}", err=e)
                 if not _confirm("Continue anyway?", default=False):

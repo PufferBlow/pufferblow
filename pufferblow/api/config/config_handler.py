@@ -63,6 +63,20 @@ def _config_bool(raw_value: object, fallback: bool) -> bool:
     return bool(raw_value)
 
 
+
+def with_driver(uri: str) -> str:
+    """Name the Postgres driver this project installs (psycopg 3).
+
+    A bare ``postgresql://`` leaves the choice to SQLAlchemy, and older versions chose psycopg2, which is not installed
+    any more. ``postgres://`` and the old ``+psycopg2`` spelling (still found in existing configs) are read as psycopg 3
+    too. An address that names another driver is left as it is.
+    """
+    for old in ("postgresql://", "postgres://", "postgresql+psycopg2://"):
+        if uri.startswith(old):
+            return "postgresql+psycopg://" + uri[len(old):]
+    return uri
+
+
 class ConfigHandler:
     """Load bootstrap config and persist runtime config in database."""
 
@@ -110,7 +124,7 @@ class ConfigHandler:
             if "database_uri" in db_config:
                 uri = str(db_config.get("database_uri", "")).strip()
                 if uri:
-                    return uri
+                    return with_driver(uri)
 
             # Approach 2: Build URI from individual parameters
             host = db_config.get("host", "localhost")
@@ -121,12 +135,12 @@ class ConfigHandler:
 
             if all([host, username, password, database]):
                 uri = f"postgresql://{username}:{password}@{host}:{port}/{database}"
-                return uri
+                return with_driver(uri)
 
         # Source 2: PUFFERBLOW_DATABASE_URI environment variable.
         env_uri = os.getenv("PUFFERBLOW_DATABASE_URI", "").strip()
         if env_uri:
-            return env_uri
+            return with_driver(env_uri)
 
         return None
 

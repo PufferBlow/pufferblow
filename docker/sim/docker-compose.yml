@@ -34,7 +34,7 @@ services:
     <<: *server
     environment:
       <<: *server-env
-      PUFFERBLOW_DATABASE_URI: postgresql+psycopg2://pufferblow:pufferblow@pb1-db:5432/pufferblow
+      PUFFERBLOW_DATABASE_URI: postgresql+psycopg://pufferblow:pufferblow@pb1-db:5432/pufferblow
       PUFFERBLOW_MEMCACHE_HOST: pb1-cache
       SIM_SERVER_NAME: "Open Harbor"
       SIM_JOIN_MODE: "open"
@@ -57,7 +57,7 @@ services:
     <<: *server
     environment:
       <<: *server-env
-      PUFFERBLOW_DATABASE_URI: postgresql+psycopg2://pufferblow:pufferblow@pb2-db:5432/pufferblow
+      PUFFERBLOW_DATABASE_URI: postgresql+psycopg://pufferblow:pufferblow@pb2-db:5432/pufferblow
       PUFFERBLOW_MEMCACHE_HOST: pb2-cache
       SIM_SERVER_NAME: "Members Only"
       SIM_JOIN_MODE: "invite"
@@ -80,7 +80,7 @@ services:
     <<: *server
     environment:
       <<: *server-env
-      PUFFERBLOW_DATABASE_URI: postgresql+psycopg2://pufferblow:pufferblow@pb3-db:5432/pufferblow
+      PUFFERBLOW_DATABASE_URI: postgresql+psycopg://pufferblow:pufferblow@pb3-db:5432/pufferblow
       PUFFERBLOW_MEMCACHE_HOST: pb3-cache
       SIM_SERVER_NAME: "By Approval"
       SIM_JOIN_MODE: "request"

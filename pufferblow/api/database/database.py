@@ -66,7 +66,7 @@ class Database:
                     # mid-query. Keepalives close that gap by keeping the
                     # TCP path warm.
                     #
-                    # The values mirror what psycopg2 / libpq recommend for
+                    # The values mirror what psycopg / libpq recommend for
                     # cloud-hosted Postgres:
                     #   keepalives=1                  enable
                     #   keepalives_idle=30            send first probe after 30s idle
@@ -181,7 +181,7 @@ class Database:
         host = quote(host)
 
         database_uri = (
-            f"postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}"
+            f"postgresql+psycopg://{username}:{password}@{host}:{port}/{database_name}"
         )
 
         # Add SSL parameters as query string

@@ -27,7 +27,6 @@ rich = "^14.2.0"
 pycryptodome = "^3.23.0"
 loguru = "^0.7.3"
 pytz = ">=2025.2,<2027.0"
-psycopg2-binary = "^2.9.10"
 sqlalchemy = "^2.0.44"
 websockets = "^15.0"
 httpx = "^0.28.1"
@@ -49,6 +48,7 @@ gunicorn = "^23.0.0"
 # as-is for the schema history that predates this.
 alembic = "^1.13.3"
 uvicorn = ">=0.30,<1"
+psycopg = {version = "^3.2", extras = ["binary"]}
 
 [tool.poetry.group.dev.dependencies]
 # pytest / pytest-asyncio moved here from the main dependencies group
@@ -168,7 +168,7 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "loguru.*",
-    "psycopg2.*",
+    "psycopg.*",
     "cryptography.*",
     "bcrypt.*",
     "magic.*",
