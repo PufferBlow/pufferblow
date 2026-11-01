@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 import httpx
+from fastapi.concurrency import run_in_threadpool
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from loguru import logger
@@ -492,7 +493,7 @@ class ActivityPubManager:
         ``guarded``: the address came from a stranger (an unauthenticated request), so it is fetched only if it is
         public, without following redirects and with a size limit.
         """
-        existing = self.database_handler.get_activitypub_actor_by_uri(actor_uri=actor_uri)
+        existing = await run_in_threadpool(self.database_handler.get_activitypub_actor_by_uri, actor_uri=actor_uri)
         now = datetime.datetime.now(datetime.timezone.utc)
         if existing is not None and existing.fetched_at is not None:
             age = now - existing.fetched_at
@@ -518,7 +519,8 @@ class ActivityPubManager:
         if not inbox_uri or not outbox_uri or not public_key_pem:
             raise ValueError("Remote actor document missing required fields")
 
-        return self.database_handler.upsert_activitypub_actor(
+        return await run_in_threadpool(
+            self.database_handler.upsert_activitypub_actor,
             actor_uri=actor_uri,
             preferred_username=preferred_username,
             inbox_uri=inbox_uri,

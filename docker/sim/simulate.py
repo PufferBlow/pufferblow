@@ -87,8 +87,10 @@ class Net:
     """HTTP to every instance, paced per instance so the server's own rate limit is not what is being measured."""
 
     def __init__(self, per_second: float = 14.0) -> None:
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=60.0)
         self.gap = 1.0 / per_second
+        # Pacing starts requests evenly, but a slow server would still be handed ever more at once: cap what is in flight.
+        self.in_flight: dict[str, asyncio.Semaphore] = defaultdict(lambda: asyncio.Semaphore(6))
         self.next_at: dict[str, float] = defaultdict(float)
         self.lock = asyncio.Lock()
 
@@ -99,7 +101,12 @@ class Net:
             self.next_at[host] = at + self.gap
         if at > now:
             await asyncio.sleep(at - now)
-        return await self.client.request(method, f"http://{host}{path}", **kwargs)
+        async with self.in_flight[host]:
+            try:
+                return await self.client.request(method, f"http://{host}{path}", **kwargs)
+            except httpx.HTTPError as exc:
+                # A timeout or a dropped connection is a result to report, not the end of the run.
+                return httpx.Response(599, json={"error_code": "sim.no_answer", "message": f"{type(exc).__name__} from {host}"}, request=httpx.Request(method, f"http://{host}{path}"))
 
 
 def reason(response: httpx.Response) -> str:

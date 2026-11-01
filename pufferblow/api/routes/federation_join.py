@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Body
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -58,7 +59,7 @@ def _invalid(why: str) -> ApiError:
 
 
 @router.post("/assertions", status_code=200)
-async def issue_assertion_route(auth_token: str = Body(..., embed=True), audience: str = Body(..., embed=True)):
+def issue_assertion_route(auth_token: str = Body(..., embed=True), audience: str = Body(..., embed=True)):
     """A signed statement that you are who you are, for one server, good for a minute. Asked of your own home server."""
     user_id = get_current_user(auth_token)
     user = api_initializer.database_handler.get_user(user_id=user_id)
@@ -117,7 +118,7 @@ async def _verified(token: str):
         raise _invalid(f"the issuer is not a public address ({exc})") from exc
     if urlsplit(claims["actor"]).scheme not in ("https", "http"):
         raise _invalid("the actor is not a web address")
-    decision = activitypub.peer_policy.decide_inbound(issuer)
+    decision = await run_in_threadpool(activitypub.peer_policy.decide_inbound, issuer)
     if not decision.allowed:
         raise ApiError(ErrorCode.JOIN_REFUSED, message=f"Federation policy refused {issuer}: {decision.reason}")
 
@@ -135,7 +136,7 @@ async def _verified(token: str):
         raise _invalid(str(exc)) from exc
 
     expires = datetime.fromtimestamp(claims["exp"] + CLOCK_SKEW_SECONDS, tz=timezone.utc) + timedelta(minutes=1)
-    if not api_initializer.database_handler.consume_assertion_nonce(claims["nonce"], expires):
+    if not await run_in_threadpool(api_initializer.database_handler.consume_assertion_nonce, claims["nonce"], expires):
         raise _invalid("already used")
     return claims, actor
 
@@ -197,50 +198,62 @@ async def join_server_route(
 ):
     """Join this server with an account from another one. Returns this server's session tokens, or says the request is waiting."""
     claims, actor = await _verified(assertion)
-    handle = claims["sub"]
+    outcome, value = await run_in_threadpool(_decide_join, actor, claims["sub"], invite_code, message)
+    if outcome == "pending":
+        await announce_join_request(value)
+        return _waiting(value)
+    return value
+
+
+def _decide_join(actor, handle: str, invite_code: str | None, message: str | None):
+    """The database side of a join. It runs off the event loop: it is a run of blocking calls, and while one is going
+    nothing else on the server (including everyone's open client) would be answered."""
     database = api_initializer.database_handler
 
     if _is_member(actor):
-        return _session_for(str(actor.user_id))
+        return "joined", _session_for(str(actor.user_id))
 
     latest = database.latest_join_request_for(handle)
     if latest is not None and latest["kind"] == "federated":
         if latest["status"] == "pending":
-            return _waiting(latest)
+            return "pending", latest
         if latest["status"] == "denied":
             raise ApiError(ErrorCode.AUTH_MEMBERSHIP_DENIED)
         if latest["status"] == "approved" and not latest["consumed"] and database.consume_join_request(latest["request_id"]):
-            return _session_for(_make_member(actor, handle))
+            return "joined", _session_for(_make_member(actor, handle))
 
     admission = JoinPolicy(database).admit(invite_code)
     if admission == PENDING:
         request = database.create_join_request(kind="federated", handle=handle, home_host=host_of(actor.actor_uri), actor_uri=actor.actor_uri, message=message)
-        await announce_join_request(request)
-        return _waiting(request)
-    return _session_for(_make_member(actor, handle))
+        return "pending", request
+    return "joined", _session_for(_make_member(actor, handle))
 
 
 @router.post("/join/status", status_code=200)
 async def join_status_route(assertion: str = Body(..., embed=True)):
     """Ask again about a request that was waiting. Returns session tokens once it was approved."""
     claims, actor = await _verified(assertion)
-    handle = claims["sub"]
+    return await run_in_threadpool(_status_of, actor, claims["sub"])
+
+
+def _status_of(actor, handle: str):
+    database = api_initializer.database_handler
     if _is_member(actor):
         return _session_for(str(actor.user_id))
-    latest = api_initializer.database_handler.latest_join_request_for(handle)
+    latest = database.latest_join_request_for(handle)
     if latest is None or latest["kind"] != "federated":
         return {"status_code": 200, "status": "none"}
     if latest["status"] == "pending":
         return _waiting(latest)
     if latest["status"] == "denied":
         raise ApiError(ErrorCode.AUTH_MEMBERSHIP_DENIED)
-    if latest["status"] == "approved" and not latest["consumed"] and api_initializer.database_handler.consume_join_request(latest["request_id"]):
+    if latest["status"] == "approved" and not latest["consumed"] and database.consume_join_request(latest["request_id"]):
         return _session_for(_make_member(actor, handle))
     return {"status_code": 200, "status": "none"}
 
 
 @router.post("/leave", status_code=200)
-async def leave_server_route(auth_token: str = Body(..., embed=True)):
+def leave_server_route(auth_token: str = Body(..., embed=True)):
     """Give up a membership you got by joining from another server. Your own server and account are untouched."""
     user_id = get_current_user(auth_token)
     database = api_initializer.database_handler
